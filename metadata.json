@@ -1,0 +1,7 @@
+{
+  "name": "POLAC Parade Management",
+  "description": "A comprehensive parade state management system for the Nigerian Police Academy, featuring real-time attendance tracking, commandant overviews, and course officer reporting.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
