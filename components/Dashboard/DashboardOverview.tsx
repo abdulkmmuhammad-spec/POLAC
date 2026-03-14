@@ -5,9 +5,10 @@ import { AttendanceBarChart } from '../Charts';
 import { useParade } from '../../context/ParadeContext';
 import { formatRC } from '../../utils/rcHelpers';
 import { ParadeType } from '../../types';
+import { StatsSkeleton, CardSkeleton, TableSkeleton } from '../Layout/Skeleton';
 
 export const DashboardOverview: React.FC = () => {
-    const { records, stats, courseSummary, yearSummary, activeRC, selectedParadeType, setSelectedParadeType } = useParade();
+    const { records, stats, courseSummary, yearSummary, activeRC, selectedParadeType, setSelectedParadeType, isDataLoading } = useParade();
 
     const chartData = [
         { name: 'Present', value: Math.round(stats.totalCadets * (stats.presentToday / 100)), color: '#10b981' },

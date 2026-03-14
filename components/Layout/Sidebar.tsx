@@ -43,8 +43,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             `}>
                 <div className="p-6 border-b flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-blue-900 rounded-lg flex items-center justify-center text-white">
-                            <Shield size={24} />
+                        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden border border-slate-200">
+                            <img src="/logo.png" alt="POLAC Logo" className="w-full h-full object-contain" />
                         </div>
                         <h2 className="font-bold text-blue-900 tracking-tight text-lg">POLAC CMS</h2>
                     </div>

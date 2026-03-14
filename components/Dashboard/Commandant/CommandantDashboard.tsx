@@ -11,6 +11,7 @@ import { CadetManager } from '../../CadetRegistry/CadetManager';
 import { CommandAnalytics } from './CommandAnalytics';
 import { OfficerManager } from './OfficerManager';
 import { useParade } from '../../../context/ParadeContext';
+import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
 import { toast } from 'react-hot-toast';
 
@@ -24,10 +25,23 @@ const ActiveRCSettings: React.FC = () => {
         if (newRC < 1) return;
         setIsSaving(true);
         try {
+            const oldRC = activeRC;
             await dbService.setActiveRC(newRC);
             await refreshActiveRC();
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
+
+            // Log settings change as audit notification
+            await dbService.addNotification({
+                type: 'settings_change',
+                title: 'Active RC Changed',
+                content: `Active Regular Course changed from RC${oldRC} to RC${newRC}`,
+                timestamp: new Date().toISOString(),
+                read: false,
+                officerName: 'System',
+                yearGroup: 1,
+                courseNumber: 0
+            });
         } catch (err) {
             toast.error('Failed to update Active RC. Please try again.');
         } finally {
@@ -91,7 +105,25 @@ const SubmissionTimeSettings: React.FC = () => {
     const handleUpdate = async (key: 'muster_start_hour' | 'muster_end_hour' | 'tattoo_start_hour', value: number) => {
         setIsSaving(key);
         try {
+            const oldValue = submissionSettings[key];
             await updateSubmissionSetting(key, value);
+
+            // Log settings change as audit notification
+            const settingLabels: Record<string, string> = {
+                muster_start_hour: 'Muster Start Hour',
+                muster_end_hour: 'Muster End Hour',
+                tattoo_start_hour: 'Tattoo Start Hour'
+            };
+            await dbService.addNotification({
+                type: 'settings_change',
+                title: 'Submission Time Changed',
+                content: `${settingLabels[key]} changed from ${oldValue}:00 to ${value}:00`,
+                timestamp: new Date().toISOString(),
+                read: false,
+                officerName: 'System',
+                yearGroup: 1,
+                courseNumber: 0
+            });
         } finally {
             setIsSaving(null);
         }

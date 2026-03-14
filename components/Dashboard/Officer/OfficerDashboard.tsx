@@ -33,22 +33,7 @@ export const OfficerDashboard: React.FC = () => {
             />
 
             <div className="max-w-6xl mx-auto p-6 md:p-10 space-y-10 w-full flex-1 relative">
-                {/* Desktop Navigation Tabs - Hidden on Mobile */}
-                <div className="hidden md:flex border-b border-slate-200 sticky top-0 bg-slate-50 z-20 overflow-x-auto pb-1">
-                    {tabs.map(tab => (
-                        <NavLink
-                            key={tab.path}
-                            to={tab.path}
-                            end={tab.end}
-                            className={({ isActive }) =>
-                                `flex items-center space-x-2 px-6 py-4 text-sm font-bold border-b-2 transition-all shrink-0 ${isActive ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`
-                            }
-                        >
-                            <tab.icon size={18} />
-                            <span>{tab.label}</span>
-                        </NavLink>
-                    ))}
-                </div>
+                {/* Unified Navigation - Accessible via Hamburger Menu */}
 
                 {/* Mobile Hamburger Menu Overlay */}
                 {isMenuOpen && (
@@ -101,7 +86,23 @@ export const OfficerDashboard: React.FC = () => {
                     </>
                 )}
 
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="hidden md:flex items-center space-x-2 border-b border-slate-200 pb-6 mb-8 w-full">
+                    {tabs.map(tab => (
+                        <NavLink
+                            key={tab.path}
+                            to={tab.path}
+                            end={tab.end}
+                            className={({ isActive }) =>
+                                `flex items-center space-x-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${isActive ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50'}`
+                            }
+                        >
+                            <tab.icon size={18} />
+                            <span>{tab.label}</span>
+                        </NavLink>
+                    ))}
+                </div>
+
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
                     <Routes>
                         <Route index element={<OfficerProfile />} />
                         <Route path="submit" element={<ParadeForm />} />

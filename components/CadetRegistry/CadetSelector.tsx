@@ -11,14 +11,29 @@ interface CadetSelectorProps {
 
 export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSelect, onInputChange }) => {
     const [registry, setRegistry] = useState<any[]>([]);
+    const [allCadets, setAllCadets] = useState<any[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isOpen, setIsOpen] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchRegistry = async () => {
-            const data = await dbService.getCadetRegistry();
-            // Filter by the officer's course number (RC) — the stable identifier
-            setRegistry(data.filter(c => c.course_number === courseNumber));
+            try {
+                setLoadError(null);
+                console.log(`[CadetSelector] Fetching cadets for RC: ${courseNumber}`);
+                // Pass courseNumber to the database query for server-side filtering
+                const data = await dbService.getCadetRegistry(undefined, undefined, undefined, courseNumber);
+                console.log(`[CadetSelector] Found ${data.length} cadets for RC ${courseNumber}`);
+                setRegistry(data);
+
+                // Also fetch all cadets as fallback
+                const allData = await dbService.getCadetRegistry();
+                console.log(`[CadetSelector] Total cadets in registry: ${allData.length}`);
+                setAllCadets(allData);
+            } catch (err) {
+                console.error('Error fetching cadets:', err);
+                setLoadError('Failed to load cadet registry');
+            }
         };
         fetchRegistry();
     }, [courseNumber]);
@@ -27,6 +42,16 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.squad.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    // Use allCadets as fallback when registry is empty
+    const displayCadets = filtered.length > 0 ? filtered :
+        (searchTerm.length > 0 && allCadets.length > 0 ?
+            allCadets.filter(c =>
+                c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                c.squad.toLowerCase().includes(searchTerm.toLowerCase())
+            ) : []);
+
+    const hasRegistryData = registry.length > 0 || allCadets.length > 0;
 
     return (
         <div className="relative">
@@ -45,10 +70,10 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
                 />
             </div>
 
-            {isOpen && (searchTerm.length > 0 || registry.length > 0) && (
+            {isOpen && (searchTerm.length > 0 || hasRegistryData) && (
                 <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-64 overflow-y-auto">
-                    {filtered.length > 0 ? (
-                        filtered.map((cadet) => (
+                    {displayCadets.length > 0 ? (
+                        displayCadets.map((cadet) => (
                             <button
                                 key={cadet.id}
                                 className="w-full text-left px-6 py-3 hover:bg-blue-50 transition-colors border-b last:border-0 border-slate-100 flex items-center justify-between"
@@ -60,19 +85,28 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
                             >
                                 <div>
                                     <p className="font-bold text-slate-800">{cadet.name}</p>
-                                    <p className="text-xs text-slate-500">{cadet.squad}</p>
+                                    <p className="text-xs text-slate-500">{cadet.squad} {cadet.course_number && <span className="text-blue-400">• RC {cadet.course_number}</span>}</p>
                                 </div>
                                 <UserPlus size={16} className="text-blue-500" />
                             </button>
                         ))
                     ) : (
                         <div className="px-6 py-8 text-center">
-                            <p className="text-sm text-slate-500 font-medium mb-1">
-                                No matching cadets in Regular Course {courseNumber} Registry
-                            </p>
-                            <p className="text-[10px] text-slate-400">
-                                Ensure the cadet is added to the Master Registry for Regular Course {courseNumber}.
-                            </p>
+                            {loadError ? (
+                                <p className="text-sm text-red-500 font-medium">{loadError}</p>
+                            ) : (
+                                <>
+                                    <p className="text-sm text-slate-500 font-medium mb-1">
+                                        {searchTerm ? `No cadets matching "${searchTerm}"` : `No cadets in Regular Course ${courseNumber} Registry`}
+                                    </p>
+                                    <p className="text-[10px] text-slate-400">
+                                        {registry.length === 0 && allCadets.length > 0
+                                            ? `Found ${allCadets.length} cadets in other courses. Your profile may need course update.`
+                                            : `Ensure the cadet is added to the Master Registry for Regular Course ${courseNumber}.`
+                                        }
+                                    </p>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>

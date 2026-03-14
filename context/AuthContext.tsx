@@ -86,6 +86,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Save to localStorage (Legacy behavior)
       localStorage.setItem('polac_user', JSON.stringify(user));
       setCurrentUser(user);
+
+      // Log successful login as audit notification
+      await dbService.addNotification({
+        type: 'login',
+        title: 'User Logged In',
+        content: `${user.fullName} (${user.role === UserRole.COMMANDANT ? 'Commandant' : 'Course Officer'}) logged in successfully`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        officerName: user.fullName,
+        yearGroup: user.yearGroup || 1,
+        courseNumber: user.courseNumber
+      });
     } catch (err: any) {
       console.error('Login Error:', err.message);
       throw err;
@@ -104,9 +116,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const user = currentUser;
     localStorage.removeItem('polac_user');
     setCurrentUser(null);
+
+    // Log logout as audit notification
+    if (user) {
+      await dbService.addNotification({
+        type: 'logout',
+        title: 'User Logged Out',
+        content: `${user.fullName} logged out`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        officerName: user.fullName,
+        yearGroup: user.yearGroup || 1,
+        courseNumber: user.courseNumber
+      });
+    }
   };
 
   return (

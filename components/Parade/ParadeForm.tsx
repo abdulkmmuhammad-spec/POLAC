@@ -15,7 +15,7 @@ export const ParadeForm: React.FC = () => {
     const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
     const [formParadeType, setFormParadeType] = useState<ParadeType>(ParadeType.MUSTER);
     const [counts, setCounts] = useState({
-        present: 0,
+        present: currentUser?.totalCadets || 0,
         absent: 0,
         sick: 0,
         detention: 0,
@@ -27,9 +27,9 @@ export const ParadeForm: React.FC = () => {
     const [cadetDetailsList, setCadetDetailsList] = useState<CadetDetail[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Determine the officer's course number — fall back to deriving from yearGroup if needed
+    // Determine the officer's course number — fall back to activeRC if needed
     const officerCourseNumber = currentUser?.courseNumber
-        ?? (currentUser?.yearGroup ? (activeRC - currentUser.yearGroup + 1) : 0);
+        ?? (currentUser?.yearGroup ? (activeRC - currentUser.yearGroup + 1) : activeRC);
 
     const handleAddCadet = () => {
         if (!tempCadet.name || !tempCadet.squad) return;
@@ -124,7 +124,7 @@ export const ParadeForm: React.FC = () => {
             });
 
             setCounts({
-                present: 0,
+                present: currentUser.totalCadets || 0,
                 absent: 0,
                 sick: 0,
                 detention: 0,
@@ -182,15 +182,20 @@ export const ParadeForm: React.FC = () => {
                 </div>
 
                 <div className="space-y-4">
-                    {/* Primary Status: Present */}
-                    <div className="p-6 bg-emerald-50 rounded-3xl border-2 border-emerald-100 shadow-sm">
-                        <label className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-2 block">Personnel Present</label>
-                        <input
-                            type="number"
-                            className="w-full bg-transparent text-4xl font-black text-emerald-700 outline-none"
-                            value={counts.present}
-                            onChange={(e) => setCounts({ ...counts, present: parseInt(e.target.value) || 0 })}
-                        />
+                    {/* Primary Status: Present (Auto-calculated) */}
+                    <div className={`p-6 rounded-3xl border-2 transition-all shadow-sm ${counts.present < 0 ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'}`}>
+                        <label className={`text-xs font-black uppercase tracking-widest mb-2 block ${counts.present < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            Personnel Present (Calculated)
+                        </label>
+                        <div className="flex items-baseline gap-2">
+                            <span className={`text-4xl font-black ${counts.present < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                                {counts.present}
+                            </span>
+                            <span className="text-slate-400 font-bold text-sm">/ {currentUser?.totalCadets || 0}</span>
+                        </div>
+                        {counts.present < 0 && (
+                            <p className="text-[10px] font-bold text-rose-500 mt-2 italic">Error: Total exceeds assigned cadets!</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -205,7 +210,16 @@ export const ParadeForm: React.FC = () => {
                                             type="number"
                                             className="w-full bg-transparent text-lg font-bold text-slate-800 outline-none"
                                             value={counts[key]}
-                                            onChange={(e) => setCounts({ ...counts, [key]: parseInt(e.target.value) || 0 })}
+                                            onChange={(e) => {
+                                                const val = Math.max(0, parseInt(e.target.value) || 0);
+                                                const newCounts = { ...counts, [key]: val };
+                                                const nonPresentSum = newCounts.absent + newCounts.sick + newCounts.detention +
+                                                    newCounts.pass + newCounts.suspension + newCounts.yetToReport;
+                                                setCounts({
+                                                    ...newCounts,
+                                                    present: (currentUser?.totalCadets || 0) - nonPresentSum
+                                                });
+                                            }}
                                         />
                                     </div>
                                 ))}
@@ -223,7 +237,16 @@ export const ParadeForm: React.FC = () => {
                                             type="number"
                                             className="w-full bg-transparent text-lg font-bold text-slate-800 outline-none"
                                             value={counts[item.key as keyof typeof counts]}
-                                            onChange={(e) => setCounts({ ...counts, [item.key]: parseInt(e.target.value) || 0 })}
+                                            onChange={(e) => {
+                                                const val = Math.max(0, parseInt(e.target.value) || 0);
+                                                const newCounts = { ...counts, [item.key]: val };
+                                                const nonPresentSum = newCounts.absent + newCounts.sick + newCounts.detention +
+                                                    newCounts.pass + newCounts.suspension + newCounts.yetToReport;
+                                                setCounts({
+                                                    ...newCounts,
+                                                    present: (currentUser?.totalCadets || 0) - nonPresentSum
+                                                });
+                                            }}
                                         />
                                     </div>
                                 ))}

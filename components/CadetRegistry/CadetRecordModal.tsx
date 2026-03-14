@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'react-hot-toast';
 
-const logo = '/download.jpg';
+const logo = '/logo.png';
 
 interface CadetRecordModalProps {
     cadet: any;
@@ -33,31 +33,62 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
         fetchStats();
     }, [cadet.name]);
 
-    const getStatusInfo = () => {
-        const { absent, detention } = stats;
-        if (detention > 5 || absent > 10) return { label: 'CRITICAL', color: 'text-rose-600 bg-rose-50 border-rose-100', icon: <BadgeAlert size={14} /> };
-        if (detention > 2 || absent > 5) return { label: 'UNDER REVIEW', color: 'text-amber-600 bg-amber-50 border-amber-100', icon: <AlertCircle size={14} /> };
-        return { label: 'EXEMPLARY', color: 'text-emerald-600 bg-emerald-50 border-emerald-100', icon: <Medal size={14} /> };
+    // Calculation Constants
+    const ABSENCE_PENALTY = 0.5;
+    const DETENTION_PENALTY = 2.0;
+
+    const calculateStandingScore = (absences: number, detentions: number) => {
+        const score = 100 - (absences * ABSENCE_PENALTY) - (detentions * DETENTION_PENALTY);
+        return Math.max(0, score);
     };
 
-    const getPerformanceComment = () => {
-        const { absent, sick, detention } = stats;
-        let comments = [];
+    const calculateFitness = (visits: number, yearLevel: number) => {
+        const allowedVisits = yearLevel * 2.5;
+        if (visits <= allowedVisits) return 100;
+        const excess = visits - allowedVisits;
+        const score = 100 - (excess * 1.8);
+        return Math.max(0, score);
+    };
 
-        if (absent === 0 && detention === 0) comments.push("This cadet maintains an outstanding record of discipline and presence.");
-        else if (absent <= 3 && detention === 0) comments.push("Performance is highly satisfactory with minor attendance gaps.");
-        else if (detention > 0) comments.push(`Disciplinary concerns noted with ${detention} recorded detentions.`);
+    const getFitnessAssessment = (score: number) => {
+        if (score >= 95) return "COMBAT READY";
+        if (score >= 80) return "FIT FOR DUTY";
+        return "MEDICAL REVIEW";
+    };
 
-        if (absent > 7) comments.push("Urgent review required due to persistent unauthorized absences.");
-        if (sick > 12) comments.push("Review of medical fitness is recommended given recurrent illness reports.");
+    const currentScore = calculateStandingScore(stats.absent, stats.detention);
 
-        return comments.length > 0 ? comments.join(' ') : "Cadet performance is within expected academy standards.";
+    const getStatusInfo = (score: number) => {
+        if (score >= 89) return { label: 'EXEMPLARY', color: 'text-emerald-600', bg: 'bg-emerald-600', icon: <Medal size={14} className="w-4 h-4" /> };
+        if (score >= 70) return { label: 'SATISFACTORY', color: 'text-blue-600', bg: 'bg-blue-600', icon: <CheckCircle size={14} className="w-4 h-4" /> };
+        if (score >= 50) return { label: 'UNDER REVIEW', color: 'text-amber-600', bg: 'bg-amber-600', icon: <AlertCircle size={14} className="w-4 h-4" /> };
+        return { label: 'CRITICAL', color: 'text-rose-600', bg: 'bg-rose-600', icon: <BadgeAlert size={14} className="w-4 h-4" /> };
+    };
+
+    const getCommandantAssessment = (score: number, currentStats: { absent: number, detention: number }) => {
+        let narrative = "";
+
+        if (score >= 89) {
+            narrative = "This cadet maintains an exemplary record of discipline and institutional presence. Performance is within the highest standards of the Academy.";
+        } else if (score >= 70) {
+            narrative = "Cadet demonstrates satisfactory conduct. Minor inconsistencies in accountability are noted but do not currently impact overall standing.";
+        } else if (score >= 50) {
+            narrative = "Conduct is under administrative review. Improvement in personal accountability and adherence to academy regulations is required to maintain standing.";
+        } else {
+            narrative = "CRITICAL: Cadet's standing has fallen below acceptable institutional thresholds. Immediate intervention and disciplinary counseling are mandated.";
+        }
+
+        const punches = [];
+        if (currentStats.absent > 8) punches.push("Persistent unauthorized absences are a primary concern.");
+        if (currentStats.detention > 3) punches.push("Frequent disciplinary detentions indicate a failure to adhere to command hierarchy.");
+
+        return punches.length > 0 ? `${narrative} ${punches.join(" ")}` : narrative;
     };
 
     const exportToPDF = () => {
         try {
             const doc = new jsPDF();
-            const status = getStatusInfo();
+            const status = getStatusInfo(currentScore);
             const cadetName = cadet?.name || 'Unknown Cadet';
 
             // Formal Border
@@ -104,17 +135,35 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             doc.setFontSize(14);
             doc.text(status.label, 130, 83);
 
+            // Draw Progress Bar Background
+            doc.setFillColor(224, 224, 224); // Light Grey
+            doc.roundedRect(20, 115, 170, 5, 2, 2, 'F');
+
+            // Draw Fill based on score
+            if (currentScore >= 89) doc.setFillColor(16, 185, 129);      // Emerald
+            else if (currentScore >= 70) doc.setFillColor(37, 99, 235); // Blue
+            else if (currentScore >= 50) doc.setFillColor(245, 158, 11); // Amber
+            else doc.setFillColor(220, 38, 38);                  // Red
+
+            const barWidth = (currentScore / 100) * 170;
+            doc.roundedRect(20, 115, barWidth, 5, 2, 2, 'F');
+
+            // Add text label
+            doc.setFontSize(10);
+            doc.setTextColor(80, 80, 80);
+            doc.text(`Institutional Standing: ${currentScore.toFixed(1)}% (${status.label})`, 20, 110);
+
             // Stats Table
             autoTable(doc, {
-                startY: 110,
-                head: [['Accountability Category', 'Total Count', 'Command Assessment']],
+                startY: 130, // Adjust this Y-value to prevent overlapping with the bar
+                head: [['Accountability Category', 'Metric', 'Assessment']],
                 body: [
-                    ['Unauthorized Absences', stats.absent, stats.absent > 5 ? 'NEEDS ATTENTION' : 'SATISFACTORY'],
-                    ['Medical / Sick Reports', stats.sick, stats.sick > 10 ? 'REVIEW REQUIRED' : 'NORMAL'],
-                    ['Disciplinary Detentions', stats.detention, stats.detention > 0 ? 'CORRECTIVE ACTION' : 'CLEAN RECORD'],
+                    ['Duty Attendance', `${(100 - (stats.absent * 0.5)).toFixed(1)}%`, stats.absent === 0 ? 'Exemplary' : 'Needs Attention'],
+                    ['Fitness Index', `${calculateFitness(stats.sick || 0, level).toFixed(1)}%`, getFitnessAssessment(calculateFitness(stats.sick || 0, level))],
+                    ['Conduct & Discipline', stats.detention > 0 ? `${stats.detention} Infractions` : 'NIL', stats.detention === 0 ? 'Distinguished' : 'Action Required']
                 ],
+                headStyles: { fillColor: [30, 58, 138] }, // Navy Blue to match Academy branding
                 theme: 'striped',
-                headStyles: { fillColor: [30, 58, 138] },
                 margin: { left: 20, right: 20 }
             });
 
@@ -133,10 +182,12 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             const assessmentY = stats.lastEvent ? currentY + 25 : currentY + 10;
             doc.setFontSize(11);
             doc.setFont('helvetica', 'bold');
-            doc.text('AUTOMATED COMMAND ASSESSMENT:', 20, assessmentY);
-            doc.setFont('helvetica', 'normal');
-            const splitComment = doc.splitTextToSize(getPerformanceComment(), 170);
-            doc.text(splitComment, 20, assessmentY + 8);
+            doc.text("COMMANDANT'S ASSESSMENT:", 20, assessmentY);
+            doc.setFont('times', 'italic');
+            doc.setFontSize(11);
+            const assessmentText = getCommandantAssessment(currentScore, stats);
+            const splitAssessment = doc.splitTextToSize(assessmentText, 170);
+            doc.text(splitAssessment, 20, assessmentY + 8);
 
             // Signature
             doc.setFontSize(10);
@@ -159,8 +210,9 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
 
 
 
-    const standing = getStatusInfo();
-
+    const standing = getStatusInfo(currentScore);
+    const attendanceScore = (100 - (stats.absent * 0.5)).toFixed(1);
+    const fitnessScore = calculateFitness(stats.sick || 0, level);
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
             <div className="bg-white w-full max-w-2xl rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300 flex flex-col max-h-[95vh] sm:max-h-[90vh]">
@@ -183,10 +235,6 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                                     <span className="hidden sm:inline-block w-1 h-1 bg-slate-700 rounded-full"></span>
                                     <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Squad {cadet.squad}</span>
                                 </div>
-                                <div className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:py-1 rounded-full border text-[9px] sm:text-[10px] font-black mt-2 sm:mt-2 ${standing.color}`}>
-                                    {standing.icon}
-                                    {standing.label}
-                                </div>
                             </div>
                         </div>
                         <button onClick={onClose} className="absolute top-0 right-0 sm:relative p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
@@ -207,29 +255,62 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                         </div>
                     ) : (
                         <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* Stats Cards */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                                <div className="p-5 rounded-3xl bg-slate-50 border border-slate-100 flex flex-col group hover:border-blue-200 hover:bg-blue-50/30 transition-all">
-                                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                        <CheckCircle size={16} />
+                            {/* Institutional Standing Visualizer & Accountability Data Table */}
+                            <div className="flex flex-col gap-y-12 mt-10">
+                                {/* 1. Header & Progress Bar Section */}
+                                <section className="space-y-4">
+                                    <div className="flex justify-between items-end">
+                                        <span className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Institutional Standing</span>
+                                        <span className="text-xl font-mono font-bold text-slate-700">{currentScore.toFixed(1)}%</span>
                                     </div>
-                                    <span className="text-3xl font-black text-slate-900">{stats.absent}</span>
-                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Absences</span>
-                                </div>
-                                <div className="p-5 rounded-3xl bg-slate-50 border border-slate-100 flex flex-col group hover:border-blue-200 hover:bg-blue-50/30 transition-all">
-                                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                        <Medal size={16} />
+                                    <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                        <div
+                                            className={`h-full transition-all duration-1000 ease-out ${standing.bg} relative`}
+                                            style={{ width: `${currentScore}%` }}
+                                        >
+                                            {/* Glossy overlay for a premium look */}
+                                            <div className="absolute inset-0 bg-white/10 w-full h-1/2"></div>
+                                        </div>
                                     </div>
-                                    <span className="text-3xl font-black text-slate-900">{stats.sick}</span>
-                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Medical</span>
-                                </div>
-                                <div className="p-5 rounded-3xl bg-slate-50 border border-slate-100 flex flex-col group hover:border-blue-200 hover:bg-blue-50/30 transition-all">
-                                    <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                                        <Shield size={16} />
-                                    </div>
-                                    <span className="text-3xl font-black text-slate-900">{stats.detention}</span>
-                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Detention</span>
-                                </div>
+                                </section>
+
+                                {/* 2. Professional Metrics Table */}
+                                <section className="rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                                    <table className="w-full text-left">
+                                        <thead className="bg-[#1e3a8a] text-white text-[10px] uppercase tracking-wider">
+                                            <tr>
+                                                <th className="p-4">Accountability Category</th>
+                                                <th className="p-4">Metric</th>
+                                                <th className="p-4">Assessment</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 text-sm">
+                                            <tr className="bg-white">
+                                                <td className="p-4 font-medium text-slate-600">Duty Attendance</td>
+                                                <td className="p-4 font-mono">{attendanceScore}%</td>
+                                                <td className={`p-4 font-bold ${stats.absent === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                                    {stats.absent === 0 ? 'EXEMPLARY' : 'NEEDS ATTENTION'}
+                                                </td>
+                                            </tr>
+                                            <tr className="bg-slate-50/50">
+                                                <td className="p-4 font-medium text-slate-600">Fitness Index</td>
+                                                <td className="p-4 font-mono">{fitnessScore.toFixed(1)}%</td>
+                                                <td className={`p-4 font-bold ${fitnessScore >= 95 ? 'text-blue-700' : (fitnessScore >= 80 ? 'text-emerald-600' : 'text-amber-600')}`}>
+                                                    {getFitnessAssessment(fitnessScore)}
+                                                </td>
+                                            </tr>
+                                            <tr className="bg-white">
+                                                <td className="p-4 font-medium text-slate-600">Conduct & Discipline</td>
+                                                <td className="p-4 font-mono text-slate-400 italic">
+                                                    {stats.detention > 0 ? `${stats.detention} Infractions` : "NIL"}
+                                                </td>
+                                                <td className={`p-4 font-bold ${stats.detention === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {stats.detention === 0 ? "DISTINGUISHED" : "ACTION REQUIRED"}
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </section>
                             </div>
 
                             {/* Accountability Focus */}
@@ -260,17 +341,14 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                             </div>
 
                             {/* Command Assessment */}
-                            <div className="space-y-3">
-                                <h4 className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-2">
+                            <div className="mt-6 p-5 sm:p-6 border-l-4 border-slate-800 bg-[#f8fafc] rounded-r-2xl shadow-sm relative italic">
+                                <h4 className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
                                     <TrendingUp size={14} className="text-blue-500" />
-                                    Command Assessment
+                                    Commandant's Assessment
                                 </h4>
-                                <div className="p-5 sm:p-6 rounded-2xl sm:rounded-[2rem] bg-white border-2 border-slate-100 shadow-sm relative italic">
-                                    <p className="text-slate-600 leading-relaxed text-sm font-medium">
-                                        "{getPerformanceComment()}"
-                                    </p>
-                                    <div className="absolute -top-3 -right-3 w-10 h-10 bg-[#0f172a] rounded-xl flex items-center justify-center text-white text-lg font-black italic">!</div>
-                                </div>
+                                <p className="text-slate-600 leading-relaxed text-sm font-medium">
+                                    "{getCommandantAssessment(currentScore, stats)}"
+                                </p>
                             </div>
                         </div>
                     )}

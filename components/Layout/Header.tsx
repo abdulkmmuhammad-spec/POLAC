@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { RefreshCcw, LogOut, Bell, History, FileText, User as UserIcon, Trash2, Menu } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { RefreshCcw, LogOut, Bell, Menu } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
+import { UserRole } from '../../types';
 import { dbService } from '../../services/dbService';
+import { ConfirmationModal } from './ConfirmationModal';
+import { NotificationDrawer } from './NotificationDrawer';
 
 interface HeaderProps {
     title: string;
@@ -13,14 +16,33 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onProfileClick, onMenuClick }) => {
     const { currentUser, logout } = useAuth();
-    const { isDataLoading, refreshData, notifications } = useParade();
-    const [showNotifications, setShowNotifications] = useState(false);
+    const { isDataLoading, refreshData, notifications, markNotificationRead, markAllAsRead } = useParade();
+    const [showDrawer, setShowDrawer] = useState(false);
+    const [showConfirmClear, setShowConfirmClear] = useState(false);
+
+    // Determine if user is commandant (sees all) or course officer (sees only own)
+    const isCommandant = currentUser?.role === UserRole.COMMANDANT;
+    const officerNameFilter = !isCommandant ? currentUser?.fullName : undefined;
+
+    // Filter notifications for display - course officers only see their own
+    const displayNotifications = isCommandant
+        ? notifications
+        : notifications.filter(n =>
+            n.officerName?.toLowerCase() === currentUser?.fullName?.toLowerCase() ||
+            !n.officerName
+        );
+
+    const unreadCount = displayNotifications.filter(n => !n.read).length;
+
+    const handleOpenDrawer = () => {
+        setShowDrawer(true);
+        // Load notifications with appropriate filter based on role
+        refreshData(officerNameFilter);
+    };
 
     const handleClearLogs = async () => {
-        if (window.confirm('Clear all activity logs?')) {
-            await dbService.clearNotifications();
-            refreshData();
-        }
+        await dbService.clearNotifications();
+        refreshData(officerNameFilter);
     };
 
     return (
@@ -29,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 {onMenuClick && (
                     <button
                         onClick={onMenuClick}
-                        className="p-1 md:p-2 md:hidden text-slate-600 hover:bg-slate-100 rounded-lg transition-colors shrink-0"
+                        className="p-1 md:hidden text-slate-600 hover:bg-slate-100 rounded-lg transition-colors shrink-0"
                     >
                         <Menu size={24} />
                     </button>
@@ -40,85 +62,19 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
 
             <div className="flex items-center gap-1 md:gap-4 shrink-0">
                 {/* Notification Bell */}
-                <div className="relative">
-                    <button
-                        onClick={() => setShowNotifications(!showNotifications)}
-                        className={`p-2 rounded-full transition-all relative ${showNotifications ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50'}`}
-                    >
-                        <Bell size={20} />
-                        {notifications.some(n => !n.read) && (
-                            <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
-                        )}
-                    </button>
-
-                    {showNotifications && (
-                        <>
-                            {/* Backdrop */}
-                            <div
-                                className="fixed inset-0 z-[60] bg-slate-900/20 backdrop-blur-sm transition-opacity"
-                                onClick={() => setShowNotifications(false)}
-                            ></div>
-
-                            {/* Notification Container */}
-                            <div className="fixed inset-x-4 top-[10%] bottom-[10%] md:absolute md:inset-auto md:right-0 md:top-full md:mt-3 md:w-80 md:bottom-auto bg-white rounded-2xl shadow-2xl border border-slate-100 z-[70] overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right flex flex-col">
-                                <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50 shrink-0">
-                                    <h4 className="font-bold text-slate-800 text-sm">Activity Logs</h4>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={handleClearLogs}
-                                            className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50"
-                                            title="Clear Logs"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                        <button
-                                            onClick={() => setShowNotifications(false)}
-                                            className="p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-lg hover:bg-slate-100 md:hidden"
-                                        >
-                                            <Menu size={16} className="rotate-45" /> {/* Using Menu as a quick close X if needed, or just standard button */}
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
-                                    {notifications.length === 0 ? (
-                                        <div className="p-12 text-center">
-                                            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                                                <Bell size={24} className="text-slate-200" />
-                                            </div>
-                                            <p className="text-xs text-slate-400 italic">No recent activity found</p>
-                                        </div>
-                                    ) : (
-                                        notifications.map(n => (
-                                            <div key={n.id} className="p-4 hover:bg-slate-50 transition-colors cursor-default">
-                                                <div className="flex gap-4">
-                                                    <div className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${n.type === 'profile_update' ? 'bg-indigo-50 text-indigo-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                                                        {n.type === 'profile_update' ? <UserIcon size={18} /> : <FileText size={18} />}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-bold text-slate-800 truncate">{n.title}</p>
-                                                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-3 leading-relaxed">{n.content}</p>
-                                                        <div className="flex items-center gap-2 mt-3">
-                                                            <History size={10} className="text-slate-400" />
-                                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{new Date(n.timestamp).toLocaleString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                                <div className="p-3 bg-slate-50/50 border-t border-slate-50 text-center md:hidden">
-                                    <button
-                                        onClick={() => setShowNotifications(false)}
-                                        className="w-full py-2 text-sm font-bold text-slate-600 hover:text-slate-800"
-                                    >
-                                        Close
-                                    </button>
-                                </div>
-                            </div>
-                        </>
+                <button
+                    onClick={() => setShowDrawer(true)}
+                    className="p-2 rounded-full transition-all relative text-slate-400 hover:bg-slate-50 hover:text-blue-600"
+                >
+                    <Bell size={20} />
+                    {unreadCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-rose-500 rounded-full border-2 border-white flex items-center justify-center">
+                            <span className="text-[9px] font-black text-white leading-none">
+                                {unreadCount > 9 ? '9+' : unreadCount}
+                            </span>
+                        </span>
                     )}
-                </div>
+                </button>
 
                 {showRefresh && (
                     <button
@@ -148,6 +104,30 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                     <LogOut size={20} />
                 </button>
             </div>
+
+            {/* ── Notification Drawer ── */}
+            <NotificationDrawer
+                isOpen={showDrawer}
+                onClose={() => setShowDrawer(false)}
+                notifications={displayNotifications}
+                onMarkRead={markNotificationRead}
+                onMarkAllRead={markAllAsRead}
+                onClearAll={() => {
+                    setShowDrawer(false);
+                    setShowConfirmClear(true);
+                }}
+            />
+
+            {/* ── Clear Confirmation ── */}
+            <ConfirmationModal
+                isOpen={showConfirmClear}
+                onClose={() => setShowConfirmClear(false)}
+                onConfirm={handleClearLogs}
+                title="Clear Activity Logs"
+                message="Are you sure you want to permanently delete all recent activity history? This action cannot be undone."
+                confirmText="Clear All"
+                type="danger"
+            />
         </header>
     );
 };

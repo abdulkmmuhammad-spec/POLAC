@@ -22,7 +22,7 @@ interface ParadeContextType {
     records: ParadeRecord[];
     notifications: Notification[];
     isDataLoading: boolean;
-    refreshData: () => Promise<void>;
+    refreshData: (officerNameFilter?: string) => Promise<void>;
     stats: DashboardStats;
     /** @deprecated Use courseSummary instead. Kept for backward compatibility. */
     yearSummary: any[];
@@ -56,6 +56,17 @@ interface ParadeContextType {
     selectedParadeType: ParadeType;
     /** Update the selected parade type. */
     setSelectedParadeType: (type: ParadeType) => void;
+    /** Mark a single notification as read. */
+    markNotificationRead: (id: string) => Promise<void>;
+    /** Mark all notifications as read. */
+    markAllAsRead: () => Promise<void>;
+    /** Get audit logs with filters (for Commandant dashboard). */
+    getAuditLogs: (filters: {
+        officerName?: string;
+        actionType?: string;
+        startDate?: string;
+        endDate?: string;
+    }) => Promise<Notification[]>;
 }
 
 const ParadeContext = createContext<ParadeContextType | undefined>(undefined);
@@ -81,12 +92,12 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const currentPage = useMemo(() => Math.ceil(records.length / PAGE_SIZE), [records.length, PAGE_SIZE]);
 
     const refreshActiveRC = useCallback(async () => {
-        const [rc, settings] = await Promise.all([
+        const [rcRes, settingsRes] = await Promise.all([
             dbService.getActiveRC(),
             dbService.getSubmissionSettings()
         ]);
-        setActiveRC(rc);
-        setSubmissionSettings(settings);
+        setActiveRC(rcRes.data);
+        setSubmissionSettings(settingsRes.data);
     }, []);
 
     const updateSubmissionSetting = async (key: 'muster_start_hour' | 'muster_end_hour' | 'tattoo_start_hour', value: number) => {
@@ -107,20 +118,24 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     };
 
-    const refreshData = async () => {
+    const refreshData = async (officerNameFilter?: string) => {
         setIsDataLoading(true);
         try {
-            const [fetchedRecords, fetchedNotifs, rc, settings, count] = await Promise.all([
+            const [recordsRes, notifsRes, rcRes, settingsRes, count] = await Promise.all([
                 dbService.getRecords(0, PAGE_SIZE - 1),
-                dbService.getNotifications(),
+                dbService.getNotifications(officerNameFilter),
                 dbService.getActiveRC(),
                 dbService.getSubmissionSettings(),
                 dbService.getTotalRecordsCount()
             ]);
+
+            const fetchedRecords = recordsRes.data;
+            const fetchedNotifs = notifsRes.data;
+
             setRecords(fetchedRecords);
             setNotifications(fetchedNotifs);
-            setActiveRC(rc);
-            setSubmissionSettings(settings);
+            setActiveRC(rcRes.data);
+            setSubmissionSettings(settingsRes.data);
             setTotalRecordsCount(count);
             setHasMoreRecords(fetchedRecords.length === PAGE_SIZE && fetchedRecords.length < count);
 
@@ -128,7 +143,6 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             const today = new Date().toISOString().split('T')[0];
             const todayRecords = fetchedRecords.filter(r => r.date === today);
             if (todayRecords.length > 0) {
-                // Sort by createdAt descending to find the absolute latest one
                 const latest = [...todayRecords].sort((a, b) =>
                     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
                 )[0];
@@ -148,12 +162,13 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         try {
             const from = records.length;
             const to = from + PAGE_SIZE - 1;
-            const fetchPromise = dbService.getRecords(from, to);
 
-            // Re-fetch total count to be sure
-            const countPromise = dbService.getTotalRecordsCount();
+            const [moreRecordsRes, count] = await Promise.all([
+                dbService.getRecords(from, to),
+                dbService.getTotalRecordsCount()
+            ]);
 
-            const [moreRecords, count] = await Promise.all([fetchPromise, countPromise]);
+            const moreRecords = moreRecordsRes.data;
 
             setRecords(prev => [...prev, ...moreRecords]);
             setTotalRecordsCount(count);
@@ -165,8 +180,42 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     };
 
+    const markNotificationRead = async (id: string) => {
+        await dbService.markNotificationRead(id);
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    };
+
+    const markAllAsRead = async () => {
+        await dbService.markAllNotificationsRead();
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    };
+
+    const getAuditLogs = async (filters: {
+        officerName?: string;
+        actionType?: string;
+        startDate?: string;
+        endDate?: string;
+    }): Promise<Notification[]> => {
+        const result = await dbService.getAuditLogs(filters);
+        return result.data;
+    };
+
+
     useEffect(() => {
         refreshData();
+    }, []);
+
+    // ── Auto-poll notifications every 30s so the commandant sees new alerts ──
+    useEffect(() => {
+        const interval = setInterval(async () => {
+            try {
+                const notifsRes = await dbService.getNotifications();
+                setNotifications(notifsRes.data);
+            } catch (err) {
+                console.error('Notification poll error:', err);
+            }
+        }, 30000);
+        return () => clearInterval(interval);
     }, []);
 
     /** Helper exposed via context to compute year level for a given course number */
@@ -282,7 +331,10 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             setSelectedParadeType,
             totalRecordsCount,
             currentPage,
-            totalPages
+            totalPages,
+            markNotificationRead,
+            markAllAsRead,
+            getAuditLogs
         }}>
             {children}
         </ParadeContext.Provider>

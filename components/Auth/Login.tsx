@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCcw } from 'lucide-react';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { LoginSkeleton } from './LoginSkeleton';
 
 export const Login: React.FC = () => {
     const { login, isLoading, lockoutTime } = useAuth();
@@ -10,6 +11,18 @@ export const Login: React.FC = () => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [validationErrors, setValidationErrors] = useState<{ username?: string, password?: string }>({});
+    const [isPageLoading, setIsPageLoading] = useState(true);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsPageLoading(false);
+        }, 1000); // 1-second "polish" delay for the skeleton
+        return () => clearTimeout(timer);
+    }, []);
+
+    if (isPageLoading) {
+        return <LoginSkeleton />;
+    }
 
     const validate = () => {
         const errors: { username?: string, password?: string } = {};
@@ -58,9 +71,9 @@ export const Login: React.FC = () => {
                 <div className="bg-primary p-8 text-center bg-blue-900 text-white">
                     <div className="w-24 h-24 bg-white rounded-full mx-auto mb-4 flex items-center justify-center text-blue-900 shadow-xl overflow-hidden border-4 border-white/20">
                         <img
-                            src="/download.jpg"
+                            src="/logo.png"
                             alt="NPA Logo"
-                            className="w-full h-full object-cover"
+                            className="w-[90%] h-[90%] object-contain block mx-auto"
                         />
                     </div>
                     <h1 className="text-2xl font-bold">Nigeria Police Academy</h1>

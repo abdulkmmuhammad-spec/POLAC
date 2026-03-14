@@ -78,6 +78,18 @@ export const CadetManager: React.FC = () => {
             setNewSquad('');
             fetchCadets(true);
             toast.success('Cadet added successfully!');
+
+            // Log cadet addition as audit notification
+            await dbService.addNotification({
+                type: 'cadet_added',
+                title: 'Cadet Added',
+                content: `${newName} (RC${newCourseNumber}, ${newSquad}) added to registry`,
+                timestamp: new Date().toISOString(),
+                read: false,
+                officerName: 'Commandant',
+                yearGroup: calculateCurrentLevel(newCourseNumber, activeRC),
+                courseNumber: newCourseNumber
+            });
         } catch (err) {
             toast.error('Failed to add cadet');
         } finally {
@@ -85,7 +97,7 @@ export const CadetManager: React.FC = () => {
         }
     };
 
-    const handleDeleteCadet = async (id: string | number) => {
+    const handleDeleteCadet = async (id: string | number, cadetName: string) => {
         if (!window.confirm('Are you sure you want to delete this cadet?')) return;
 
         setIsLoading(true);
@@ -93,6 +105,18 @@ export const CadetManager: React.FC = () => {
             await dbService.removeCadetFromRegistry(id);
             fetchCadets(true);
             toast.success('Cadet deleted successfully!');
+
+            // Log as audit notification
+            await dbService.addNotification({
+                type: 'cadet_removed',
+                title: 'Cadet Removed',
+                content: `${cadetName} removed from registry`,
+                timestamp: new Date().toISOString(),
+                read: false,
+                officerName: 'Commandant',
+                yearGroup: 1,
+                courseNumber: 0
+            });
         } catch (err) {
             toast.error('Failed to delete cadet');
         } finally {
@@ -195,6 +219,18 @@ export const CadetManager: React.FC = () => {
                         console.warn('Some rows were skipped:', errors);
                     }
                     fetchCadets(true);
+
+                    // Log as audit notification
+                    await dbService.addNotification({
+                        type: 'cadet_added',
+                        title: 'Cadets Bulk Imported',
+                        content: `${cadetsToUpload.length} cadets imported via Excel upload`,
+                        timestamp: new Date().toISOString(),
+                        read: false,
+                        officerName: 'Commandant',
+                        yearGroup: 1,
+                        courseNumber: 0
+                    });
                 } catch (dbErr: any) {
                     console.error('Database Error during bulk import:', dbErr);
                     const errorDetails = dbErr.message || dbErr.details || 'Check for duplicate names or database connection issues.';
@@ -336,7 +372,7 @@ export const CadetManager: React.FC = () => {
                                         </td>
                                         <td className="px-8 py-4 text-right">
                                             <button
-                                                onClick={() => handleDeleteCadet(cadet.id)}
+                                                onClick={() => handleDeleteCadet(cadet.id, cadet.name)}
                                                 className="text-slate-300 hover:text-rose-600 transition-colors p-2"
                                             >
                                                 <Trash2 size={18} />
@@ -372,7 +408,7 @@ export const CadetManager: React.FC = () => {
                                                     {cadet.name}
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDeleteCadet(cadet.id)}
+                                                    onClick={() => handleDeleteCadet(cadet.id, cadet.name)}
                                                     className="text-slate-300 p-2"
                                                 >
                                                     <Trash2 size={16} />

@@ -7,6 +7,7 @@ import { Login } from './components/Auth/Login';
 import { CommandantDashboard } from './components/Dashboard/Commandant/CommandantDashboard';
 import { OfficerDashboard } from './components/Dashboard/Officer/OfficerDashboard';
 import { Toaster } from 'react-hot-toast';
+import ErrorBoundary from './components/Layout/ErrorBoundary';
 
 const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRole?: UserRole }> = ({ children, allowedRole }) => {
   const { currentUser } = useAuth();
@@ -68,7 +69,9 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppContent />
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
   );
