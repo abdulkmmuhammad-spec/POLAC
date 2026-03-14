@@ -62,7 +62,7 @@ export const Login: React.FC = () => {
     return (
         <div className="min-h-screen flex items-center justify-center p-6 bg-slate-900 relative overflow-hidden">
             <img
-                src="/download (1).jpg"
+                src="/background.jpg"
                 alt="Background"
                 className="absolute inset-0 w-full h-full object-cover opacity-30 blur-sm scale-105 grayscale-0"
             />
