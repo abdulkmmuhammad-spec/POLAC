@@ -79,17 +79,22 @@ export const CadetManager: React.FC = () => {
             fetchCadets(true);
             toast.success('Cadet added successfully!');
 
-            // Log cadet addition as audit notification
-            await dbService.addNotification({
-                type: 'cadet_added',
-                title: 'Cadet Added',
-                content: `${newName} (RC${newCourseNumber}, ${newSquad}) added to registry`,
-                timestamp: new Date().toISOString(),
-                read: false,
-                officerName: 'Commandant',
-                yearGroup: calculateCurrentLevel(newCourseNumber, activeRC),
-                courseNumber: newCourseNumber
-            });
+            try {
+                // Log cadet addition as audit notification
+                await dbService.addNotification({
+                    type: 'cadet_added',
+                    title: 'Cadet Added',
+                    content: `${newName} (RC${newCourseNumber}, ${newSquad}) added to registry`,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    officerName: 'Commandant',
+                    yearGroup: calculateCurrentLevel(newCourseNumber, activeRC),
+                    courseNumber: newCourseNumber
+                });
+            } catch (auditErr) {
+                console.error('Failed to log audit notification for adding cadet:', auditErr);
+                toast.error('Cadet added, but failed to securely log audit trail.');
+            }
         } catch (err) {
             toast.error('Failed to add cadet');
         } finally {
@@ -106,17 +111,22 @@ export const CadetManager: React.FC = () => {
             fetchCadets(true);
             toast.success('Cadet deleted successfully!');
 
-            // Log as audit notification
-            await dbService.addNotification({
-                type: 'cadet_removed',
-                title: 'Cadet Removed',
-                content: `${cadetName} removed from registry`,
-                timestamp: new Date().toISOString(),
-                read: false,
-                officerName: 'Commandant',
-                yearGroup: 1,
-                courseNumber: 0
-            });
+            try {
+                // Log as audit notification
+                await dbService.addNotification({
+                    type: 'cadet_removed',
+                    title: 'Cadet Removed',
+                    content: `${cadetName} removed from registry`,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    officerName: 'Commandant',
+                    yearGroup: 1,
+                    courseNumber: 0
+                });
+            } catch (auditErr) {
+                console.error('Failed to log audit notification for removing cadet:', auditErr);
+                toast.error('Cadet deleted, but failed to securely log audit trail.');
+            }
         } catch (err) {
             toast.error('Failed to delete cadet');
         } finally {
@@ -220,17 +230,22 @@ export const CadetManager: React.FC = () => {
                     }
                     fetchCadets(true);
 
-                    // Log as audit notification
-                    await dbService.addNotification({
-                        type: 'cadet_added',
-                        title: 'Cadets Bulk Imported',
-                        content: `${cadetsToUpload.length} cadets imported via Excel upload`,
-                        timestamp: new Date().toISOString(),
-                        read: false,
-                        officerName: 'Commandant',
-                        yearGroup: 1,
-                        courseNumber: 0
-                    });
+                    try {
+                        // Log as audit notification
+                        await dbService.addNotification({
+                            type: 'cadet_added',
+                            title: 'Cadets Bulk Imported',
+                            content: `${cadetsToUpload.length} cadets imported via Excel upload`,
+                            timestamp: new Date().toISOString(),
+                            read: false,
+                            officerName: 'Commandant',
+                            yearGroup: 1,
+                            courseNumber: 0
+                        });
+                    } catch (auditErr) {
+                        console.error('Failed to log audit notification for bulk import:', auditErr);
+                        toast.error('Import successful, but failed to log audit trail.');
+                    }
                 } catch (dbErr: any) {
                     console.error('Database Error during bulk import:', dbErr);
                     const errorDetails = dbErr.message || dbErr.details || 'Check for duplicate names or database connection issues.';

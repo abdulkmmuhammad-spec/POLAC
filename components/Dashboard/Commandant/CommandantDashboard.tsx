@@ -17,6 +17,7 @@ import { toast } from 'react-hot-toast';
 
 const ActiveRCSettings: React.FC = () => {
     const { activeRC, refreshActiveRC } = useParade();
+    const { currentUser } = useAuth();
     const [newRC, setNewRC] = useState<number>(activeRC);
     const [isSaving, setIsSaving] = useState(false);
     const [saved, setSaved] = useState(false);
@@ -31,17 +32,22 @@ const ActiveRCSettings: React.FC = () => {
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
 
-            // Log settings change as audit notification
-            await dbService.addNotification({
-                type: 'settings_change',
-                title: 'Active RC Changed',
-                content: `Active Regular Course changed from RC${oldRC} to RC${newRC}`,
-                timestamp: new Date().toISOString(),
-                read: false,
-                officerName: 'System',
-                yearGroup: 1,
-                courseNumber: 0
-            });
+            try {
+                // Log settings change as audit notification
+                await dbService.addNotification({
+                    type: 'settings_change',
+                    title: 'Active RC Changed',
+                    content: `Active Regular Course changed from RC${oldRC} to RC${newRC}`,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    officerName: currentUser?.fullName || 'System',
+                    yearGroup: 1,
+                    courseNumber: 0
+                });
+            } catch (auditErr) {
+                console.error('Failed to log audit notification for settings change:', auditErr);
+                toast.error('Settings updated, but failed to securely log audit trail.');
+            }
         } catch (err) {
             toast.error('Failed to update Active RC. Please try again.');
         } finally {
@@ -100,6 +106,7 @@ const ActiveRCSettings: React.FC = () => {
 
 const SubmissionTimeSettings: React.FC = () => {
     const { submissionSettings, updateSubmissionSetting } = useParade();
+    const { currentUser } = useAuth();
     const [isSaving, setIsSaving] = useState<string | null>(null);
 
     const handleUpdate = async (key: 'muster_start_hour' | 'muster_end_hour' | 'tattoo_start_hour', value: number) => {
@@ -108,22 +115,27 @@ const SubmissionTimeSettings: React.FC = () => {
             const oldValue = submissionSettings[key];
             await updateSubmissionSetting(key, value);
 
-            // Log settings change as audit notification
-            const settingLabels: Record<string, string> = {
-                muster_start_hour: 'Muster Start Hour',
-                muster_end_hour: 'Muster End Hour',
-                tattoo_start_hour: 'Tattoo Start Hour'
-            };
-            await dbService.addNotification({
-                type: 'settings_change',
-                title: 'Submission Time Changed',
-                content: `${settingLabels[key]} changed from ${oldValue}:00 to ${value}:00`,
-                timestamp: new Date().toISOString(),
-                read: false,
-                officerName: 'System',
-                yearGroup: 1,
-                courseNumber: 0
-            });
+            try {
+                // Log settings change as audit notification
+                const settingLabels: Record<string, string> = {
+                    muster_start_hour: 'Muster Start Hour',
+                    muster_end_hour: 'Muster End Hour',
+                    tattoo_start_hour: 'Tattoo Start Hour'
+                };
+                await dbService.addNotification({
+                    type: 'settings_change',
+                    title: 'Submission Time Changed',
+                    content: `${settingLabels[key]} changed from ${oldValue}:00 to ${value}:00`,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    officerName: currentUser?.fullName || 'System',
+                    yearGroup: 1,
+                    courseNumber: 0
+                });
+            } catch (auditErr) {
+                console.error('Failed to log audit notification for submission time settings:', auditErr);
+                toast.error('Submission Time updated, but failed to securely log audit trail.');
+            }
         } finally {
             setIsSaving(null);
         }

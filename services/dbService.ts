@@ -8,7 +8,11 @@ import { ParadeRecord, User, Notification, CadetStatus } from '../types';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('CRITICAL: Missing Supabase environment variables. App requires VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+}
+
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
 
 export const dbService = {
   // ─── App Settings ────────────────────────────────────────────────────────
@@ -347,67 +351,12 @@ export const dbService = {
           read: n.read,
           officerName: n.officer_name,
           yearGroup: n.year_group,
-          courseNumber: n.year_group // fallback: no course_number column in notifications table
+          courseNumber: n.course_number || n.year_group
         })),
         error: null
       };
     } catch (err: any) {
       console.error('Supabase Error (getNotifications):', err);
-      return { data: [], error: err };
-    }
-  },
-
-  // ─── Audit Log (Filtered Notifications) ───────────────────────────────────
-
-  getAuditLogs: async (filters: {
-    officerName?: string;
-    actionType?: string;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<{ data: Notification[]; error: any }> => {
-    try {
-      let query = supabase
-        .from('notifications')
-        .select('*')
-        .order('timestamp', { ascending: false });
-
-      // Filter by officer name
-      if (filters.officerName) {
-        query = query.ilike('officer_name', `%${filters.officerName}%`);
-      }
-
-      // Filter by action type
-      if (filters.actionType) {
-        query = query.eq('type', filters.actionType);
-      }
-
-      // Filter by date range
-      if (filters.startDate) {
-        query = query.gte('timestamp', filters.startDate);
-      }
-      if (filters.endDate) {
-        query = query.lte('timestamp', filters.endDate + 'T23:59:59');
-      }
-
-      const { data, error } = await query.limit(200);
-
-      if (error) throw error;
-      return {
-        data: (data || []).map(n => ({
-          id: n.id,
-          type: n.type,
-          title: n.title,
-          content: n.content,
-          timestamp: n.timestamp,
-          read: n.read,
-          officerName: n.officer_name,
-          yearGroup: n.year_group,
-          courseNumber: n.year_group
-        })),
-        error: null
-      };
-    } catch (err: any) {
-      console.error('Supabase Error (getAuditLogs):', err);
       return { data: [], error: err };
     }
   },
@@ -462,7 +411,7 @@ export const dbService = {
           read: n.read,
           officerName: n.officer_name,
           yearGroup: n.year_group,
-          courseNumber: n.year_group
+          courseNumber: n.course_number || n.year_group
         })),
         error: null
       };
@@ -481,7 +430,8 @@ export const dbService = {
         timestamp: notif.timestamp,
         read: notif.read,
         officer_name: notif.officerName,
-        year_group: notif.yearGroup
+        year_group: notif.yearGroup,
+        course_number: notif.courseNumber
       };
       console.log('[Notification] Inserting:', payload);
       const { data, error } = await supabase

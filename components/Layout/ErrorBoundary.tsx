@@ -36,15 +36,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
                         <div className="absolute top-0 left-0 w-full h-2 bg-rose-500" />
 
                         <div className="w-20 h-20 bg-rose-50 rounded-3xl flex items-center justify-center mx-auto mb-8 text-rose-500 shadow-inner">
-                            <WifiOff size={40} />
+                            <AlertCircle size={40} />
                         </div>
 
                         <h2 className="text-2xl font-black text-slate-800 mb-4 tracking-tight">
-                            System Interruption
+                            Rendering Error
                         </h2>
                         <p className="text-slate-500 leading-relaxed mb-10 text-sm">
-                            The CMS encountered a critical connection or rendering error. This usually
-                            happens during network timeouts or database maintenance.
+                            The interface encountered an unexpected rendering error. This usually
+                            happens due to unexpected data formats or UI state issues, not network failures.
                         </p>
 
                         <div className="space-y-3">

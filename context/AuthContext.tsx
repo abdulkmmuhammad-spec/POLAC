@@ -88,16 +88,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setCurrentUser(user);
 
       // Log successful login as audit notification
-      await dbService.addNotification({
-        type: 'login',
-        title: 'User Logged In',
-        content: `${user.fullName} (${user.role === UserRole.COMMANDANT ? 'Commandant' : 'Course Officer'}) logged in successfully`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        officerName: user.fullName,
-        yearGroup: user.yearGroup || 1,
-        courseNumber: user.courseNumber
-      });
+      try {
+        await dbService.addNotification({
+          type: 'login',
+          title: 'User Logged In',
+          content: `${user.fullName} (${user.role === UserRole.COMMANDANT ? 'Commandant' : 'Course Officer'}) logged in successfully`,
+          timestamp: new Date().toISOString(),
+          read: false,
+          officerName: user.fullName,
+          yearGroup: user.yearGroup || 1,
+          courseNumber: user.courseNumber
+        });
+      } catch (auditErr) {
+        console.error('Auth context: Failed to log audit notification for login', auditErr);
+      }
     } catch (err: any) {
       console.error('Login Error:', err.message);
       throw err;
@@ -123,16 +127,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Log logout as audit notification
     if (user) {
-      await dbService.addNotification({
-        type: 'logout',
-        title: 'User Logged Out',
-        content: `${user.fullName} logged out`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        officerName: user.fullName,
-        yearGroup: user.yearGroup || 1,
-        courseNumber: user.courseNumber
-      });
+      try {
+        await dbService.addNotification({
+          type: 'logout',
+          title: 'User Logged Out',
+          content: `${user.fullName} logged out`,
+          timestamp: new Date().toISOString(),
+          read: false,
+          officerName: user.fullName,
+          yearGroup: user.yearGroup || 1,
+          courseNumber: user.courseNumber
+        });
+      } catch (auditErr) {
+        console.error('Auth context: Failed to log audit notification for logout', auditErr);
+      }
     }
   };
 

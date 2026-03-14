@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, X } from 'lucide-react';
 
@@ -23,6 +23,22 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     cancelText = 'Cancel',
     type = 'danger'
 }) => {
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+
+        if (isOpen) {
+            window.addEventListener('keydown', handleKeyDown);
+        }
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isOpen, onClose]);
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -42,6 +58,10 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.9, opacity: 0, y: 20 }}
                         className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="modal-title"
+                        aria-describedby="modal-desc"
                     >
                         <div className="p-6 md:p-8">
                             <div className="flex items-start justify-between mb-6">
@@ -50,14 +70,15 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                                 </div>
                                 <button
                                     onClick={onClose}
+                                    aria-label="Close"
                                     className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl transition-all"
                                 >
                                     <X size={20} />
                                 </button>
                             </div>
 
-                            <h3 className="text-xl font-bold text-slate-800 mb-2">{title}</h3>
-                            <p className="text-slate-500 leading-relaxed">{message}</p>
+                            <h3 id="modal-title" className="text-xl font-bold text-slate-800 mb-2">{title}</h3>
+                            <p id="modal-desc" className="text-slate-500 leading-relaxed">{message}</p>
 
                             <div className="flex flex-col sm:flex-row gap-3 mt-8">
                                 <button

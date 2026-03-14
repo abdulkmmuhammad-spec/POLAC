@@ -41,8 +41,14 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
     };
 
     const handleClearLogs = async () => {
-        await dbService.clearNotifications();
-        refreshData(officerNameFilter);
+        try {
+            await dbService.clearNotifications();
+            refreshData(officerNameFilter);
+        } catch (error) {
+            console.error('Failed to clear notifications:', error);
+        } finally {
+            setShowConfirmClear(false);
+        }
     };
 
     return (
@@ -56,14 +62,14 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                         <Menu size={24} />
                     </button>
                 )}
-                <h2 className="text-base md:text-xl font-bold text-slate-800 capitalize truncate max-w-[120px] md:max-w-none">{title}</h2>
+                <h2 className="text-sm sm:text-base md:text-xl font-bold text-slate-800 capitalize leading-tight">{title}</h2>
                 <span className="hidden sm:inline-block px-2 py-0.5 bg-blue-100 text-blue-600 text-[10px] font-black rounded-full border border-blue-200 shrink-0">V2</span>
             </div>
 
             <div className="flex items-center gap-1 md:gap-4 shrink-0">
                 {/* Notification Bell */}
                 <button
-                    onClick={() => setShowDrawer(true)}
+                    onClick={handleOpenDrawer}
                     className="p-2 rounded-full transition-all relative text-slate-400 hover:bg-slate-50 hover:text-blue-600"
                 >
                     <Bell size={20} />

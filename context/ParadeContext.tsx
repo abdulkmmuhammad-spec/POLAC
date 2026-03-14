@@ -150,6 +150,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             }
         } catch (error) {
             console.error('Error refreshing data:', error);
+            toast.error('Failed to sync master parade data. Please check your connection.');
         } finally {
             setIsDataLoading(false);
         }
@@ -175,19 +176,30 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             setHasMoreRecords(moreRecords.length === PAGE_SIZE && (records.length + moreRecords.length) < count);
         } catch (error) {
             console.error('Error loading more records:', error);
+            toast.error('Failed to load older records.');
         } finally {
             setIsDataLoading(false);
         }
     };
 
     const markNotificationRead = async (id: string) => {
-        await dbService.markNotificationRead(id);
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+        try {
+            await dbService.markNotificationRead(id);
+            setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+        } catch (err) {
+            console.error('Error marking notification read:', err);
+            toast.error('Failed to mark notification as read');
+        }
     };
 
     const markAllAsRead = async () => {
-        await dbService.markAllNotificationsRead();
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        try {
+            await dbService.markAllNotificationsRead();
+            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        } catch (err) {
+            console.error('Error marking all notifications read:', err);
+            toast.error('Failed to mark all notifications as read');
+        }
     };
 
     const getAuditLogs = async (filters: {
@@ -207,16 +219,20 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     // ── Auto-poll notifications every 30s so the commandant sees new alerts ──
     useEffect(() => {
+        if (!currentUser) return; // Prevent unnecessary polling when unauthenticated
+
         const interval = setInterval(async () => {
             try {
-                const notifsRes = await dbService.getNotifications();
+                // Ensure polling respects the current user's role filter
+                const officerNameFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.fullName;
+                const notifsRes = await dbService.getNotifications(officerNameFilter);
                 setNotifications(notifsRes.data);
             } catch (err) {
                 console.error('Notification poll error:', err);
             }
         }, 30000);
         return () => clearInterval(interval);
-    }, []);
+    }, [currentUser]);
 
     /** Helper exposed via context to compute year level for a given course number */
     const getLevelForCourse = useCallback(

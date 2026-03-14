@@ -72,7 +72,7 @@ export interface ParadeRecord {
 
 export interface Notification {
   id: string;
-  type: 'profile_update' | 'parade_submission';
+  type: 'profile_update' | 'parade_submission' | 'login' | 'logout' | 'cadet_added' | 'cadet_removed' | 'settings_change' | string;
   title: string;
   content: string;
   timestamp: string;

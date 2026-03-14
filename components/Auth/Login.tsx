@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { RefreshCcw } from 'lucide-react';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { LoginSkeleton } from './LoginSkeleton';
 
 export const Login: React.FC = () => {
     const { login, isLoading, lockoutTime } = useAuth();
@@ -11,18 +10,6 @@ export const Login: React.FC = () => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [validationErrors, setValidationErrors] = useState<{ username?: string, password?: string }>({});
-    const [isPageLoading, setIsPageLoading] = useState(true);
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setIsPageLoading(false);
-        }, 1000); // 1-second "polish" delay for the skeleton
-        return () => clearTimeout(timer);
-    }, []);
-
-    if (isPageLoading) {
-        return <LoginSkeleton />;
-    }
 
     const validate = () => {
         const errors: { username?: string, password?: string } = {};

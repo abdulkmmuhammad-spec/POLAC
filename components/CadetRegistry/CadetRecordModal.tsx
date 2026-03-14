@@ -39,7 +39,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
 
     const calculateStandingScore = (absences: number, detentions: number) => {
         const score = 100 - (absences * ABSENCE_PENALTY) - (detentions * DETENTION_PENALTY);
-        return Math.max(0, score);
+        return Math.max(0, Math.min(100, score));
     };
 
     const calculateFitness = (visits: number, yearLevel: number) => {
@@ -47,7 +47,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
         if (visits <= allowedVisits) return 100;
         const excess = visits - allowedVisits;
         const score = 100 - (excess * 1.8);
-        return Math.max(0, score);
+        return Math.max(0, Math.min(100, score));
     };
 
     const getFitnessAssessment = (score: number) => {
@@ -102,7 +102,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
 
             // Add Logo
             try {
-                doc.addImage(logo, 'JPEG', 15, 15, 20, 20);
+                doc.addImage(logo, 'PNG', 15, 15, 20, 20);
             } catch (e) {
                 console.warn('Logo could not be added to PDF', e);
             }

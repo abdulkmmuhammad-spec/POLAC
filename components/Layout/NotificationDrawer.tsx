@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Bell, CheckCircle, AlertTriangle, Settings, FileText,
@@ -73,8 +73,13 @@ const getSeverityBadge = (severity: 'critical' | 'info' | 'system') => {
 
 const formatTime = (timestamp: string): string => {
     const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return 'Unknown time';
+
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
+
+    if (diffMs < 0) return 'Just now';
+
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
@@ -97,6 +102,22 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
 }) => {
     const unreadCount = notifications.filter(n => !n.read).length;
 
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+
+        if (isOpen) {
+            window.addEventListener('keydown', handleKeyDown);
+        }
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isOpen, onClose]);
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -118,6 +139,9 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                         exit={{ x: '100%' }}
                         transition={{ type: 'spring', damping: 28, stiffness: 280 }}
                         className="fixed right-0 top-0 h-full w-full sm:w-[420px] bg-white shadow-2xl z-[70] flex flex-col"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Notifications Drawer"
                     >
                         {/* ── Header Bar ── */}
                         <div className="px-6 py-5 border-b border-slate-100 bg-gradient-to-r from-blue-900 to-blue-800 text-white shrink-0">
@@ -137,6 +161,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                 </div>
                                 <button
                                     onClick={onClose}
+                                    aria-label="Close Notifications"
                                     className="p-2 hover:bg-white/10 rounded-xl transition-colors"
                                 >
                                     <X size={20} />
@@ -209,9 +234,18 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                                     onClick={() => {
                                                         if (!n.read) onMarkRead(n.id);
                                                     }}
-                                                    className={`px-6 py-4 transition-colors cursor-pointer group ${n.read
-                                                            ? 'bg-white hover:bg-slate-50/50'
-                                                            : 'bg-blue-50/30 hover:bg-blue-50/50 border-l-[3px] border-l-blue-500'
+                                                    onKeyDown={(e) => {
+                                                        if (!n.read && (e.key === 'Enter' || e.key === ' ')) {
+                                                            e.preventDefault();
+                                                            onMarkRead(n.id);
+                                                        }
+                                                    }}
+                                                    tabIndex={0}
+                                                    role="button"
+                                                    aria-label={`${n.read ? 'Read' : 'Unread'} notification: ${n.title}`}
+                                                    className={`px-6 py-4 transition-colors cursor-pointer group focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${n.read
+                                                        ? 'bg-white hover:bg-slate-50/50'
+                                                        : 'bg-blue-50/30 hover:bg-blue-50/50 border-l-[3px] border-l-blue-500'
                                                         }`}
                                                 >
                                                     <div className="flex gap-3">
@@ -251,11 +285,13 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                         </div>
 
                         {/* ── Footer ── */}
-                        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-                            <p className="text-[10px] text-center font-bold uppercase tracking-widest text-slate-300">
-                                Showing latest {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
-                            </p>
-                        </div>
+                        {notifications.length > 0 && (
+                            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+                                <p className="text-[10px] text-center font-bold uppercase tracking-widest text-slate-300">
+                                    Showing latest {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
+                                </p>
+                            </div>
+                        )}
                     </motion.div>
                 </>
             )}

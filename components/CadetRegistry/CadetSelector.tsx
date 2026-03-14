@@ -99,12 +99,14 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
                                     <p className="text-sm text-slate-500 font-medium mb-1">
                                         {searchTerm ? `No cadets matching "${searchTerm}"` : `No cadets in Regular Course ${courseNumber} Registry`}
                                     </p>
-                                    <p className="text-[10px] text-slate-400">
-                                        {registry.length === 0 && allCadets.length > 0
-                                            ? `Found ${allCadets.length} cadets in other courses. Your profile may need course update.`
-                                            : `Ensure the cadet is added to the Master Registry for Regular Course ${courseNumber}.`
-                                        }
-                                    </p>
+                                    {!searchTerm && (
+                                        <p className="text-[10px] text-slate-400">
+                                            {registry.length === 0 && allCadets.length > 0
+                                                ? `Found ${allCadets.length} cadets in other courses. Your profile may need course update.`
+                                                : `Ensure the cadet is added to the Master Registry for Regular Course ${courseNumber}.`
+                                            }
+                                        </p>
+                                    )}
                                 </>
                             )}
                         </div>
