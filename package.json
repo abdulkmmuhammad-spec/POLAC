@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2",
+    "bcryptjs": "^3.0.3",
     "framer-motion": "^12.35.0",
     "jspdf": "^4.1.0",
     "jspdf-autotable": "^5.0.7",
@@ -22,6 +23,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.27",

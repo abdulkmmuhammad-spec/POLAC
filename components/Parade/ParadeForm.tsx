@@ -7,6 +7,7 @@ import { dbService } from '../../services/dbService';
 import { CadetSelector } from '../CadetRegistry/CadetSelector';
 import { formatRC } from '../../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
+import { SubmissionPreview } from '../Common/SubmissionPreview';
 
 export const ParadeForm: React.FC = () => {
     const { currentUser } = useAuth();
@@ -26,6 +27,8 @@ export const ParadeForm: React.FC = () => {
     const [tempCadet, setTempCadet] = useState<CadetDetail>({ name: '', squad: '', status: CadetStatus.ABSENT });
     const [cadetDetailsList, setCadetDetailsList] = useState<CadetDetail[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showPreview, setShowPreview] = useState(false);
+    const [previewData, setPreviewData] = useState<any>(null);
 
     // Determine the officer's course number — fall back to activeRC if needed
     const officerCourseNumber = currentUser?.courseNumber
@@ -48,7 +51,7 @@ export const ParadeForm: React.FC = () => {
         setTempCadet({ name: '', squad: '', status: CadetStatus.ABSENT });
     };
 
-    const handleSubmission = async () => {
+    const handleSubmission = () => {
         if (!currentUser) return;
         const total = counts.present + counts.absent + counts.sick + counts.detention +
             counts.pass + counts.suspension + counts.yetToReport;
@@ -65,6 +68,33 @@ export const ParadeForm: React.FC = () => {
             return;
         }
 
+        // Prepare data for preview
+        const data = {
+            officerId: currentUser.id,
+            officerName: currentUser.fullName,
+            courseName: currentUser.courseName || '',
+            yearGroup: currentUser.yearGroup || 1,
+            courseNumber: officerCourseNumber,
+            date: formDate,
+            paradeType: formParadeType,
+            presentCount: counts.present,
+            absentCount: counts.absent,
+            sickCount: counts.sick,
+            detentionCount: counts.detention,
+            passCount: counts.pass,
+            suspensionCount: counts.suspension,
+            yetToReportCount: counts.yetToReport,
+            grandTotal: total,
+            cadets: cadetDetailsList
+        };
+
+        setPreviewData(data);
+        setShowPreview(true);
+    };
+
+    const commitSubmission = async () => {
+        if (!previewData || !currentUser) return;
+
         // ──── Submission Guards ───────────────────────────────────────────────
 
         // 1. Time Window Enforcement (only for "today")
@@ -75,11 +105,13 @@ export const ParadeForm: React.FC = () => {
 
             if (formParadeType === ParadeType.MUSTER && (currentHour < musterStartHour || currentHour >= musterEndHour)) {
                 toast.error(`Morning Muster can only be submitted between ${String(musterStartHour).padStart(2, '0')}:00 and ${String(musterEndHour - 1).padStart(2, '0')}:59.`);
+                setShowPreview(false);
                 return;
             }
 
             if (formParadeType === ParadeType.TATTOO && (currentHour < tattooStartHour)) {
                 toast.error(`Night Tattoo can only be submitted from ${String(tattooStartHour).padStart(2, '0')}:00 onwards.`);
+                setShowPreview(false);
                 return;
             }
         }
@@ -101,27 +133,11 @@ export const ParadeForm: React.FC = () => {
                         : 'Special Parade';
                 toast.error(`A ${label} state has already been submitted for ${formDate}.`);
                 setIsSubmitting(false);
+                setShowPreview(false);
                 return;
             }
 
-            await dbService.saveRecord({
-                officerId: currentUser.id,
-                officerName: currentUser.fullName,
-                courseName: currentUser.courseName || '',
-                yearGroup: currentUser.yearGroup || 1,
-                courseNumber: officerCourseNumber,
-                date: formDate,
-                paradeType: formParadeType,
-                presentCount: counts.present,
-                absentCount: counts.absent,
-                sickCount: counts.sick,
-                detentionCount: counts.detention,
-                passCount: counts.pass,
-                suspensionCount: counts.suspension,
-                yetToReportCount: counts.yetToReport,
-                grandTotal: total,
-                cadets: cadetDetailsList
-            });
+            await dbService.saveRecord(previewData);
 
             setCounts({
                 present: currentUser.totalCadets || 0,
@@ -133,6 +149,8 @@ export const ParadeForm: React.FC = () => {
                 yetToReport: 0
             });
             setCadetDetailsList([]);
+            setShowPreview(false);
+            setPreviewData(null);
             await refreshData();
             toast.success('Parade State submitted successfully!');
         } catch (error) {
@@ -143,7 +161,7 @@ export const ParadeForm: React.FC = () => {
     };
 
     const levelLabel = officerCourseNumber
-        ? `${formatRC(officerCourseNumber)} — Year ${getLevelForCourse(officerCourseNumber)}`
+        ? `${formatRC(officerCourseNumber)} — YEAR ${getLevelForCourse(officerCourseNumber)}`
         : '';
 
     return (
@@ -151,7 +169,7 @@ export const ParadeForm: React.FC = () => {
             <div className="p-6 md:p-8 bg-blue-900 text-white">
                 <h3 className="text-xl font-bold">New Parade Submission</h3>
                 <p className="text-blue-200 text-sm">
-                    Personnel Accountability Form
+                    Cadet Accountability Form
                     {levelLabel && <span className="ml-2 bg-blue-700 px-3 py-0.5 rounded-full text-xs font-bold">{levelLabel}</span>}
                 </p>
             </div>
@@ -185,7 +203,7 @@ export const ParadeForm: React.FC = () => {
                     {/* Primary Status: Present (Auto-calculated) */}
                     <div className={`p-6 rounded-3xl border-2 transition-all shadow-sm ${counts.present < 0 ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'}`}>
                         <label className={`text-xs font-black uppercase tracking-widest mb-2 block ${counts.present < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            Personnel Present (Calculated)
+                            Cadet Present (Calculated)
                         </label>
                         <div className="flex items-baseline gap-2">
                             <span className={`text-4xl font-black ${counts.present < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
@@ -256,7 +274,7 @@ export const ParadeForm: React.FC = () => {
                 </div>
 
                 <div className="pt-6 border-t border-slate-100">
-                    <h4 className="font-bold text-slate-800 mb-4">Nominal Roll (Non-Present Personnel)</h4>
+                    <h4 className="font-bold text-slate-800 mb-4">Nominal Roll (Non-Present Cadets)</h4>
 
                     {/* CADET PREVIEW CARD */}
                     {tempCadet.name && (
@@ -345,7 +363,7 @@ export const ParadeForm: React.FC = () => {
                             ))
                         ) : (
                             <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                                <p className="text-slate-400 text-sm italic">No non-present personnel added yet.</p>
+                                <p className="text-slate-400 text-sm italic">No non-present cadets added yet.</p>
                             </div>
                         )}
                     </div>
@@ -359,6 +377,15 @@ export const ParadeForm: React.FC = () => {
                     {isSubmitting ? <RefreshCcw className="animate-spin" /> : <span>Submit Official Parade State</span>}
                 </button>
             </div>
+
+            <SubmissionPreview
+                isOpen={showPreview}
+                onClose={() => setShowPreview(false)}
+                onConfirm={commitSubmission}
+                title={`Review ${formParadeType} State`}
+                type="parade"
+                data={previewData}
+            />
         </div>
     );
 };

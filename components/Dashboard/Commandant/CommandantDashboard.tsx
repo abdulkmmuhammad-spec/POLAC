@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, Radio, ChevronRight } from 'lucide-react';
+import { Settings, Radio, ChevronRight, Shield } from 'lucide-react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 
 import { Sidebar } from '../../Layout/Sidebar';
@@ -10,6 +10,7 @@ import { DefaulterAnalysis } from './DefaulterAnalysis';
 import { CadetManager } from '../../CadetRegistry/CadetManager';
 import { CommandAnalytics } from './CommandAnalytics';
 import { OfficerManager } from './OfficerManager';
+import { AuditLogView } from '../../Settings/AuditLogView';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
@@ -56,32 +57,34 @@ const ActiveRCSettings: React.FC = () => {
     };
 
     return (
-        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
-            <div className="p-5 border-b bg-blue-900 text-white flex items-center gap-3">
-                <Radio size={18} />
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 border-b bg-blue-900 text-white flex items-center gap-3">
+                <Radio size={16} />
                 <div>
-                    <h3 className="font-bold text-sm">Active Regular Course Setting</h3>
-                    <p className="text-blue-200 text-xs">Controls year level calculation for all cadets</p>
+                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em]">Global Reference RC</h3>
                 </div>
             </div>
             <div className="p-6">
-                <div className="flex items-start gap-4 mb-5">
+                <div className="flex items-start gap-4 mb-6">
                     <div className="flex-1">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Current Active Regular Course</p>
-                        <p className="text-3xl font-black text-blue-700">Regular Course {activeRC}</p>
-                        <p className="text-[11px] text-slate-500 mt-1">
-                            This is the newest/highest course. All year levels are calculated from this value.
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Current Active Configuration</p>
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-3xl font-black text-blue-900 font-mono tracking-tighter">{activeRC}</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase">Regular Course</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-2 font-bold uppercase tracking-tight">
+                            Master value for dynamic year-group calculations across academy sectors.
                         </p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                    <div className="space-y-1 flex-1">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">New Active Regular Course</label>
+                <div className="flex items-center gap-4">
+                    <div className="space-y-1.5 flex-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Update Parameter</label>
                         <input
                             type="number"
                             min={1}
-                            className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-blue-500 outline-none font-bold text-slate-800 text-lg"
+                            className="w-full px-4 py-2.5 rounded-md border border-slate-200 focus:ring-1 focus:ring-blue-900 outline-none font-black text-slate-900 text-lg font-mono bg-slate-50/50"
                             value={newRC}
                             onChange={(e) => setNewRC(parseInt(e.target.value) || activeRC)}
                         />
@@ -89,13 +92,13 @@ const ActiveRCSettings: React.FC = () => {
                     <button
                         onClick={handleSave}
                         disabled={isSaving || newRC === activeRC}
-                        className={`mt-5 flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all shadow-sm ${saved
+                        className={`mt-4 flex items-center justify-center gap-2 px-6 h-[46px] rounded-md font-black text-[10px] uppercase tracking-widest transition-all shadow-sm ${saved
                             ? 'bg-emerald-600 text-white'
-                            : 'bg-blue-700 hover:bg-blue-800 text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                            : 'bg-blue-900 hover:bg-blue-800 text-white disabled:opacity-20 disabled:grayscale'
                             }`}
                     >
-                        {isSaving ? 'Saving...' : saved ? '✓ Saved!' : (
-                            <>Update <ChevronRight size={16} /></>
+                        {isSaving ? 'Processing...' : saved ? 'Committed' : (
+                            <>Update <ChevronRight size={14} /></>
                         )}
                     </button>
                 </div>
@@ -142,39 +145,38 @@ const SubmissionTimeSettings: React.FC = () => {
     };
 
     return (
-        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden mt-6 text-slate-800">
-            <div className="p-5 border-b bg-slate-800 text-white flex items-center gap-3">
-                <Settings size={18} />
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden mt-6 text-slate-800">
+            <div className="p-4 border-b bg-blue-900 text-white flex items-center gap-3">
+                <Settings size={16} />
                 <div>
-                    <h3 className="font-bold text-sm">Parade Submission Time Windows</h3>
-                    <p className="text-slate-300 text-xs">Configure when officers can submit records</p>
+                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em]">Reporting Windows</h3>
                 </div>
             </div>
             <div className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Morning Muster Window</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Muster State Window</label>
                         <div className="flex items-center gap-3">
                             <div className="flex-1">
-                                <p className="text-[10px] text-slate-500 mb-1">Start Hour (24h)</p>
+                                <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Start (0-23)</p>
                                 <input
                                     type="number"
                                     min={0}
                                     max={23}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-blue-500 outline-none font-bold"
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-blue-900 outline-none font-mono font-bold text-sm"
                                     value={submissionSettings.musterStartHour}
                                     onChange={(e) => handleUpdate('muster_start_hour', parseInt(e.target.value) || 0)}
                                     disabled={isSaving === 'muster_start_hour'}
                                 />
                             </div>
-                            <div className="pt-4 text-slate-300">to</div>
+                            <div className="pt-4 text-slate-200 font-black">—</div>
                             <div className="flex-1">
-                                <p className="text-[10px] text-slate-500 mb-1">End Hour (24h)</p>
+                                <p className="text-[8px] font-black text-slate-400 uppercase mb-1">End (0-23)</p>
                                 <input
                                     type="number"
                                     min={0}
                                     max={23}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-blue-500 outline-none font-bold"
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-blue-900 outline-none font-mono font-bold text-sm"
                                     value={submissionSettings.musterEndHour}
                                     onChange={(e) => handleUpdate('muster_end_hour', parseInt(e.target.value) || 0)}
                                     disabled={isSaving === 'muster_end_hour'}
@@ -183,33 +185,74 @@ const SubmissionTimeSettings: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Night Tattoo Window</label>
+                    <div className="space-y-4">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Tattoo Phase Gate</label>
                         <div className="flex items-center gap-3">
-                            <div className="flex-1">
-                                <p className="text-[10px] text-slate-500 mb-1">Start Hour (24h)</p>
+                            <div className="flex-2">
+                                <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Entry Threshold (24H)</p>
                                 <input
                                     type="number"
                                     min={0}
                                     max={23}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-blue-500 outline-none font-bold"
+                                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-blue-900 outline-none font-mono font-bold text-sm"
                                     value={submissionSettings.tattooStartHour}
                                     onChange={(e) => handleUpdate('tattoo_start_hour', parseInt(e.target.value) || 0)}
                                     disabled={isSaving === 'tattoo_start_hour'}
                                 />
                             </div>
-                            <div className="pt-4 text-slate-300">onwards</div>
-                            <div className="flex-1" />
+                            <div className="pt-4 flex-1">
+                                <span className="text-[9px] font-mono font-black text-slate-300 uppercase tracking-widest ml-2">Open End</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
-                    <p className="text-xs text-amber-700 leading-relaxed font-medium">
-                        <strong>Note:</strong> These settings take effect immediately for all officers across the academy.
-                        Ensure the windows provide sufficient time for accurate reporting.
+                <div className="p-4 bg-blue-50/50 rounded-md border border-blue-100 flex items-start gap-3">
+                    <Shield size={14} className="text-blue-900 mt-0.5 shrink-0" />
+                    <p className="text-[10px] text-blue-900/80 leading-relaxed font-bold uppercase tracking-tight">
+                        Operational Note: Changes take immediate effect. Ensure reporting windows align with academy daily routine orders to avoid service lockout.
                     </p>
                 </div>
+            </div>
+        </div>
+    );
+};
+
+const SettingsContainer: React.FC = () => {
+    const [activeTab, setActiveTab] = useState<'general' | 'audit'>('general');
+
+    return (
+        <div className="space-y-8">
+            <div className="flex p-1 bg-slate-100 rounded-xl w-fit border border-slate-200 shadow-inner">
+                <button
+                    onClick={() => setActiveTab('general')}
+                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'general'
+                            ? 'bg-blue-900 text-white shadow-md'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                >
+                    Administrative Parameters
+                </button>
+                <button
+                    onClick={() => setActiveTab('audit')}
+                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'audit'
+                            ? 'bg-blue-900 text-white shadow-md'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                >
+                    Forensic Archive
+                </button>
+            </div>
+
+            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                {activeTab === 'general' ? (
+                    <div className="max-w-2xl">
+                        <ActiveRCSettings />
+                        <SubmissionTimeSettings />
+                    </div>
+                ) : (
+                    <AuditLogView />
+                )}
             </div>
         </div>
     );
@@ -225,7 +268,7 @@ export const CommandantDashboard: React.FC = () => {
         if (path.includes('audit')) return 'Attendance Audit Ledger';
         if (path.includes('cadet_registry')) return 'Master Cadet Registry';
         if (path.includes('analytics')) return 'Advanced Command Analytics';
-        if (path.includes('settings')) return 'System Settings';
+        if (path.includes('settings')) return 'System Settings & Forensics';
         return 'Command Overview';
     };
 
@@ -251,9 +294,10 @@ export const CommandantDashboard: React.FC = () => {
                             <Route path="cadet_registry" element={<CadetManager />} />
                             <Route path="analytics" element={<CommandAnalytics />} />
                             <Route path="settings" element={
-                                <div className="max-w-2xl mx-auto py-8">
-                                    <ActiveRCSettings />
-                                    <SubmissionTimeSettings />
+                                <div className="py-8">
+                                    <div className="max-w-4xl mx-auto px-4">
+                                        <SettingsContainer />
+                                    </div>
                                 </div>
                             } />
                         </Routes>

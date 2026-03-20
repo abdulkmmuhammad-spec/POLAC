@@ -4,6 +4,10 @@ import { dbService } from '../../services/dbService';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'react-hot-toast';
+import { SubmissionPreview } from '../Common/SubmissionPreview';
+import { calculateCurrentLevel } from '../../utils/rcHelpers';
+import { useAuth } from '../../context/AuthContext';
+import { Edit3, Save, ShieldAlert } from 'lucide-react';
 
 const logo = '/logo.png';
 
@@ -14,10 +18,24 @@ interface CadetRecordModalProps {
 }
 
 export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activeRC, onClose }) => {
+    const { currentUser } = useAuth();
     const [stats, setStats] = useState({ absent: 0, sick: 0, detention: 0, lastEvent: null as any });
     const [isLoading, setIsLoading] = useState(true);
+    const [isEditing, setIsEditing] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+
+    // Editable Fields
+    const [editName, setEditName] = useState(cadet.name);
+    const [editSquad, setEditSquad] = useState(cadet.squad);
+    const [editCourse, setEditCourse] = useState(cadet.course_number);
 
     const level = cadet.course_number ? (activeRC - cadet.course_number + 1) : cadet.year_group;
+
+    useEffect(() => {
+        setEditName(cadet.name);
+        setEditSquad(cadet.squad);
+        setEditCourse(cadet.course_number);
+    }, [cadet.id, cadet.name, cadet.squad, cadet.course_number]);
 
     useEffect(() => {
         const fetchStats = async () => {
@@ -56,6 +74,18 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
         return "MEDICAL REVIEW";
     };
 
+    // Year-weighted attendance thresholds (confirmed: EXEMPLARY ≤ yearLevel × 6.5)
+    const getAttendanceAssessment = (absences: number, yearLevel: number) => {
+        const exemplaryLimit = Math.round(yearLevel * 6.5);  // Year4 → 26
+        const satisfactoryLimit = Math.round(yearLevel * 15);  // Year4 → 60
+        const underReviewLimit = Math.round(yearLevel * 26);  // Year4 → 104
+
+        if (absences <= exemplaryLimit) return { label: 'EXEMPLARY', color: 'text-emerald-600' };
+        if (absences <= satisfactoryLimit) return { label: 'SATISFACTORY', color: 'text-blue-600' };
+        if (absences <= underReviewLimit) return { label: 'UNDER REVIEW', color: 'text-amber-600' };
+        return { label: 'ACTION REQUIRED', color: 'text-rose-700' };
+    };
+
     const currentScore = calculateStandingScore(stats.absent, stats.detention);
 
     const getStatusInfo = (score: number) => {
@@ -79,136 +109,203 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
         }
 
         const punches = [];
-        if (currentStats.absent > 8) punches.push("Persistent unauthorized absences are a primary concern.");
+        const exemplaryLimit = Math.round(level * 6.5);
+        const satisfactoryLimit = Math.round(level * 15);
+        if (currentStats.absent > satisfactoryLimit) punches.push("Persistent unauthorized absences are a primary concern.");
+        if (currentStats.absent > exemplaryLimit && currentStats.absent <= satisfactoryLimit) punches.push("Absence count is trending above exemplary thresholds — review is advised.");
         if (currentStats.detention > 3) punches.push("Frequent disciplinary detentions indicate a failure to adhere to command hierarchy.");
 
         return punches.length > 0 ? `${narrative} ${punches.join(" ")}` : narrative;
     };
 
-    const exportToPDF = () => {
+    const exportToPDF = async () => {
         try {
             const doc = new jsPDF();
             const status = getStatusInfo(currentScore);
             const cadetName = cadet?.name || 'Unknown Cadet';
+            const generateAuditId = () => {
+                try {
+                    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                        return crypto.randomUUID().toUpperCase();
+                    }
+                    if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
+                        return window.crypto.randomUUID().toUpperCase();
+                    }
+                    return Math.random().toString(36).substring(2, 15).toUpperCase() +
+                        Math.random().toString(36).substring(2, 15).toUpperCase();
+                } catch (e) {
+                    return 'CR-' + Date.now().toString(36).toUpperCase();
+                }
+            };
 
-            // Formal Border
-            doc.setDrawColor(20, 30, 60);
-            doc.setLineWidth(0.5);
-            doc.rect(10, 10, 190, 277);
+            const auditId = generateAuditId();
 
-            // Header - Blue Bar
-            doc.setFillColor(30, 58, 138); // blue-900
-            doc.rect(10, 10, 190, 40, 'F');
+            // 1. Formal Command Border
+            doc.setDrawColor(30, 58, 138); // Blue 900
+            doc.setLineWidth(1);
+            doc.rect(5, 5, 200, 287);
 
-            // Add Logo
+            // 2. High-Authority Header (35% Upscale)
+            doc.setFillColor(30, 58, 138);
+            doc.rect(10, 10, 190, 45, 'F');
+
             try {
-                doc.addImage(logo, 'PNG', 15, 15, 20, 20);
+                doc.addImage(logo, 'PNG', 15, 17, 24, 24);
             } catch (e) {
-                console.warn('Logo could not be added to PDF', e);
+                console.warn('Logo missing');
             }
 
-            doc.setFontSize(22);
+            doc.setFontSize(24.3); // 18 * 1.35
             doc.setTextColor(255);
             doc.setFont('helvetica', 'bold');
-            doc.text('NIGERIAN POLICE ACADEMY', 110, 25, { align: 'center' });
+            doc.text('NIGERIAN POLICE ACADEMY', 110, 28, { align: 'center' });
 
-            doc.setFontSize(10);
+            doc.setFontSize(13.5); // 10 * 1.35
             doc.setFont('helvetica', 'normal');
-            doc.text('OFFICE OF THE COMMANDANT • CADET PERFORMANCE DOSSIER', 110, 33, { align: 'center' });
+            doc.text('OFFICE OF THE COMMANDANT • OFFICIAL PERFORMANCE DOSSIER', 110, 38, { align: 'center' });
+            doc.setFontSize(10.8);
+            doc.text(`AUDIT_ID: ${auditId} | STATUS: AUTHORITATIVE_UNCLASSIFIED`, 110, 46, { align: 'center' });
 
-            // Identification Section
+            // 3. Identification Section
             doc.setTextColor(0);
-            doc.setFontSize(11);
+            doc.setFontSize(14.8); // 11 * 1.35
             doc.setFont('helvetica', 'bold');
-            doc.text('CADET IDENTIFICATION', 20, 65);
-            doc.line(20, 67, 70, 67);
+            doc.text('I. CADET IDENTIFICATION', 20, 75);
+            doc.line(20, 77, 90, 77);
 
+            doc.setFontSize(12);
             doc.setFont('helvetica', 'normal');
-            doc.text(`Full Name: ${cadetName.toUpperCase()}`, 20, 75);
-            doc.text(`Regular Course: RC ${cadet.course_number || 'N/A'}`, 20, 83);
-            doc.text(`Year Level: Year ${level}`, 20, 91);
-            doc.text(`Assigned Squad: ${cadet.squad || 'N/A'}`, 20, 99);
+            doc.text(`NAME: ${cadetName.toUpperCase()}`, 25, 88);
+            doc.text(`COURSE: REGULAR COURSE ${cadet.course_number || 'N/A'}`, 25, 96);
+            doc.text(`LEVEL: YEAR ${level}`, 25, 104);
+            doc.text(`SQUAD: ${cadet.squad?.toUpperCase() || 'N/A'}`, 25, 112);
 
-            // Standing Label
+            // Standing Module (Visual)
+            const fScore = calculateFitness(stats.sick || 0, level);
             doc.setFont('helvetica', 'bold');
-            doc.text('CURRENT STANDING:', 130, 75);
-            doc.setFontSize(14);
-            doc.text(status.label, 130, 83);
+            doc.text('INSTITUTIONAL STANDING:', 130, 88);
+            doc.setFontSize(18.9); // 14 * 1.35
+            if (status.bg === 'bg-rose-600') doc.setTextColor(159, 18, 57);
+            else doc.setTextColor(30, 58, 138);
+            doc.text(status.label, 130, 98);
 
-            // Draw Progress Bar Background
-            doc.setFillColor(224, 224, 224); // Light Grey
-            doc.roundedRect(20, 115, 170, 5, 2, 2, 'F');
+            // Bar
+            doc.setFillColor(241, 245, 249);
+            doc.roundedRect(20, 125, 170, 6, 1, 1, 'F');
+            if (currentScore >= 89) doc.setFillColor(5, 150, 105);
+            else if (currentScore >= 70) doc.setFillColor(37, 99, 235);
+            else if (currentScore >= 50) doc.setFillColor(217, 119, 6);
+            else doc.setFillColor(185, 28, 28);
+            doc.roundedRect(20, 125, (currentScore / 100) * 170, 6, 1, 1, 'F');
 
-            // Draw Fill based on score
-            if (currentScore >= 89) doc.setFillColor(16, 185, 129);      // Emerald
-            else if (currentScore >= 70) doc.setFillColor(37, 99, 235); // Blue
-            else if (currentScore >= 50) doc.setFillColor(245, 158, 11); // Amber
-            else doc.setFillColor(220, 38, 38);                  // Red
-
-            const barWidth = (currentScore / 100) * 170;
-            doc.roundedRect(20, 115, barWidth, 5, 2, 2, 'F');
-
-            // Add text label
-            doc.setFontSize(10);
-            doc.setTextColor(80, 80, 80);
-            doc.text(`Institutional Standing: ${currentScore.toFixed(1)}% (${status.label})`, 20, 110);
-
-            // Stats Table
+            // 4. Detailed Accountability Table (NIL Rendering)
             autoTable(doc, {
-                startY: 130, // Adjust this Y-value to prevent overlapping with the bar
-                head: [['Accountability Category', 'Metric', 'Assessment']],
+                startY: 145,
+                head: [['Accountability Logic', 'Metric Index', 'Command Assessment']],
                 body: [
-                    ['Duty Attendance', `${(100 - (stats.absent * 0.5)).toFixed(1)}%`, stats.absent === 0 ? 'Exemplary' : 'Needs Attention'],
-                    ['Fitness Index', `${calculateFitness(stats.sick || 0, level).toFixed(1)}%`, getFitnessAssessment(calculateFitness(stats.sick || 0, level))],
-                    ['Conduct & Discipline', stats.detention > 0 ? `${stats.detention} Infractions` : 'NIL', stats.detention === 0 ? 'Distinguished' : 'Action Required']
+                    ['Duty Attendance', `${attendanceScore}%`, `${getAttendanceAssessment(stats.absent, level).label} (${stats.absent} ABSENCES)`],
+                    ['Fitness Index (Weighted)', `${fitnessScore.toFixed(1)}%`, getFitnessAssessment(fitnessScore)],
+                    ['Disciplinary Record', stats.detention > 0 ? `${stats.detention} INFRACTIONS` : 'NIL (DISTINGUISHED)', stats.detention === 0 ? 'NIL_OFFENSES' : 'ACTION_REQUIRED']
                 ],
-                headStyles: { fillColor: [30, 58, 138] }, // Navy Blue to match Academy branding
-                theme: 'striped',
-                margin: { left: 20, right: 20 }
+                headStyles: { fillColor: [30, 58, 138], fontSize: 11, fontStyle: 'bold' },
+                styles: { fontSize: 10.8, cellPadding: 6 },
+                alternateRowStyles: { fillColor: [248, 250, 252] }
             });
 
-            const currentY = (doc as any).lastAutoTable.finalY + 15;
+            const finalY = (doc as any).lastAutoTable.finalY + 20;
 
-            // Last Event
-            if (stats.lastEvent) {
-                doc.setFontSize(11);
-                doc.setFont('helvetica', 'bold');
-                doc.text('MOST RECENT INCIDENT:', 20, currentY);
-                doc.setFont('helvetica', 'normal');
-                doc.text(`${stats.lastEvent.status.toUpperCase()} recorded on ${new Date(stats.lastEvent.date).toLocaleDateString()} (${stats.lastEvent.type})`, 20, currentY + 8);
-            }
+            // 5. Commandant's Assessment (Serif for Gravity)
+            doc.setFont('times', 'bold');
+            doc.setFontSize(14.8);
+            doc.setTextColor(30, 58, 138);
+            doc.text("II. COMMANDANT'S ASSESSMENT", 20, finalY);
 
-            // Command Assessment
-            const assessmentY = stats.lastEvent ? currentY + 25 : currentY + 10;
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text("COMMANDANT'S ASSESSMENT:", 20, assessmentY);
             doc.setFont('times', 'italic');
-            doc.setFontSize(11);
-            const assessmentText = getCommandantAssessment(currentScore, stats);
-            const splitAssessment = doc.splitTextToSize(assessmentText, 170);
-            doc.text(splitAssessment, 20, assessmentY + 8);
+            doc.setFontSize(13);
+            doc.setTextColor(0);
+            const assessment = getCommandantAssessment(currentScore, stats);
+            const splitContent = doc.splitTextToSize(`"${assessment}"`, 170);
+            doc.text(splitContent, 20, finalY + 10);
 
-            // Signature
-            doc.setFontSize(10);
+            // 6. Secure Sign-off
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
             doc.text('__________________________', 140, 260);
-            doc.text('Commandant Signature', 140, 265);
-            doc.text('Security ID: ' + Math.random().toString(36).substring(7).toUpperCase(), 140, 271);
+            doc.text('OFFICE OF THE COMMANDANT', 140, 266);
+            doc.setFontSize(9);
+            doc.setTextColor(150);
+            doc.text(`VALIDATED SECURE_ID: ${auditId}`, 140, 272);
 
             // Footer
-            doc.setFontSize(8);
-            doc.setTextColor(150);
-            doc.text(`CONFIDENTIAL DOCUMENT • GENERATED ${new Date().toLocaleString()} • POLAC CMS V2`, 105, 282, { align: 'center' });
+            doc.setFontSize(9);
+            doc.text(`CONFIDENTIAL CADET RECORD • GENERATED: ${new Date().toLocaleString()} • NPA_CMS_V2_AUDIT`, 105, 282, { align: 'center' });
 
-            doc.save(`${cadetName.replace(/\s+/g, '_')}_Dossier.pdf`);
-            toast.success('Professional Dossier Exported');
+            // Traceability Notification
+            await dbService.addNotification({
+                type: 'system',
+                title: 'Official Dossier Produced',
+                content: `Commandant Dossier generated for Cadet ${cadetName} (Audit ID: ${auditId})`,
+                timestamp: new Date().toISOString(),
+                read: false,
+                officerName: 'COMMANDANT',
+                yearGroup: 5,
+                courseNumber: cadet.course_number || activeRC
+            });
+
+            doc.save(`${cadetName.replace(/\s+/g, '_')}_AUTHORITATIVE_DOSSIER.pdf`);
+            toast.success('Dossier Generated with Search ID: ' + auditId);
         } catch (err) {
-            console.error('PDF Export Error:', err);
-            toast.error('Failed to export PDF');
+            console.error(err);
+            toast.error('Dossier Generation Failed');
         }
     };
 
 
+
+    const handleSave = async () => {
+        // Validation Layer
+        const trimmedName = editName?.trim();
+        const trimmedSquad = editSquad?.trim();
+        const parsedCourse = parseInt(String(editCourse), 10);
+
+        if (!trimmedName) {
+            toast.error('Name cannot be empty');
+            return;
+        }
+
+        if (isNaN(parsedCourse) || parsedCourse < 1 || parsedCourse > 20) {
+            toast.error('RC Number must be between 1 and 20');
+            return;
+        }
+
+        if (!trimmedSquad) {
+            toast.error('Squad assignment is required');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const updates = {
+                name: trimmedName,
+                squad: trimmedSquad,
+                course_number: parsedCourse,
+                year_group: calculateCurrentLevel(parsedCourse, activeRC)
+            };
+
+            const { error } = await dbService.updateCadetRegistry(cadet.id, updates, currentUser!);
+            if (error) throw error;
+
+            toast.success('Master Record updated and audit-logged.');
+            setIsEditing(false);
+            setShowConfirm(false);
+            // The CadetManager will refresh when we close/modify
+        } catch (err) {
+            console.error('Save failed:', err);
+            toast.error('Failed to update Master Registry.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const standing = getStatusInfo(currentScore);
     const attendanceScore = (100 - (stats.absent * 0.5)).toFixed(1);
@@ -228,13 +325,58 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                                     <img src={logo} alt="Academy Logo" className="w-5 h-5 sm:w-6 sm:h-6 object-contain" />
                                 </div>
                             </div>
-                            <div className="space-y-1">
-                                <h2 className="text-xl sm:text-2xl font-black tracking-tight">{cadet.name}</h2>
-                                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 sm:gap-3">
-                                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Regular Course {cadet.course_number}</span>
-                                    <span className="hidden sm:inline-block w-1 h-1 bg-slate-700 rounded-full"></span>
-                                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Squad {cadet.squad}</span>
-                                </div>
+                            <div className="space-y-1 w-full">
+                                {isEditing ? (
+                                    <div className="space-y-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700 animate-in fade-in slide-in-from-top-2">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <ShieldAlert size={12} className="text-amber-500" />
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-amber-500">Administrative Override Mode</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                            <div className="sm:col-span-2">
+                                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Full Name</label>
+                                                <input
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none uppercase"
+                                                    value={editName}
+                                                    onChange={e => setEditName(e.target.value)}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">RC Number</label>
+                                                <input
+                                                    type="number"
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs font-mono font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                                                    value={editCourse || ''}
+                                                    onChange={e => {
+                                                        const val = e.target.value;
+                                                        if (val === '') {
+                                                            setEditCourse(null);
+                                                        } else {
+                                                            setEditCourse(parseInt(val, 10));
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Assigned Squad</label>
+                                                <input
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none uppercase"
+                                                    value={editSquad}
+                                                    onChange={e => setEditSquad(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <h2 className="text-xl sm:text-2xl font-black tracking-tight">{cadet.name}</h2>
+                                        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 sm:gap-3">
+                                            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Regular Course {cadet.course_number}</span>
+                                            <span className="hidden sm:inline-block w-1 h-1 bg-slate-700 rounded-full"></span>
+                                            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Squad {cadet.squad}</span>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                         <button onClick={onClose} className="absolute top-0 right-0 sm:relative p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
@@ -288,8 +430,8 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                                             <tr className="bg-white">
                                                 <td className="p-4 font-medium text-slate-600">Duty Attendance</td>
                                                 <td className="p-4 font-mono">{attendanceScore}%</td>
-                                                <td className={`p-4 font-bold ${stats.absent === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                                    {stats.absent === 0 ? 'EXEMPLARY' : 'NEEDS ATTENTION'}
+                                                <td className={`p-4 font-bold ${getAttendanceAssessment(stats.absent, level).color}`}>
+                                                    {getAttendanceAssessment(stats.absent, level).label}
                                                 </td>
                                             </tr>
                                             <tr className="bg-slate-50/50">
@@ -355,17 +497,56 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                 </div>
 
                 {/* Secure Actions */}
-                <div className="p-4 sm:p-8 bg-slate-50 border-t border-slate-200 flex items-center gap-4 shrink-0">
+                <div className="p-4 sm:p-8 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center gap-4 shrink-0">
                     <button
                         onClick={exportToPDF}
-                        disabled={isLoading}
-                        className="flex-1 bg-[#0f172a] hover:bg-slate-800 text-white font-black py-4 sm:py-5 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-2 sm:gap-3 group active:scale-[0.98] disabled:opacity-50"
+                        disabled={isLoading || isEditing}
+                        className="flex-1 w-full bg-[#0f172a] hover:bg-slate-800 text-white font-black py-4 sm:py-5 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-2 sm:gap-3 group active:scale-[0.98] disabled:opacity-50"
                     >
                         <FileText size={18} className="sm:w-5 sm:h-5 group-hover:translate-y-[-2px] transition-transform" />
                         <span className="text-xs sm:text-sm uppercase tracking-widest leading-tight text-center">Generate<span className="hidden sm:inline"> Official</span> Dossier</span>
                     </button>
 
+                    <button
+                        onClick={() => isEditing ? setShowConfirm(true) : setIsEditing(true)}
+                        disabled={isLoading}
+                        className={`flex-1 w-full font-black py-4 sm:py-5 rounded-2xl transition-all border-2 flex items-center justify-center gap-2 sm:gap-3 group active:scale-[0.98] ${isEditing
+                            ? 'bg-amber-500 border-amber-600 text-white hover:bg-amber-600'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                    >
+                        {isEditing ? <Save size={18} /> : <Edit3 size={18} />}
+                        <span className="text-xs sm:text-sm uppercase tracking-widest leading-tight text-center">
+                            {isEditing ? 'Commit Changes' : 'Administrative Edit'}
+                        </span>
+                    </button>
+
+                    {isEditing && (
+                        <button
+                            onClick={() => setIsEditing(false)}
+                            className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-rose-600 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    )}
                 </div>
+
+                <SubmissionPreview
+                    isOpen={showConfirm}
+                    onClose={() => setShowConfirm(false)}
+                    onConfirm={handleSave}
+                    title="Confirm Master Registry Edit"
+                    type="system"
+                    data={{
+                        officer: 'COMMANDANT',
+                        action: 'MASTER_RECORD_STABILIZATION',
+                        changes: [
+                            { field: 'Name', from: cadet.name, to: editName },
+                            { field: 'Squad', from: cadet.squad, to: editSquad },
+                            { field: 'RC', from: cadet.course_number, to: editCourse }
+                        ].filter(c => c.from !== c.to)
+                    }}
+                />
             </div>
         </div>
     );

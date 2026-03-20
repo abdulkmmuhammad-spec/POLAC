@@ -7,7 +7,8 @@ import {
     LogOut,
     Users,
     Activity,
-    X
+    X,
+    ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -22,7 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     const navItems = [
         { path: '/commandant', icon: LayoutDashboard, label: 'Overview', end: true },
         { path: '/commandant/audit', icon: FileText, label: 'Attendance Audit' },
-        { path: '/commandant/cadet_registry', icon: Users, label: 'Master Registry' },
+        { path: '/commandant/cadet_registry', icon: Users, label: 'Cadet Registry' },
         { path: '/commandant/analytics', icon: Activity, label: 'Command Analytics' },
     ];
 
@@ -31,30 +32,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             {/* Mobile Overlay */}
             {isOpen && (
                 <div
-                    className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 md:hidden transition-opacity animate-in fade-in"
+                    className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-40 md:hidden transition-opacity animate-in fade-in"
                     onClick={onClose}
                 />
             )}
 
             <div className={`
-                fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out
+                fixed inset-y-0 left-0 z-50 w-64 bg-blue-900/95 backdrop-blur-xl border-r border-white/10 flex flex-col h-full transform transition-transform duration-300 ease-in-out
                 ${isOpen ? 'translate-x-0' : '-translate-x-full'}
                 md:relative md:translate-x-0
             `}>
-                <div className="p-6 border-b flex items-center justify-between">
+                {/* Tactical Header */}
+                <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/10">
                     <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden border border-slate-200">
-                            <img src="/logo.png" alt="POLAC Logo" className="w-full h-full object-contain" />
+                        <div className="w-8 h-8 bg-blue-500/10 rounded flex items-center justify-center border border-blue-400/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
+                            <Shield size={18} className="text-blue-400" />
                         </div>
-                        <h2 className="font-bold text-blue-900 tracking-tight text-lg">POLAC CMS</h2>
+                        <h2 className="font-black text-white tracking-tighter text-lg uppercase">
+                            POLAC <span className="text-blue-400">CMD</span>
+                        </h2>
                     </div>
                     {onClose && (
-                        <button onClick={onClose} className="p-2 md:hidden text-slate-400 hover:text-slate-600">
+                        <button onClick={onClose} className="p-2 md:hidden text-white/40 hover:text-white">
                             <X size={20} />
                         </button>
                     )}
                 </div>
-                <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+
+                {/* Navigation Links */}
+                <nav className="flex-1 p-4 space-y-1 overflow-y-auto mt-2">
                     {navItems.map(item => (
                         <NavLink
                             key={item.path}
@@ -62,22 +68,37 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                             end={item.end}
                             onClick={onClose}
                             className={({ isActive }) =>
-                                `w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100'}`
+                                `w-full flex items-center space-x-3 px-4 py-3 rounded-md transition-all duration-200 border border-transparent ${isActive
+                                    ? 'bg-white/10 text-white border-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
+                                    : 'text-blue-100/60 hover:text-white hover:bg-white/5 hover:border-white/5'}`
                             }
                         >
-                            <item.icon size={20} />
-                            <span className="font-medium text-sm">{item.label}</span>
+                            <item.icon size={18} className="shrink-0" />
+                            <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>
                         </NavLink>
                     ))}
                 </nav>
-                <div className="p-4 border-t">
-                    <button
-                        onClick={logout}
-                        className="w-full flex items-center space-x-3 px-4 py-3 text-slate-500 hover:bg-red-50 hover:text-red-600 rounded-xl transition-all group"
-                    >
-                        <LogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
-                        <span className="font-medium">Sign Out</span>
-                    </button>
+
+                {/* System Status & Sign Out */}
+                <div className="mt-auto border-t border-white/5">
+                    <div className="p-4 bg-black/20 flex items-center justify-between border-b border-white/5">
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                            <span className="text-[8px] font-mono font-bold text-emerald-500/80 uppercase tracking-widest">
+                                System: Active
+                            </span>
+                        </div>
+                        <span className="text-[8px] font-mono text-white/20">V2.4.0</span>
+                    </div>
+                    <div className="p-4">
+                        <button
+                            onClick={logout}
+                            className="w-full flex items-center space-x-3 px-4 py-3 text-blue-100/40 hover:text-rose-400 hover:bg-rose-500/5 rounded-md transition-all group"
+                        >
+                            <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
+                            <span className="text-[10px] font-black uppercase tracking-widest">Secure Sign Out</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </>

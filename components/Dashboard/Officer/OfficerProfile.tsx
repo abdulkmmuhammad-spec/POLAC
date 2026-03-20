@@ -37,7 +37,7 @@ export const OfficerProfile: React.FC = () => {
                     <Info className="text-blue-900 mt-1" size={20} />
                     <div>
                         <h4 className="text-sm font-bold text-blue-900 uppercase tracking-wide">Command Directive</h4>
-                        <p className="text-sm text-blue-800/80 italic font-medium">"Precision in personnel accountability is the hallmark of discipline. Ensure absolute accuracy in your daily returns. Errors reflect poorly on command capability and will not be tolerated. - Office of the Commandant"</p>
+                        <p className="text-sm text-blue-800/80 italic font-medium">"Precision in cadet accountability is the hallmark of discipline. Ensure absolute accuracy in your daily returns. Errors reflect poorly on command capability and will not be tolerated. - Office of the Commandant"</p>
                     </div>
                 </div>
             </div>
@@ -63,7 +63,7 @@ export const OfficerProfile: React.FC = () => {
                         )}
                         {yearLevel && (
                             <span className="bg-slate-100 text-slate-700 text-xs font-bold px-3 py-1 rounded-full">
-                                Year {yearLevel}
+                                YEAR {yearLevel}
                             </span>
                         )}
                     </div>

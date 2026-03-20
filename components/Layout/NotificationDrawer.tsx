@@ -15,16 +15,17 @@ interface NotificationDrawerProps {
     onClearAll: () => void;
 }
 
-// ─── Severity Inference ──────────────────────────────────────────────
-// Derives a severity/category from notification data since the existing
-// table uses 'parade_submission' and 'profile_update' as types.
 const inferSeverity = (n: Notification): 'critical' | 'info' | 'system' => {
-    if (n.type === 'profile_update') return 'system';
-
-    // Check content for high-absence keywords
+    // Audit logs are now in a separate table. We suppress "Modified" noise 
+    // and elevate actual "Alerts".
+    const type = n.type?.toLowerCase() || '';
     const content = n.content?.toLowerCase() || '';
+
+    if (type === 'settings_change' || type === 'profile_update') return 'system';
+
+    // Actionable Intel Elevation
     if (content.includes('absent') && content.includes('high')) return 'critical';
-    if (content.includes('critical') || content.includes('alert')) return 'critical';
+    if (content.includes('nil') || content.includes('detention') || content.includes('critical')) return 'critical';
 
     return 'info';
 };
@@ -216,69 +217,76 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                             All caught up!
                                         </p>
                                         <p className="text-xs text-slate-300 font-medium mt-1 text-center">
-                                            Your command activity log is crystal clear.<br />
-                                            New alerts will appear here in real-time.
+                                            Your command activity log is focused on Actionable Intel.<br />
+                                            Administrative logs are maintained in the Forensic Archive.
                                         </p>
                                     </motion.div>
                                 ) : (
                                     <div className="divide-y divide-slate-50">
-                                        {notifications.map((n, idx) => {
-                                            const severity = inferSeverity(n);
-                                            return (
-                                                <motion.div
-                                                    key={n.id}
-                                                    initial={{ opacity: 0, x: 20 }}
-                                                    animate={{ opacity: 1, x: 0 }}
-                                                    exit={{ opacity: 0, x: -20, height: 0 }}
-                                                    transition={{ delay: idx * 0.03 }}
-                                                    onClick={() => {
-                                                        if (!n.read) onMarkRead(n.id);
-                                                    }}
-                                                    onKeyDown={(e) => {
-                                                        if (!n.read && (e.key === 'Enter' || e.key === ' ')) {
-                                                            e.preventDefault();
-                                                            onMarkRead(n.id);
-                                                        }
-                                                    }}
-                                                    tabIndex={0}
-                                                    role="button"
-                                                    aria-label={`${n.read ? 'Read' : 'Unread'} notification: ${n.title}`}
-                                                    className={`px-6 py-4 transition-colors cursor-pointer group focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${n.read
-                                                        ? 'bg-white hover:bg-slate-50/50'
-                                                        : 'bg-blue-50/30 hover:bg-blue-50/50 border-l-[3px] border-l-blue-500'
-                                                        }`}
-                                                >
-                                                    <div className="flex gap-3">
-                                                        <div className="transition-transform group-hover:scale-110">
-                                                            {getIconForSeverity(severity)}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center gap-2 mb-1">
-                                                                <p className={`text-sm font-bold truncate ${n.read ? 'text-slate-600' : 'text-slate-800'
-                                                                    }`}>
-                                                                    {n.title}
-                                                                </p>
-                                                                {!n.read && (
-                                                                    <span className="w-2 h-2 bg-blue-500 rounded-full shrink-0" />
-                                                                )}
+                                        {notifications
+                                            .filter(n => {
+                                                // Suppress noise: Hide generic "Modified" notifications if they are 'system' type
+                                                // and don't contain critical keywords
+                                                if (n.type === 'system' && n.title.includes('Modified')) return false;
+                                                return true;
+                                            })
+                                            .map((n, idx) => {
+                                                const severity = inferSeverity(n);
+                                                return (
+                                                    <motion.div
+                                                        key={n.id}
+                                                        initial={{ opacity: 0, x: 20 }}
+                                                        animate={{ opacity: 1, x: 0 }}
+                                                        exit={{ opacity: 0, x: -20, height: 0 }}
+                                                        transition={{ delay: idx * 0.03 }}
+                                                        onClick={() => {
+                                                            if (!n.read) onMarkRead(n.id);
+                                                        }}
+                                                        onKeyDown={(e) => {
+                                                            if (!n.read && (e.key === 'Enter' || e.key === ' ')) {
+                                                                e.preventDefault();
+                                                                onMarkRead(n.id);
+                                                            }
+                                                        }}
+                                                        tabIndex={0}
+                                                        role="button"
+                                                        aria-label={`${n.read ? 'Read' : 'Unread'} notification: ${n.title}`}
+                                                        className={`px-6 py-4 transition-colors cursor-pointer group focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${n.read
+                                                            ? 'bg-white hover:bg-slate-50/50'
+                                                            : 'bg-blue-50/30 hover:bg-blue-50/50 border-l-[3px] border-l-blue-500'
+                                                            }`}
+                                                    >
+                                                        <div className="flex gap-3">
+                                                            <div className="transition-transform group-hover:scale-110">
+                                                                {getIconForSeverity(severity)}
                                                             </div>
-                                                            <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
-                                                                {n.content}
-                                                            </p>
-                                                            <div className="flex items-center gap-3 mt-2.5">
-                                                                {getSeverityBadge(severity)}
-                                                                <div className="flex items-center gap-1">
-                                                                    <History size={10} className="text-slate-400" />
-                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                                                        {formatTime(n.timestamp)}
-                                                                    </span>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <p className={`text-sm font-bold truncate ${n.read ? 'text-slate-600' : 'text-slate-800'
+                                                                        }`}>
+                                                                        {n.title}
+                                                                    </p>
+                                                                    {!n.read && (
+                                                                        <span className="w-2 h-2 bg-blue-500 rounded-full shrink-0" />
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                                                                    {n.content}
+                                                                </p>
+                                                                <div className="flex items-center gap-3 mt-2.5">
+                                                                    {getSeverityBadge(severity)}
+                                                                    <div className="flex items-center gap-1">
+                                                                        <History size={10} className="text-slate-400" />
+                                                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                                                            {formatTime(n.timestamp)}
+                                                                        </span>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                </motion.div>
-                                            );
-                                        })}
+                                                    </motion.div>
+                                                );
+                                            })}
                                     </div>
                                 )}
                             </AnimatePresence>

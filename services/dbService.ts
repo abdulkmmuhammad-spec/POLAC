@@ -1,6 +1,8 @@
-
 import { createClient } from '@supabase/supabase-js';
-import { ParadeRecord, User, Notification, CadetStatus } from '../types';
+import { ParadeRecord, User, Notification, CadetStatus, AuditEvent } from '../types';
+import bcrypt from 'bcryptjs';
+
+const SALT_ROUNDS = 10;
 
 /**
  * The Supabase client requires a valid URL and Anon Key.
@@ -120,19 +122,27 @@ export const dbService = {
   loginWithCredentials: async (username: string, password_hash: string): Promise<User | null> => {
     try {
       const cleanUsername = username.trim();
-      const cleanPassword = password_hash.trim();
+      const providedPassword = password_hash.trim();
 
-      console.log('Attempting login for:', { cleanUsername, passwordLength: cleanPassword.length });
+      console.log('Attempting secure login for:', { cleanUsername });
 
+      // 1. Fetch the user by username only
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .ilike('username', cleanUsername)
-        .eq('password_hash', cleanPassword)
         .single();
 
       if (error || !data) {
-        console.error('Login match failed:', error?.message || 'No user found');
+        console.error('Login failed: User not found', error?.message);
+        return null;
+      }
+
+      // 2. Compare the provided password with the stored hash
+      const isMatch = await bcrypt.compare(providedPassword, data.password_hash);
+
+      if (!isMatch) {
+        console.error('Login failed: Password mismatch for', cleanUsername);
         return null;
       }
 
@@ -208,6 +218,84 @@ export const dbService = {
       });
     } catch (err) {
       console.error('Supabase Error (updateUser):', err);
+      throw err;
+    }
+  },
+
+  getOfficers: async (): Promise<User[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'course_officer')
+        .order('full_name', { ascending: true });
+
+      if (error) throw error;
+      return (data || []).map(d => ({
+        id: d.id,
+        username: d.username,
+        role: d.role,
+        fullName: d.full_name,
+        courseName: d.course_name,
+        yearGroup: d.year_group,
+        courseNumber: d.course_number,
+        totalCadets: d.total_cadets,
+        profileImage: d.profile_image,
+        serviceNumber: d.username // Mapping service number to username field
+      }));
+    } catch (err) {
+      console.error('Supabase Error (getOfficers):', err);
+      throw err;
+    }
+  },
+
+  inviteOfficer: async (fullName: string, serviceNumber: string, initialCourse: number): Promise<void> => {
+    try {
+      // Securely hash the initial password (service number) before persistence
+      const hashedPassword = await bcrypt.hash(serviceNumber.trim(), SALT_ROUNDS);
+
+      const { error } = await supabase
+        .from('profiles')
+        .insert({
+          username: serviceNumber.trim(),
+          full_name: fullName,
+          role: 'course_officer',
+          course_number: initialCourse,
+          password_hash: hashedPassword, // Store results of the hash operation
+          course_name: `REGULAR COURSE ${initialCourse}`
+        });
+
+      if (error) throw error;
+
+      await dbService.addNotification({
+        type: 'system',
+        title: 'New Officer Commissioned',
+        content: `${fullName} has been granted access to RC ${initialCourse}`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        officerName: 'COMMANDANT',
+        yearGroup: 5,
+        courseNumber: initialCourse
+      });
+    } catch (err) {
+      console.error('Supabase Error (inviteOfficer):', err);
+      throw err;
+    }
+  },
+
+  updateOfficerAssignment: async (officerId: string | number, courseNumber: number): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          course_number: courseNumber || null,
+          course_name: courseNumber ? `REGULAR COURSE ${courseNumber}` : null
+        })
+        .eq('id', officerId);
+
+      if (error) throw error;
+    } catch (err) {
+      console.error('Supabase Error (updateOfficerAssignment):', err);
       throw err;
     }
   },
@@ -351,7 +439,7 @@ export const dbService = {
           read: n.read,
           officerName: n.officer_name,
           yearGroup: n.year_group,
-          courseNumber: n.course_number || n.year_group
+          courseNumber: n.course_number // Correct semantic mapping
         })),
         error: null
       };
@@ -361,63 +449,72 @@ export const dbService = {
     }
   },
 
-  // ─── Audit Log (Filtered Notifications) ───────────────────────────────────
+  // ─── Audit Log (Querying audit_events table) ──────────────────────────────
 
   getAuditLogs: async (filters?: {
-    officerName?: string;
-    type?: string;
+    actorName?: string;
+    actionType?: string;
     startDate?: string;
     endDate?: string;
     limit?: number;
-  }): Promise<{ data: Notification[]; error: any }> => {
+  }): Promise<{ data: AuditEvent[]; error: any }> => {
     try {
       let query = supabase
-        .from('notifications')
+        .from('audit_events')
         .select('*')
-        .order('timestamp', { ascending: false });
+        .order('created_at', { ascending: false });
 
-      if (filters?.officerName) {
-        query = query.ilike('officer_name', `%${filters.officerName}%`);
+      if (filters?.actorName) {
+        query = query.ilike('actor_name', `%${filters.actorName}%`);
       }
 
-      if (filters?.type) {
-        query = query.eq('type', filters.type);
+      if (filters?.actionType) {
+        query = query.eq('action_type', filters.actionType);
       }
 
       if (filters?.startDate) {
-        query = query.gte('timestamp', filters.startDate);
+        query = query.gte('created_at', filters.startDate);
       }
 
       if (filters?.endDate) {
-        query = query.lte('timestamp', filters.endDate + 'T23:59:59');
+        query = query.lte('created_at', filters.endDate + 'T23:59:59');
       }
 
-      if (filters?.limit) {
-        query = query.limit(filters.limit);
-      } else {
-        query = query.limit(200); // Default limit for audit log
-      }
-
-      const { data, error } = await query;
+      const { data, error } = await query.limit(filters?.limit || 200);
 
       if (error) throw error;
       return {
-        data: (data || []).map(n => ({
-          id: n.id,
-          type: n.type,
-          title: n.title,
-          content: n.content,
-          timestamp: n.timestamp,
-          read: n.read,
-          officerName: n.officer_name,
-          yearGroup: n.year_group,
-          courseNumber: n.course_number || n.year_group
+        data: (data || []).map(a => ({
+          id: a.id,
+          actorId: a.actor_id,
+          actorName: a.actor_name,
+          actionType: a.action_type,
+          targetId: a.target_id,
+          payload: a.payload,
+          createdAt: a.created_at
         })),
         error: null
       };
     } catch (err: any) {
       console.error('Supabase Error (getAuditLogs):', err);
       return { data: [], error: err };
+    }
+  },
+
+  logAuditEvent: async (event: Omit<AuditEvent, 'id' | 'createdAt'>) => {
+    try {
+      const { error } = await supabase
+        .from('audit_events')
+        .insert({
+          actor_id: event.actorId,
+          actor_name: event.actorName,
+          action_type: event.actionType,
+          target_id: event.targetId,
+          payload: event.payload
+        });
+      if (error) throw error;
+    } catch (err) {
+      console.error('Audit Logging Failed:', err);
     }
   },
 
@@ -515,6 +612,65 @@ export const dbService = {
     } catch (err) {
       console.error('Supabase Error (getCadetRegistry):', err);
       return [];
+    }
+  },
+
+  getNominalRollData: async (courseNumber: number): Promise<any[]> => {
+    try {
+      // 1. Lean Fetch: Selected fields only for maximum speed
+      // Sort by squad (numeric ascending) then by name (alpha ascending)
+      const { data: registry, error: regError } = await supabase
+        .from('cadet_registry')
+        .select('id, name, squad')
+        .eq('course_number', courseNumber)
+        .order('squad', { ascending: true })
+        .order('name', { ascending: true });
+
+      if (regError) throw regError;
+      return registry || [];
+    } catch (err) {
+      console.error('Supabase Error (getNominalRollData):', err);
+      return [];
+    }
+  },
+
+  updateCadetRegistry: async (id: string | number, updates: any, officer: User) => {
+    try {
+      // Perform atomic update via RPC to ensure consistent read-before-write state
+      const { data, error: rpcError } = await supabase.rpc('update_cadet_registry_with_audit', {
+        p_id: id,
+        p_name: updates.name,
+        p_squad: updates.squad,
+        p_course_number: updates.course_number,
+        p_year_group: updates.year_group
+      });
+
+      if (rpcError) throw rpcError;
+
+      const result = Array.isArray(data) ? data[0] : data;
+      const oldRec = result.old_record;
+      const newRec = result.new_record;
+
+      // 3. Log to Forensic Audit Table (Decoupled from Notifications)
+      await dbService.logAuditEvent({
+        actorId: String(officer.id),
+        actorName: officer.fullName,
+        actionType: 'CADET_MODIFIED',
+        targetId: String(id),
+        payload: {
+          cadetName: newRec.name,
+          before: oldRec,
+          after: newRec,
+          diff: Object.keys(updates)
+            .filter(key => oldRec[key] !== newRec[key])
+            .map(key => ({ field: key, from: oldRec[key], to: newRec[key] }))
+        }
+      });
+
+      return { error: null };
+    } catch (err) {
+      console.error('Supabase Error (updateCadetRegistry):', err);
+      return { error: err };
     }
   },
 

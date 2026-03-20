@@ -95,3 +95,13 @@ export interface SubmissionSettings {
   musterEndHour: number;
   tattooStartHour: number;
 }
+
+export interface AuditEvent {
+  id: string;
+  actorId: string;
+  actorName: string;
+  actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED';
+  targetId?: string;
+  payload: any;
+  createdAt: string;
+}

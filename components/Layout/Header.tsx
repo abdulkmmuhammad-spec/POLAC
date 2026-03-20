@@ -52,62 +52,61 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
     };
 
     return (
-        <header className="bg-white border-b border-slate-200 h-20 flex items-center justify-between px-2 md:px-8 shrink-0 relative">
-            <div className="flex items-center gap-1 md:gap-3 min-w-0">
+        <header className="bg-blue-900 border-b border-white/10 h-20 flex items-center justify-between px-4 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+            <div className="flex items-center gap-1 md:gap-4 min-w-0">
                 {onMenuClick && (
                     <button
                         onClick={onMenuClick}
-                        className="p-1 md:hidden text-slate-600 hover:bg-slate-100 rounded-lg transition-colors shrink-0"
+                        className="p-2 md:hidden text-blue-200 hover:bg-white/5 rounded-md transition-colors shrink-0 border border-transparent hover:border-white/5"
                     >
                         <Menu size={24} />
                     </button>
                 )}
-                <h2 className="text-sm sm:text-base md:text-xl font-bold text-slate-800 capitalize leading-tight">{title}</h2>
-                <span className="hidden sm:inline-block px-2 py-0.5 bg-blue-100 text-blue-600 text-[10px] font-black rounded-full border border-blue-200 shrink-0">V2</span>
+                <div className="flex flex-col">
+                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
+                    <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight">{title}</h2>
+                </div>
+                <span className="hidden sm:inline-block px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded border border-blue-400/20 shrink-0 uppercase tracking-widest ml-2">Secure</span>
             </div>
 
             <div className="flex items-center gap-1 md:gap-4 shrink-0">
                 {/* Notification Bell */}
                 <button
                     onClick={handleOpenDrawer}
-                    className="p-2 rounded-full transition-all relative text-slate-400 hover:bg-slate-50 hover:text-blue-600"
+                    className="p-2.5 rounded-md transition-all relative text-blue-200 hover:bg-white/5 hover:border-white/10 border border-transparent"
                 >
-                    <Bell size={20} />
+                    <Bell size={18} />
                     {unreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-rose-500 rounded-full border-2 border-white flex items-center justify-center">
-                            <span className="text-[9px] font-black text-white leading-none">
-                                {unreadCount > 9 ? '9+' : unreadCount}
-                            </span>
-                        </span>
+                        <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full shadow-[0_0_8px_rgba(244,63,94,0.6)] animate-pulse" />
                     )}
                 </button>
 
                 {showRefresh && (
                     <button
                         onClick={refreshData}
-                        className={`p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors ${isDataLoading ? 'animate-spin' : ''}`}
+                        className={`p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 ${isDataLoading ? 'animate-spin' : ''}`}
                     >
-                        <RefreshCcw size={20} />
+                        <RefreshCcw size={18} />
                     </button>
                 )}
 
-                <div className="h-8 w-[1px] bg-slate-200 mx-1 md:mx-2"></div>
+                <div className="h-10 w-[1px] bg-white/10 mx-1 md:mx-2"></div>
 
                 <div
                     onClick={onProfileClick}
-                    className={`flex items-center gap-1 md:gap-3 ${onProfileClick ? 'cursor-pointer group hover:bg-slate-50 p-1 md:p-2 rounded-xl border border-transparent hover:border-slate-100 transition-all' : ''}`}
+                    className={`flex items-center gap-1 md:gap-4 ${onProfileClick ? 'cursor-pointer group hover:bg-white/5 p-1 md:px-3 md:py-2 rounded-md border border-transparent hover:border-white/10 transition-all' : ''}`}
                     title={onProfileClick ? 'Open System Settings' : ''}
                 >
                     <div className="text-right hidden md:block">
-                        <p className="text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{currentUser?.fullName}</p>
-                        <p className="text-xs text-slate-500">{currentUser?.role === 'commandant' ? 'Administrator' : 'Course Officer'}</p>
+                        <p className="text-[11px] font-black text-white uppercase tracking-wider group-hover:text-blue-400 transition-colors uppercase">{currentUser?.fullName}</p>
+                        <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest">{currentUser?.role === 'commandant' ? 'Administrative Lead' : 'Service Officer'}</p>
                     </div>
-                    <div className="w-8 h-8 md:w-10 md:h-10 shrink-0 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold border-2 border-white shadow-sm group-hover:shadow-md transition-all text-xs md:text-base">
+                    <div className="w-8 h-8 md:w-9 md:h-9 shrink-0 bg-blue-500/10 rounded border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_10px_rgba(59,130,246,0.1)] text-xs md:text-sm">
                         {currentUser?.fullName.charAt(0)}
                     </div>
                 </div>
-                <button onClick={logout} className="hidden md:block p-2 text-slate-400 hover:text-red-600 transition-colors" title="Sign Out">
-                    <LogOut size={20} />
+                <button onClick={logout} className="hidden md:block p-2 text-blue-100/30 hover:text-rose-400 transition-colors" title="Sign Out">
+                    <LogOut size={18} />
                 </button>
             </div>
 

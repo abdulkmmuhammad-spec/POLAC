@@ -61,6 +61,14 @@ interface ParadeContextType {
     /** Mark all notifications as read. */
     markAllAsRead: () => Promise<void>;
     /** Get audit logs with filters (for Commandant dashboard). */
+    /** Persistent filter states for Audit & Analytics */
+    auditStatusFilter: string;
+    setAuditStatusFilter: (status: string) => void;
+    auditCourseFilter: string;
+    setAuditCourseFilter: (course: string) => void;
+    auditSearchTerm: string;
+    setAuditSearchTerm: (term: string) => void;
+    /** Get audit logs with filters (for Commandant dashboard). */
     getAuditLogs: (filters: {
         officerName?: string;
         actionType?: string;
@@ -85,6 +93,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [hasMoreRecords, setHasMoreRecords] = useState(true);
     const [selectedParadeType, setSelectedParadeType] = useState<ParadeType>(ParadeType.MUSTER);
     const [totalRecordsCount, setTotalRecordsCount] = useState<number>(0);
+
+    // Persistent Filter State for Commandant Section
+    const [auditStatusFilter, setAuditStatusFilter] = useState<string>('all');
+    const [auditCourseFilter, setAuditCourseFilter] = useState<string>('all');
+    const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
 
     const PAGE_SIZE = 20;
 
@@ -350,7 +363,13 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             totalPages,
             markNotificationRead,
             markAllAsRead,
-            getAuditLogs
+            getAuditLogs,
+            auditStatusFilter,
+            setAuditStatusFilter,
+            auditCourseFilter,
+            setAuditCourseFilter,
+            auditSearchTerm,
+            setAuditSearchTerm
         }}>
             {children}
         </ParadeContext.Provider>
