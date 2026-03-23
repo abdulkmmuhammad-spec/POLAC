@@ -1,8 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import { ParadeRecord, User, Notification, CadetStatus, AuditEvent } from '../types';
-import bcrypt from 'bcryptjs';
-
-const SALT_ROUNDS = 10;
 
 /**
  * The Supabase client requires a valid URL and Anon Key.
@@ -119,43 +116,41 @@ export const dbService = {
 
   // ─── Users / Profiles ────────────────────────────────────────────────────
 
-  loginWithCredentials: async (username: string, password_hash: string): Promise<User | null> => {
+  loginWithCredentials: async (username: string, password: string): Promise<User | null> => {
     try {
       const cleanUsername = username.trim();
-      const providedPassword = password_hash.trim();
+      const providedPassword = password.trim();
 
-      console.log('Attempting secure login for:', { cleanUsername });
+      console.log(`Attempting secure login for: ${cleanUsername}`);
 
-      // 1. Fetch the user by username only
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .ilike('username', cleanUsername)
-        .single();
+      // Use the secure RPC that handles bcrypt comparison via crypt()
+      const { data, error } = await supabase.rpc('verify_user_login', {
+        p_username: cleanUsername,
+        p_password: providedPassword
+      });
 
-      if (error || !data) {
-        console.error('Login failed: User not found', error?.message);
+      if (error) {
+        console.error('Login failed: RPC error', error.message);
         return null;
       }
 
-      // 2. Compare the provided password with the stored hash
-      const isMatch = await bcrypt.compare(providedPassword, data.password_hash);
-
-      if (!isMatch) {
+      if (!data || data.length === 0) {
         console.error('Login failed: Password mismatch for', cleanUsername);
         return null;
       }
 
+      const userData = data[0];
+      console.log(`Login successful for: ${cleanUsername}`);
       return {
-        id: data.id,
-        username: data.username,
-        role: data.role,
-        fullName: data.full_name,
-        courseName: data.course_name,
-        yearGroup: data.year_group,
-        courseNumber: data.course_number,
-        totalCadets: data.total_cadets,
-        profileImage: data.profile_image
+        id: userData.id,
+        username: userData.username,
+        role: userData.role,
+        fullName: userData.full_name,
+        courseName: userData.course_name,
+        yearGroup: userData.year_group,
+        courseNumber: userData.course_number,
+        totalCadets: userData.total_cadets,
+        profileImage: userData.profile_image
       };
     } catch (err) {
       console.error('Login error:', err);
@@ -251,9 +246,6 @@ export const dbService = {
 
   inviteOfficer: async (fullName: string, serviceNumber: string, initialCourse: number): Promise<void> => {
     try {
-      // Securely hash the initial password (service number) before persistence
-      const hashedPassword = await bcrypt.hash(serviceNumber.trim(), SALT_ROUNDS);
-
       const { error } = await supabase
         .from('profiles')
         .insert({
@@ -261,7 +253,7 @@ export const dbService = {
           full_name: fullName,
           role: 'course_officer',
           course_number: initialCourse,
-          password_hash: hashedPassword, // Store results of the hash operation
+          password_hash: serviceNumber.trim(), // Store plain text password
           course_name: `REGULAR COURSE ${initialCourse}`
         });
 
