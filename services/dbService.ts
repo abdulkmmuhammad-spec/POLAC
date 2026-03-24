@@ -121,36 +121,36 @@ export const dbService = {
       const cleanUsername = username.trim();
       const providedPassword = password.trim();
 
-      console.log(`Attempting secure login for: ${cleanUsername}`);
+      console.log(`Attempting login for: ${cleanUsername}`);
 
-      // Use the secure RPC that handles bcrypt comparison via crypt()
-      const { data, error } = await supabase.rpc('verify_user_login', {
-        p_username: cleanUsername,
-        p_password: providedPassword
-      });
+      // 1. Fetch the user by username only
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('username', cleanUsername)
+        .single();
 
-      if (error) {
-        console.error('Login failed: RPC error', error.message);
+      if (error || !data) {
+        console.error('Login failed: User not found', error?.message);
         return null;
       }
 
-      if (!data || data.length === 0) {
+      // 2. Plain text password comparison
+      if (providedPassword !== data.password_hash) {
         console.error('Login failed: Password mismatch for', cleanUsername);
         return null;
       }
-
-      const userData = data[0];
       console.log(`Login successful for: ${cleanUsername}`);
       return {
-        id: userData.id,
-        username: userData.username,
-        role: userData.role,
-        fullName: userData.full_name,
-        courseName: userData.course_name,
-        yearGroup: userData.year_group,
-        courseNumber: userData.course_number,
-        totalCadets: userData.total_cadets,
-        profileImage: userData.profile_image
+        id: data.id,
+        username: data.username,
+        role: data.role,
+        fullName: data.full_name,
+        courseName: data.course_name,
+        yearGroup: data.year_group,
+        courseNumber: data.course_number,
+        totalCadets: data.total_cadets,
+        profileImage: data.profile_image
       };
     } catch (err) {
       console.error('Login error:', err);
