@@ -116,48 +116,52 @@ export const dbService = {
 
   // ─── Users / Profiles ────────────────────────────────────────────────────
 
-  loginWithCredentials: async (username: string, password: string): Promise<User | null> => {
-    try {
-      const cleanUsername = username.trim();
-      const providedPassword = password.trim();
+  /**
+   * Pre-flight check: Returns how many profiles exist for a given role.
+   * Used by the Login page to decide whether to show Signup or Login form.
+   */
+  getRegistrationStatus: async (role: 'commandant' | 'course_officer'): Promise<{ canRegister: boolean; count: number }> => {
+    const { count, error } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', role);
 
-      console.log(`Attempting login for: ${cleanUsername}`);
-
-      // 1. Fetch the user by username only
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .ilike('username', cleanUsername)
-        .single();
-
-      if (error || !data) {
-        console.error('Login failed: User not found', error?.message);
-        return null;
-      }
-
-      // 2. Plain text password comparison
-      if (providedPassword !== data.password_hash) {
-        console.error('Login failed: Password mismatch for', cleanUsername);
-        return null;
-      }
-      console.log(`Login successful for: ${cleanUsername}`);
-      return {
-        id: data.id,
-        username: data.username,
-        role: data.role,
-        fullName: data.full_name,
-        courseName: data.course_name,
-        yearGroup: data.year_group,
-        courseNumber: data.course_number,
-        totalCadets: data.total_cadets,
-        profileImage: data.profile_image
-      };
-    } catch (err) {
-      console.error('Login error:', err);
-      return null;
+    if (error) {
+      console.error('getRegistrationStatus error:', error.message);
+      return { canRegister: false, count: 0 };
     }
+
+    const total = count ?? 0;
+    const canRegister = role === 'commandant' ? total === 0 : total < 5;
+    return { canRegister, count: total };
   },
 
+  /**
+   * Secure Signup: Creates user in Supabase Auth (GoTrue).
+   * The profile row is created automatically by the `on_auth_user_created` database trigger.
+   */
+  signUpUser: async (email: string, password: string, username: string, role: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { username, role }
+      }
+    });
+    return { data, error };
+  },
+
+  /**
+   * Secure Login: Uses Supabase Auth managed session.
+   */
+  signInUser: async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    return { data, error };
+  },
+
+  /**
+   * Fetch the public profile for a given user id.
+   */
   getUserProfile: async (id: string): Promise<User | null> => {
     try {
       const { data, error } = await supabase
