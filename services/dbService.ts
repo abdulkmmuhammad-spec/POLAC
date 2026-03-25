@@ -195,6 +195,74 @@ export const dbService = {
     }
   },
 
+  getAllUsers: async (): Promise<User[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .order('role', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(d => ({
+        id: d.id,
+        username: d.username,
+        role: d.role,
+        fullName: d.full_name,
+        courseName: d.course_name,
+        yearGroup: d.year_group,
+        courseNumber: d.course_number ? parseInt(d.course_number) : undefined,
+        totalCadets: d.total_cadets,
+        profileImage: d.profile_image_url,
+        serviceNumber: d.service_number || d.username,
+        email: d.email, // Explicitly include email/password for override view
+        password: d.password
+      }));
+    } catch (err) {
+      console.error('Supabase Error (getAllUsers):', err);
+      throw err;
+    }
+  },
+
+  updateUserCredentials: async (userId: string | number, payload: { email?: string; password?: string; course_name?: string }, actorName: string) => {
+    try {
+      // 1. Perform Update
+      const { error } = await supabase
+        .from('users')
+        .update(payload)
+        .eq('id', userId);
+      
+      if (error) throw error;
+
+      // 2. Log Forensic Audit Event
+      await dbService.logAuditEvent({
+        actorId: 'COMMAND_OVERRIDE',
+        actorName: actorName,
+        actionType: 'CREDENTIAL_OVERRIDE',
+        targetId: String(userId),
+        payload: {
+          timestamp: new Date().toISOString(),
+          changedFields: Object.keys(payload),
+          note: "Sensitive credential modification via Commandant Control"
+        }
+      });
+
+      // 3. Add system notification
+      await dbService.addNotification({
+        type: 'settings_change',
+        title: 'Security Credential Override',
+        content: `Commandant [${actorName}] forcefully updated credentials for User ID: ${userId}`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        officerName: 'COMMANDANT',
+        yearGroup: 1,
+        courseNumber: 0
+      });
+
+    } catch (err) {
+      console.error('Supabase Error (updateUserCredentials):', err);
+      throw err;
+    }
+  },
+
   // ─── Parade Records ───────────────────────────────────────────────────────
 
   getRecords: async (from: number, to: number): Promise<{ data: ParadeRecord[]; error: any }> => {

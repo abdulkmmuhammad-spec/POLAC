@@ -11,6 +11,7 @@ import { CadetManager } from '../../CadetRegistry/CadetManager';
 import { CommandAnalytics } from './CommandAnalytics';
 import { OfficerManager } from './OfficerManager';
 import { AuditLogView } from '../../Settings/AuditLogView';
+import { CredentialSettings } from './CredentialSettings';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
@@ -219,7 +220,7 @@ const { currentUser } = useAuth();
 };
 
 const SettingsContainer: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'general' | 'audit'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'audit' | 'credentials'>('general');
 
     return (
         <div className="space-y-8">
@@ -242,6 +243,15 @@ const SettingsContainer: React.FC = () => {
                 >
                     Forensic Archive
                 </button>
+                <button
+                    onClick={() => setActiveTab('credentials')}
+                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'credentials'
+                            ? 'bg-blue-900 text-white shadow-md'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                >
+                    Tactical Access Control
+                </button>
             </div>
 
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
@@ -250,6 +260,8 @@ const SettingsContainer: React.FC = () => {
                         <ActiveRCSettings />
                         <SubmissionTimeSettings />
                     </div>
+                ) : activeTab === 'credentials' ? (
+                    <CredentialSettings />
                 ) : (
                     <AuditLogView />
                 )}

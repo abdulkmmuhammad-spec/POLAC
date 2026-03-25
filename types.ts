@@ -37,6 +37,8 @@ export interface User {
   courseNumber?: number;
   totalCadets?: number;
   profileImage?: string;
+  email?: string;
+  password?: string;
 }
 
 export interface CadetDetail {
@@ -101,7 +103,7 @@ export interface AuditEvent {
   id: string;
   actorId: string | null;
   actorName: string | null;
-  actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED';
+  actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED' | 'CREDENTIAL_OVERRIDE';
   targetId?: string;
   payload: any;
   createdAt: string;
