@@ -10,7 +10,7 @@ import { toast } from 'react-hot-toast';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
 
 export const ParadeForm: React.FC = () => {
-    const { currentUser } = useAuth();
+const { currentUser } = useAuth();
     const { isDataLoading, refreshData, getLevelForCourse, activeRC, submissionSettings } = useParade();
 
     const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);

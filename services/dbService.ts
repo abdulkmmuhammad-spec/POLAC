@@ -25,7 +25,7 @@ export const dbService = {
         .single();
       if (error) throw error;
       return { data: parseInt(data?.value || '12', 10), error: null };
-    } catch (err: any) {
+    } catch (err) {
       console.error('Supabase Error (getActiveRC):', err);
       return { data: 12, error: err };
     }
@@ -79,7 +79,7 @@ export const dbService = {
       });
 
       return { data: settings, error: null };
-    } catch (err: any) {
+    } catch (err) {
       console.error('Supabase Error (getSubmissionSettings):', err);
       return {
         data: {
@@ -114,92 +114,19 @@ export const dbService = {
     }
   },
 
-  // ─── Users / Profiles ────────────────────────────────────────────────────
-
-  /**
-   * Pre-flight check: Returns how many profiles exist for a given role.
-   * Used by the Login page to decide whether to show Signup or Login form.
-   */
-  getRegistrationStatus: async (role: 'commandant' | 'course_officer'): Promise<{ canRegister: boolean; count: number }> => {
-    const { count, error } = await supabase
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', role);
-
-    if (error) {
-      console.error('getRegistrationStatus error:', error.message);
-      return { canRegister: false, count: 0 };
-    }
-
-    const total = count ?? 0;
-    const canRegister = role === 'commandant' ? total === 0 : total < 5;
-    return { canRegister, count: total };
-  },
-
-  /**
-   * Secure Signup: Creates user in Supabase Auth (GoTrue).
-   * The profile row is created automatically by the `on_auth_user_created` database trigger.
-   */
-  signUpUser: async (email: string, password: string, username: string, role: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { username, role }
-      }
-    });
-    return { data, error };
-  },
-
-  /**
-   * Secure Login: Uses Supabase Auth managed session.
-   */
-  signInUser: async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    return { data, error };
-  },
-
-  /**
-   * Fetch the public profile for a given user id.
-   */
-  getUserProfile: async (id: string): Promise<User | null> => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error || !data) return null;
-
-      return {
-        id: data.id,
-        username: data.username,
-        role: data.role,
-        fullName: data.full_name,
-        courseName: data.course_name,
-        yearGroup: data.year_group,
-        courseNumber: data.course_number,
-        totalCadets: data.total_cadets,
-        profileImage: data.profile_image
-      };
-    } catch (err) {
-      console.error('Supabase Error (getUserProfile):', err);
-      return null;
-    }
-  },
+  // ─── Users ────────────────────────────────────────────────────────────────
 
   updateUser: async (updatedUser: User) => {
     try {
       const { error } = await supabase
-        .from('profiles')
+        .from('users')
         .update({
           full_name: updatedUser.fullName,
           course_name: updatedUser.courseName,
           year_group: updatedUser.yearGroup,
-          course_number: updatedUser.courseNumber,
+          course_number: updatedUser.courseNumber ? String(updatedUser.courseNumber) : null,
           total_cadets: updatedUser.totalCadets,
-          profile_image: updatedUser.profileImage
+          profile_image_url: updatedUser.profileImage
         })
         .eq('id', updatedUser.id);
 
@@ -224,12 +151,13 @@ export const dbService = {
   getOfficers: async (): Promise<User[]> => {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('users')
         .select('*')
-        .eq('role', 'course_officer')
-        .order('full_name', { ascending: true });
-
-      if (error) throw error;
+        .eq('role', 'course_officer');
+      if (error) {
+        console.error('getOfficers error:', error.message);
+        throw error;
+      }
       return (data || []).map(d => ({
         id: d.id,
         username: d.username,
@@ -237,10 +165,10 @@ export const dbService = {
         fullName: d.full_name,
         courseName: d.course_name,
         yearGroup: d.year_group,
-        courseNumber: d.course_number,
+        courseNumber: d.course_number ? parseInt(d.course_number) : undefined,
         totalCadets: d.total_cadets,
-        profileImage: d.profile_image,
-        serviceNumber: d.username // Mapping service number to username field
+        profileImage: d.profile_image_url,
+        serviceNumber: d.service_number || d.username
       }));
     } catch (err) {
       console.error('Supabase Error (getOfficers):', err);
@@ -248,41 +176,12 @@ export const dbService = {
     }
   },
 
-  inviteOfficer: async (fullName: string, serviceNumber: string, initialCourse: number): Promise<void> => {
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .insert({
-          username: serviceNumber.trim(),
-          full_name: fullName,
-          role: 'course_officer',
-          course_number: initialCourse,
-          password_hash: serviceNumber.trim(), // Store plain text password
-          course_name: `REGULAR COURSE ${initialCourse}`
-        });
 
-      if (error) throw error;
-
-      await dbService.addNotification({
-        type: 'system',
-        title: 'New Officer Commissioned',
-        content: `${fullName} has been granted access to RC ${initialCourse}`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        officerName: 'COMMANDANT',
-        yearGroup: 5,
-        courseNumber: initialCourse
-      });
-    } catch (err) {
-      console.error('Supabase Error (inviteOfficer):', err);
-      throw err;
-    }
-  },
 
   updateOfficerAssignment: async (officerId: string | number, courseNumber: number): Promise<void> => {
     try {
       const { error } = await supabase
-        .from('profiles')
+        .from('users')
         .update({
           course_number: courseNumber || null,
           course_name: courseNumber ? `REGULAR COURSE ${courseNumber}` : null
@@ -331,7 +230,7 @@ export const dbService = {
         })),
         error: null
       };
-    } catch (err: any) {
+    } catch (err) {
       console.error('Supabase Error (getRecords):', err);
       return { data: [], error: err };
     }
@@ -352,6 +251,22 @@ export const dbService = {
   },
 
   saveRecord: async (record: Omit<ParadeRecord, 'id' | 'createdAt'>) => {
+    // ─── MATH VERIFICATION BLOCK ───────────────────────────────────────────
+    const calculatedTotal = (record.presentCount || 0) + 
+                            (record.absentCount || 0) + 
+                            (record.sickCount || 0) + 
+                            (record.detentionCount || 0) + 
+                            (record.passCount || 0) + 
+                            (record.suspensionCount || 0) + 
+                            (record.yetToReportCount || 0);
+    const masterTotal = record.grandTotal;
+
+    if (calculatedTotal !== masterTotal) {
+      console.error("❌ ACCOUNTABILITY ERROR:", { calculatedTotal, masterTotal, record });
+      throw new Error(`Math Mismatch: Calculated Sum (${calculatedTotal}) does not equal Master Total (${masterTotal})`);
+    }
+    // ─── END MATH VERIFICATION ─────────────────────────────────────────────
+
     try {
       const { data: recordData, error: recordError } = await supabase
         .from('parade_records')
@@ -360,7 +275,7 @@ export const dbService = {
           officer_name: record.officerName,
           course_name: record.courseName,
           year_group: record.yearGroup,
-          course_number: record.courseNumber,
+          course_number: record.courseNumber ? String(record.courseNumber) : null,
           date: record.date,
           parade_type: record.paradeType,
           present_count: record.presentCount,
@@ -439,7 +354,7 @@ export const dbService = {
         })),
         error: null
       };
-    } catch (err: any) {
+    } catch (err) {
       console.error('Supabase Error (getNotifications):', err);
       return { data: [], error: err };
     }
@@ -491,7 +406,7 @@ export const dbService = {
         })),
         error: null
       };
-    } catch (err: any) {
+    } catch (err) {
       console.error('Supabase Error (getAuditLogs):', err);
       return { data: [], error: err };
     }
@@ -536,7 +451,7 @@ export const dbService = {
         throw error;
       }
       console.log('[Notification] Insert success:', data);
-    } catch (err: any) {
+    } catch (err) {
       console.error('[Notification] CRITICAL:', err?.message || err);
       // Don't re-throw — notification failure shouldn't block the parent action
     }
@@ -792,6 +707,25 @@ export const dbService = {
     } catch (err) {
       console.error('Supabase Error (checkDuplicateParade):', err);
       return false; // Fail-open to avoid blocking users if DB check fails
+    }
+  },
+
+  /**
+   * Verified if a user ID still exists in the database.
+   * Crucial for clearing stale localStorage sessions after a database reset.
+   */
+  verifySession: async (userId: string | number): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', userId)
+        .single();
+      
+      if (error || !data) return false;
+      return true;
+    } catch {
+      return false;
     }
   }
 };

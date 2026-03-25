@@ -18,7 +18,7 @@ import { toast } from 'react-hot-toast';
 
 const ActiveRCSettings: React.FC = () => {
     const { activeRC, refreshActiveRC } = useParade();
-    const { currentUser } = useAuth();
+const { currentUser } = useAuth();
     const [newRC, setNewRC] = useState<number>(activeRC);
     const [isSaving, setIsSaving] = useState(false);
     const [saved, setSaved] = useState(false);
@@ -109,7 +109,7 @@ const ActiveRCSettings: React.FC = () => {
 
 const SubmissionTimeSettings: React.FC = () => {
     const { submissionSettings, updateSubmissionSetting } = useParade();
-    const { currentUser } = useAuth();
+const { currentUser } = useAuth();
     const [isSaving, setIsSaving] = useState<string | null>(null);
 
     const handleUpdate = async (key: 'muster_start_hour' | 'muster_end_hour' | 'tattoo_start_hour', value: number) => {

@@ -298,12 +298,12 @@ export const CadetManager: React.FC = () => {
                         console.error('Failed to log audit notification for bulk import:', auditErr);
                         toast.error('Import successful, but failed to log audit trail.');
                     }
-                } catch (dbErr: any) {
+                } catch (dbErr) {
                     console.error('Database Error during bulk import:', dbErr);
                     const errorDetails = dbErr.message || dbErr.details || 'Check for duplicate names or database connection issues.';
                     toast.error(`Database Error: ${errorDetails}`);
                 }
-            } catch (parseErr: any) {
+            } catch (parseErr) {
                 console.error('Excel Parsing Error:', parseErr);
                 toast.error(`Error reading Excel file: ${parseErr.message || 'Please ensure it is a valid .xlsx file'}`);
             } finally {

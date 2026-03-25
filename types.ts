@@ -67,6 +67,7 @@ export interface ParadeRecord {
   yetToReportCount?: number;
   grandTotal: number;
   cadets: CadetDetail[];
+  status?: string;
   createdAt: string;
 }
 
@@ -98,8 +99,8 @@ export interface SubmissionSettings {
 
 export interface AuditEvent {
   id: string;
-  actorId: string;
-  actorName: string;
+  actorId: string | null;
+  actorName: string | null;
   actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED';
   targetId?: string;
   payload: any;

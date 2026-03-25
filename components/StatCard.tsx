@@ -20,7 +20,7 @@ export const StatCard: React.FC<StatCardProps> = ({ label, value, icon, color })
   return (
     <div className="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-slate-200 flex items-center space-x-4 hover:border-slate-300 transition-all group overflow-hidden relative">
       <div className={`p-3 rounded-md border ${colorMap[color]} shrink-0 flex items-center justify-center transition-transform group-hover:scale-105`}>
-        {React.cloneElement(icon as React.ReactElement, { size: 20 })}
+        {React.cloneElement(icon as React.ReactElement<any>, { size: 20 })}
       </div>
       <div className="min-w-0">
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1 truncate">{label}</p>

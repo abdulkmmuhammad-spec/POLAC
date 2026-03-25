@@ -18,7 +18,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-    const { logout } = useAuth();
+const { logout } = useAuth();
 
     const navItems = [
         { path: '/commandant', icon: LayoutDashboard, label: 'Overview', end: true },
@@ -92,7 +92,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                     </div>
                     <div className="p-4">
                         <button
-                            onClick={logout}
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                logout();
+                            }}
                             className="w-full flex items-center space-x-3 px-4 py-3 text-blue-100/40 hover:text-rose-400 hover:bg-rose-500/5 rounded-md transition-all group"
                         >
                             <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />

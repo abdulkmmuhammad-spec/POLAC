@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo, useCallback } from 'react';
-import { ParadeRecord, Notification, DashboardStats, UserRole, ParadeType } from '../types';
-import { dbService } from '../services/dbService';
+import { ParadeRecord, Notification, DashboardStats, UserRole, ParadeType, AuditEvent } from '../types';
+import { dbService, supabase } from '../services/dbService';
 import { useAuth } from './AuthContext';
 import { calculateCurrentLevel } from '../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
@@ -24,8 +24,6 @@ interface ParadeContextType {
     isDataLoading: boolean;
     refreshData: (officerNameFilter?: string) => Promise<void>;
     stats: DashboardStats;
-    /** @deprecated Use courseSummary instead. Kept for backward compatibility. */
-    yearSummary: any[];
     /** Grouped summary per RC course with computed year levels. */
     courseSummary: CourseSummaryEntry[];
     /** The current highest active RC from app_settings. */
@@ -60,7 +58,6 @@ interface ParadeContextType {
     markNotificationRead: (id: string) => Promise<void>;
     /** Mark all notifications as read. */
     markAllAsRead: () => Promise<void>;
-    /** Get audit logs with filters (for Commandant dashboard). */
     /** Persistent filter states for Audit & Analytics */
     auditStatusFilter: string;
     setAuditStatusFilter: (status: string) => void;
@@ -74,13 +71,13 @@ interface ParadeContextType {
         actionType?: string;
         startDate?: string;
         endDate?: string;
-    }) => Promise<Notification[]>;
+    }) => Promise<AuditEvent[]>;
 }
 
 const ParadeContext = createContext<ParadeContextType | undefined>(undefined);
 
 export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const { currentUser } = useAuth();
+const { currentUser } = useAuth();
     const [records, setRecords] = useState<ParadeRecord[]>([]);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [isDataLoading, setIsDataLoading] = useState(false);
@@ -220,7 +217,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         actionType?: string;
         startDate?: string;
         endDate?: string;
-    }): Promise<Notification[]> => {
+    }): Promise<AuditEvent[]> => {
         const result = await dbService.getAuditLogs(filters);
         return result.data;
     };
@@ -230,21 +227,51 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         refreshData();
     }, []);
 
-    // ── Auto-poll notifications every 30s so the commandant sees new alerts ──
+    // ── Realtime Notifications (Supabase WebSockets) ──
     useEffect(() => {
-        if (!currentUser) return; // Prevent unnecessary polling when unauthenticated
+        if (!currentUser) return; // Do not subscribe when unauthenticated
 
-        const interval = setInterval(async () => {
+        // Perform initial fetch
+        const fetchInitial = async () => {
             try {
-                // Ensure polling respects the current user's role filter
                 const officerNameFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.fullName;
                 const notifsRes = await dbService.getNotifications(officerNameFilter);
                 setNotifications(notifsRes.data);
             } catch (err) {
-                console.error('Notification poll error:', err);
+                console.error('Initial notification fetch error:', err);
             }
-        }, 30000);
-        return () => clearInterval(interval);
+        };
+        fetchInitial();
+
+        // Subscribe to real-time inserts
+        const channel = supabase
+            .channel('public:notifications')
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'notifications' },
+                (payload) => {
+                    const newNotif = {
+                        id: payload.new.id,
+                        type: payload.new.type,
+                        title: payload.new.title,
+                        content: payload.new.content,
+                        timestamp: payload.new.timestamp,
+                        read: payload.new.read,
+                        officerName: payload.new.officer_name,
+                        yearGroup: payload.new.year_group,
+                        courseNumber: payload.new.course_number
+                    } as Notification;
+                    
+                    if (currentUser.role === UserRole.COMMANDANT || newNotif.officerName === currentUser.fullName) {
+                        setNotifications((prev) => [newNotif, ...prev]);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, [currentUser]);
 
     /** Helper exposed via context to compute year level for a given course number */
@@ -316,29 +343,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
     }, [records, activeRC, selectedParadeType]);
 
-    /**
-     * Legacy year summary - kept so existing components don't break.
-     * Computes the same data using year_group for older records.
-     */
-    const yearSummary = useMemo(() => {
-        const today = new Date().toISOString().split('T')[0];
-        // FILTER BY SELECTED PARADE TYPE
-        const todayRecords = records.filter(r => r.date === today && r.paradeType === selectedParadeType);
 
-        return [1, 2, 3, 4, 5].map(year => {
-            const yrRecords = todayRecords.filter(r => r.yearGroup === year);
-            const total = yrRecords.reduce((sum, r) => sum + r.grandTotal, 0);
-            const present = yrRecords.reduce((sum, r) => sum + r.presentCount, 0);
-            const absent = yrRecords.reduce((sum, r) => sum + r.absentCount, 0);
-            const sick = yrRecords.reduce((sum, r) => sum + r.sickCount, 0);
-            const detention = yrRecords.reduce((sum, r) => sum + r.detentionCount, 0);
-            const pass = yrRecords.reduce((sum, r) => sum + (r.passCount || 0), 0);
-            const suspension = yrRecords.reduce((sum, r) => sum + (r.suspensionCount || 0), 0);
-            const yet_to_report = yrRecords.reduce((sum, r) => sum + (r.yetToReportCount || 0), 0);
-
-            return { year, total, present, absent, sick, detention, pass, suspension, yet_to_report };
-        });
-    }, [records, selectedParadeType]);
 
     return (
         <ParadeContext.Provider value={{
@@ -347,7 +352,6 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             isDataLoading,
             refreshData,
             stats,
-            yearSummary,
             courseSummary,
             activeRC,
             refreshActiveRC,

@@ -6,7 +6,7 @@ import { SubmissionPreviewModal } from './SubmissionPreviewModal';
 import { ParadeRecord } from '../../../types';
 
 export const SubmissionHistory: React.FC = () => {
-    const { currentUser } = useAuth();
+const { currentUser } = useAuth();
     const {
         records,
         loadMoreRecords,

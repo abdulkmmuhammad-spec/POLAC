@@ -4,7 +4,9 @@
       "Bash(cd:*)",
       "Bash(npm install:*)",
       "Bash(tar -xzf supabase.tar.gz)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(where supabase:*)",
+      "Bash(ls:*)"
     ]
   }
 }

@@ -15,7 +15,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onProfileClick, onMenuClick }) => {
-    const { currentUser, logout } = useAuth();
+const { currentUser, logout } = useAuth();
     const { isDataLoading, refreshData, notifications, markNotificationRead, markAllAsRead } = useParade();
     const [showDrawer, setShowDrawer] = useState(false);
     const [showConfirmClear, setShowConfirmClear] = useState(false);
@@ -83,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
 
                 {showRefresh && (
                     <button
-                        onClick={refreshData}
+                        onClick={() => refreshData()}
                         className={`p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 ${isDataLoading ? 'animate-spin' : ''}`}
                     >
                         <RefreshCcw size={18} />
@@ -102,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                         <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest">{currentUser?.role === 'commandant' ? 'Administrative Lead' : 'Service Officer'}</p>
                     </div>
                     <div className="w-8 h-8 md:w-9 md:h-9 shrink-0 bg-blue-500/10 rounded border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_10px_rgba(59,130,246,0.1)] text-xs md:text-sm">
-                        {currentUser?.fullName.charAt(0)}
+                        {(currentUser?.fullName || 'U').charAt(0)}
                     </div>
                 </div>
                 <button onClick={logout} className="hidden md:block p-2 text-blue-100/30 hover:text-rose-400 transition-colors" title="Sign Out">

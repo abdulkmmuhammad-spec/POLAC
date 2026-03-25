@@ -7,7 +7,7 @@ import { formatRC } from '../../utils/rcHelpers';
 import { ParadeType } from '../../types';
 
 export const DashboardOverview: React.FC = () => {
-    const { records, stats, courseSummary, yearSummary, activeRC, selectedParadeType, setSelectedParadeType } = useParade();
+    const { records, stats, courseSummary, activeRC, selectedParadeType, setSelectedParadeType } = useParade();
 
     const chartData = [
         { name: 'Present', value: Math.round(stats.totalCadets * (stats.presentToday / 100)), color: '#3b82f6' },
@@ -16,8 +16,6 @@ export const DashboardOverview: React.FC = () => {
         { name: 'Detention', value: records.reduce((sum, r) => sum + r.detentionCount, 0), color: '#6366f1' },
     ];
 
-    // Prefer course-based summary (new records), fall back to year-based (old records)
-    const useCourseView = courseSummary.length > 0;
 
     const paradeTypes = [
         { id: ParadeType.MUSTER, label: 'MUSTER', icon: '☀️' },
@@ -78,47 +76,29 @@ export const DashboardOverview: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                            {useCourseView ? (
-                                courseSummary.map(c => (
-                                    <tr key={c.courseNumber} className="hover:bg-slate-50 border-l-[3px] border-l-transparent hover:border-l-blue-900 transition-all font-mono">
-                                        <td className="px-6 py-4 font-black">
-                                            <span className="text-blue-900 tracking-tighter">
-                                                {formatRC(c.courseNumber)}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-slate-500 font-bold text-center">YEAR {c.currentLevel}</td>
-                                        <td className="px-6 py-4 text-emerald-600 font-black text-right">{c.present}</td>
-                                        <td className="px-6 py-4 text-rose-600 font-black text-right">{c.absent}</td>
-                                        <td className="px-6 py-4 text-amber-600 font-black text-right">{c.sick}</td>
-                                        <td className="px-6 py-4 text-indigo-600 font-black text-right">{c.detention}</td>
-                                        <td className="px-6 py-4 font-black text-slate-900 text-right bg-slate-50/30">{c.total}</td>
-                                    </tr>
-                                ))
-                            ) : (
-                                yearSummary.map(y => (
-                                    <tr key={y.year} className="hover:bg-slate-50 border-l-[3px] border-l-transparent hover:border-l-blue-900 transition-all font-mono">
-                                        <td className="px-6 py-4 font-black">
-                                            <span className="text-blue-900 tracking-tighter">
-                                                {formatRC(activeRC - (y.year - 1))}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-slate-500 font-bold text-center">YEAR {y.year}</td>
-                                        <td className="px-6 py-4 text-emerald-600 font-black text-right">{y.present}</td>
-                                        <td className="px-6 py-4 text-rose-600 font-black text-right">{y.absent}</td>
-                                        <td className="px-6 py-4 text-amber-600 font-black text-right">{y.sick}</td>
-                                        <td className="px-6 py-4 text-indigo-600 font-black text-right">{y.detention}</td>
-                                        <td className="px-6 py-4 font-black text-slate-900 text-right bg-slate-50/30">{y.total}</td>
-                                    </tr>
-                                ))
-                            )}
+                            {courseSummary.map(c => (
+                                <tr key={c.courseNumber} className="hover:bg-slate-50 border-l-[3px] border-l-transparent hover:border-l-blue-900 transition-all font-mono">
+                                    <td className="px-6 py-4 font-black">
+                                        <span className="text-blue-900 tracking-tighter">
+                                            {formatRC(c.courseNumber)}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-500 font-bold text-center">YEAR {c.currentLevel}</td>
+                                    <td className="px-6 py-4 text-emerald-600 font-black text-right">{c.present}</td>
+                                    <td className="px-6 py-4 text-rose-600 font-black text-right">{c.absent}</td>
+                                    <td className="px-6 py-4 text-amber-600 font-black text-right">{c.sick}</td>
+                                    <td className="px-6 py-4 text-indigo-600 font-black text-right">{c.detention}</td>
+                                    <td className="px-6 py-4 font-black text-slate-900 text-right bg-slate-50/30">{c.total}</td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
 
                     {/* Mobile List/Card View */}
                     <div className="md:hidden divide-y divide-slate-100">
-                        {(useCourseView ? courseSummary : yearSummary).map((item: any, idx) => {
-                            const rcLabel = useCourseView ? formatRC(item.courseNumber) : formatRC(activeRC - (item.year - 1));
-                            const yearLabel = useCourseView ? item.currentLevel : item.year;
+                        {courseSummary.map((item: any, idx) => {
+                            const rcLabel = formatRC(item.courseNumber);
+                            const yearLabel = item.currentLevel;
                             return (
                                 <div key={idx} className="p-4 space-y-4">
                                     <div className="flex items-center justify-between">

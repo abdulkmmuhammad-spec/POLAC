@@ -51,7 +51,7 @@ export const AuditLogView: React.FC = () => {
     };
 
     const filteredLogs = logs.filter(log =>
-        log.actorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (log.actorName ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         log.targetId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         JSON.stringify(log.payload).toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -167,7 +167,7 @@ export const AuditLogView: React.FC = () => {
                                             </td>
                                             <td className="p-4">
                                                 <span className={`px-2 py-1 rounded text-[9px] font-black border uppercase tracking-tight ${getActionColor(log.actionType)}`}>
-                                                    {log.actionType.replace('_', ' ')}
+                                                    {log.actionType.replace(/_/g, ' ')}
                                                 </span>
                                             </td>
                                             <td className="p-4">
@@ -224,7 +224,9 @@ export const AuditLogView: React.FC = () => {
                                                                 </div>
                                                                 <div className="flex justify-between text-xs border-b border-slate-200 pb-1">
                                                                     <span className="text-slate-400 font-bold">Actor Identity</span>
-                                                                    <span className="text-slate-600 uppercase font-black">{log.actorId.split('-')[0]}...</span>
+                                                                    <span className="text-slate-600 uppercase font-black">
+                                                                        {log.actorId ? `${log.actorId.split('-')[0]}...` : 'SYSTEM'}
+                                                                    </span>
                                                                 </div>
                                                                 <div className="flex justify-between text-xs border-b border-slate-200 pb-1">
                                                                     <span className="text-slate-400 font-bold">Protocol</span>

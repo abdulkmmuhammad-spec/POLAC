@@ -7,7 +7,7 @@ import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
 
 export const OfficerProfile: React.FC = () => {
-    const { currentUser, setCurrentUser } = useAuth();
+const { currentUser, setCurrentUser } = useAuth();
     const { isDataLoading, refreshData, activeRC } = useParade();
     const [showEdit, setShowEdit] = useState(false);
 

@@ -18,7 +18,7 @@ interface CadetRecordModalProps {
 }
 
 export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activeRC, onClose }) => {
-    const { currentUser } = useAuth();
+const { currentUser } = useAuth();
     const [stats, setStats] = useState({ absent: 0, sick: 0, detention: 0, lastEvent: null as any });
     const [isLoading, setIsLoading] = useState(true);
     const [isEditing, setIsEditing] = useState(false);
@@ -160,7 +160,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             doc.setFont('helvetica', 'bold');
             doc.text('NIGERIAN POLICE ACADEMY', 110, 28, { align: 'center' });
 
-            doc.setFontSize(13.5); // 10 * 1.35
+            doc.setFontSize(11.5); // Reduced from 13.5 to prevent logo overlap
             doc.setFont('helvetica', 'normal');
             doc.text('OFFICE OF THE COMMANDANT • OFFICIAL PERFORMANCE DOSSIER', 110, 38, { align: 'center' });
             doc.setFontSize(10.8);
@@ -536,7 +536,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                     onClose={() => setShowConfirm(false)}
                     onConfirm={handleSave}
                     title="Confirm Master Registry Edit"
-                    type="system"
+                    type="cadet"
                     data={{
                         officer: 'COMMANDANT',
                         action: 'MASTER_RECORD_STABILIZATION',

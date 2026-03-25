@@ -9,10 +9,6 @@ export const OfficerManager: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // New Officer Form
-    const [newName, setNewName] = useState('');
-    const [newServiceNumber, setNewServiceNumber] = useState('');
-    const [initialCourse, setInitialCourse] = useState<number>(12);
 
     const fetchOfficers = async () => {
         setIsLoading(true);
@@ -30,24 +26,6 @@ export const OfficerManager: React.FC = () => {
         fetchOfficers();
     }, []);
 
-    const handleCreateOfficer = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newName || !newServiceNumber) return;
-
-        setIsSubmitting(true);
-        try {
-            await dbService.inviteOfficer(newName, newServiceNumber, initialCourse);
-            toast.success(`Account created for ${newName} (SN: ${newServiceNumber})`);
-            setNewName('');
-            setNewServiceNumber('');
-            fetchOfficers();
-        } catch (err) {
-            toast.error('Failed to create officer account');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
     const handleUpdateAssignment = async (officerId: string | number, course: number) => {
         try {
             await dbService.updateOfficerAssignment(officerId, course);
@@ -61,60 +39,22 @@ export const OfficerManager: React.FC = () => {
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="bg-white p-4 md:p-8 rounded-lg shadow-sm border border-slate-200">
-                <div className="flex items-center gap-4 mb-8">
+                <div className="flex items-center gap-4 mb-4">
                     <div className="p-3 bg-blue-900 rounded-md text-white shadow-lg shadow-blue-900/10">
                         <UserPlus size={20} />
                     </div>
                     <div>
-                        <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Commission New Course Officer</h3>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Initialize secure service account via Service Number</p>
+                        <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Office Commissioning Instructions</h3>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Self-Service Registration Enforced</p>
                     </div>
                 </div>
 
-                <form onSubmit={handleCreateOfficer} className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Full Service Name</label>
-                        <input
-                            placeholder="e.g. CAPT. JOHN DOE"
-                            className="w-full px-4 py-3 rounded-md border border-slate-200 focus:ring-1 focus:ring-blue-900 outline-none transition-all text-xs font-bold uppercase placeholder:text-slate-300"
-                            value={newName}
-                            onChange={(e) => setNewName(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Service Number ID</label>
-                        <input
-                            placeholder="e.g. SN12345"
-                            className="w-full px-4 py-3 rounded-md border border-slate-200 focus:ring-1 focus:ring-blue-900 outline-none transition-all text-xs font-mono font-bold uppercase placeholder:text-slate-300"
-                            value={newServiceNumber}
-                            onChange={(e) => setNewServiceNumber(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Initial Duty Post</label>
-                        <select
-                            className="w-full px-4 py-3 rounded-md border border-slate-200 focus:ring-1 focus:ring-blue-900 outline-none transition-all bg-white text-xs font-bold uppercase"
-                            value={initialCourse}
-                            onChange={(e) => setInitialCourse(parseInt(e.target.value))}
-                        >
-                            {[12, 11, 10, 9, 8].map(rc => (
-                                <option key={rc} value={rc}>REGULAR COURSE {rc}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="flex items-end">
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black uppercase tracking-widest h-[46px] rounded-md transition-all shadow-md flex items-center justify-center gap-2 group text-[10px]"
-                        >
-                            <UserPlus size={14} className="group-hover:scale-110 transition-transform" />
-                            <span>Establish Account</span>
-                        </button>
-                    </div>
-                </form>
+                <div className="p-4 bg-blue-50/50 rounded-md border border-blue-100 flex items-start gap-3">
+                    <Shield size={14} className="text-blue-900 mt-0.5 shrink-0" />
+                    <p className="text-[10px] text-blue-900/80 leading-relaxed font-bold tracking-tight">
+                        <strong>SECURITY PROTOCOL UPDATE:</strong> Manual creation of Officer accounts has been deprecated to enforce strict access control and encrypted credentials. Ensure the Officer completes their initialization process on the main portal page before assigning them a seat.
+                    </p>
+                </div>
             </div>
 
             <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">

@@ -8,7 +8,7 @@ import { ParadeForm } from '../../Parade/ParadeForm';
 import { SubmissionHistory } from './SubmissionHistory';
 
 export const OfficerDashboard: React.FC = () => {
-    const { logout } = useAuth();
+const { logout } = useAuth();
     const location = useLocation();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
