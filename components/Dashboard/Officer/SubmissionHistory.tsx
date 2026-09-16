@@ -3,7 +3,7 @@ import { History, FileText, Eye } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useParade } from '../../../context/ParadeContext';
 import { SubmissionPreviewModal } from './SubmissionPreviewModal';
-import { ParadeRecord } from '../../../types';
+import { ParadeRecordMetadata } from '../../../types';
 
 export const SubmissionHistory: React.FC = () => {
 const { currentUser } = useAuth();
@@ -15,7 +15,7 @@ const { currentUser } = useAuth();
         currentPage,
         totalPages
     } = useParade();
-    const [selectedRecord, setSelectedRecord] = useState<ParadeRecord | null>(null);
+    const [selectedRecord, setSelectedRecord] = useState<ParadeRecordMetadata | null>(null);
 
     const officerRecords = records.filter(r => r.officerId === currentUser?.id);
 

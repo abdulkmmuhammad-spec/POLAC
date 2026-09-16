@@ -1,13 +1,84 @@
 import React from 'react';
-import { Users, CheckCircle, AlertCircle, Activity, Calendar, FileText, Zap } from 'lucide-react';
+import { Users, CheckCircle, AlertCircle, Activity, Calendar, FileText, Zap, History, RefreshCcw } from 'lucide-react';
 import { StatCard } from '../StatCard';
 import { AttendanceBarChart } from '../Charts';
 import { useParade } from '../../context/ParadeContext';
 import { formatRC } from '../../utils/rcHelpers';
 import { ParadeType } from '../../types';
+import AtRiskCadetsWidget from './Commandant/AtRiskCadetsWidget';
+
+const NetworkErrorFallback: React.FC<{ error: any, onRetry: () => void }> = ({ error, onRetry }) => {
+    const [isRetrying, setIsRetrying] = React.useState(false);
+    return (
+        <div className="flex flex-col items-center justify-center p-12 bg-amber-50 rounded-2xl border border-amber-200 mt-6 shadow-sm">
+            <AlertCircle size={48} className="text-amber-500 mb-4 animate-pulse" />
+            <h3 className="text-xl font-black text-amber-900 uppercase tracking-widest mb-2">Network Connection Interrupted</h3>
+            <p className="text-xs font-mono text-amber-700/70 mb-6 bg-white p-3 rounded-md shadow-inner border border-amber-100 max-w-lg text-center break-words">
+                {error?.message || 'Database execution failure. Unable to resolve host or connect to gateway.'}
+            </p>
+            <button
+                onClick={async () => {
+                    setIsRetrying(true);
+                    await onRetry();
+                    setTimeout(() => setIsRetrying(false), 500);
+                }}
+                disabled={isRetrying}
+                className="flex items-center gap-3 px-8 py-3.5 bg-amber-600 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-lg hover:bg-amber-700 hover:-translate-y-0.5 transition-all active:scale-95 disabled:opacity-50 disabled:hover:translate-y-0"
+            >
+                {isRetrying ? <RefreshCcw className="animate-spin" size={16} /> : <Zap size={16} />}
+                {isRetrying ? 'Reconnecting...' : 'Retry Connection'}
+            </button>
+        </div>
+    );
+};
 
 export const DashboardOverview: React.FC = () => {
-    const { records, stats, courseSummary, activeRC, selectedParadeType, setSelectedParadeType } = useParade();
+    const { records, stats, courseSummary, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
+    const [showYesterday, setShowYesterday] = React.useState(false);
+
+    // Auto-detect if today's data has arrived and reset yesterday view
+    React.useEffect(() => {
+        if (courseSummary.length > 0 && showYesterday) {
+            setShowYesterday(false);
+        }
+    }, [courseSummary.length, showYesterday]);
+
+    // Calculate Yesterday's Summary Fallback
+    const yesterdaySummary = React.useMemo(() => {
+        const now = new Date();
+        const watOffsetMs = 60 * 60 * 1000;
+        const watDate = new Date(now.getTime() + watOffsetMs);
+        watDate.setDate(watDate.getDate() - 1);
+        const yesterdayStr = watDate.toISOString().split('T')[0];
+        
+        const yesterdayRecords = records.filter(r => r.date === yesterdayStr && r.paradeType === selectedParadeType);
+        const courseNumbers = Array.from(
+            new Set(
+                yesterdayRecords
+                    .map(r => r.courseNumber ?? null)
+                    .filter((cn): cn is number => cn !== null)
+            )
+        ).sort((a: any, b: any) => (b as number) - (a as number));
+
+        return courseNumbers.map(cn => {
+            const courseRecords = yesterdayRecords.filter(r => r.courseNumber === cn);
+            return {
+                courseNumber: cn,
+                currentLevel: activeRC - cn + 1, // Simplified level calc matching context logic
+                total: courseRecords.reduce((s, r) => s + r.grandTotal, 0),
+                present: courseRecords.reduce((s, r) => s + r.presentCount, 0),
+                absent: courseRecords.reduce((s, r) => s + r.absentCount, 0),
+                sick: courseRecords.reduce((s, r) => s + r.sickCount, 0),
+                detention: courseRecords.reduce((s, r) => s + r.detentionCount, 0),
+                pass: courseRecords.reduce((s, r) => s + (r.passCount || 0), 0),
+                suspension: courseRecords.reduce((s, r) => s + (r.suspensionCount || 0), 0),
+                yet_to_report: courseRecords.reduce((s, r) => s + (r.yetToReportCount || 0), 0),
+            };
+        });
+    }, [records, activeRC, selectedParadeType]);
+
+    const displayData = showYesterday ? yesterdaySummary : courseSummary;
+    const isTodayEmpty = courseSummary.length === 0;
 
     const chartData = [
         { name: 'Present', value: Math.round(stats.totalCadets * (stats.presentToday / 100)), color: '#3b82f6' },
@@ -23,6 +94,10 @@ export const DashboardOverview: React.FC = () => {
         { id: ParadeType.TATTOO, label: 'TATTOO', icon: '🌙' },
     ];
 
+    if (isError) {
+        return <NetworkErrorFallback error={error} onRetry={refetchRecords} />;
+    }
+
     return (
         <div className="space-y-6 md:space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
@@ -32,6 +107,9 @@ export const DashboardOverview: React.FC = () => {
                 <StatCard label="cadets in sickbay" value={stats.sickCadets} icon={<Activity />} color="red" />
             </div>
 
+            {/* Antigravity Module: At-Risk Cadets Widget */}
+            <AtRiskCadetsWidget />
+
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b bg-slate-50/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
@@ -39,9 +117,11 @@ export const DashboardOverview: React.FC = () => {
                             <Zap size={18} />
                         </div>
                         <div>
-                            <p className="text-[10px] font-black text-blue-900 uppercase tracking-[0.2em] mb-0.5">Tactical Summary</p>
+                            <p className="text-[10px] font-black text-blue-900 uppercase tracking-[0.2em] mb-0.5">
+                                Tactical Summary • {showYesterday ? 'ARCHIVE DATA' : `Today ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`}
+                            </p>
                             <h3 className="font-black text-slate-900 uppercase tracking-tight text-sm">
-                                {selectedParadeType} FORMATION STATE
+                                {selectedParadeType} FORMATION STATE {showYesterday && '(YESTERDAY)'}
                             </h3>
                         </div>
                     </div>
@@ -72,11 +152,14 @@ export const DashboardOverview: React.FC = () => {
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">ABSENT</th>
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">SICK</th>
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">DETENTION</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">PASS</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">SUSPENSION</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">YET TO REPORT</th>
                                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">TOTAL</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                            {courseSummary.map(c => (
+                            {displayData.map(c => (
                                 <tr key={c.courseNumber} className="hover:bg-slate-50 border-l-[3px] border-l-transparent hover:border-l-blue-900 transition-all font-mono">
                                     <td className="px-6 py-4 font-black">
                                         <span className="text-blue-900 tracking-tighter">
@@ -88,15 +171,47 @@ export const DashboardOverview: React.FC = () => {
                                     <td className="px-6 py-4 text-rose-600 font-black text-right">{c.absent}</td>
                                     <td className="px-6 py-4 text-amber-600 font-black text-right">{c.sick}</td>
                                     <td className="px-6 py-4 text-indigo-600 font-black text-right">{c.detention}</td>
+                                    <td className="px-6 py-4 text-cyan-600 font-black text-right">{c.pass}</td>
+                                    <td className="px-6 py-4 text-slate-500 font-black text-right">{c.suspension}</td>
+                                    <td className="px-6 py-4 text-orange-600 font-black text-right">{c.yet_to_report}</td>
                                     <td className="px-6 py-4 font-black text-slate-900 text-right bg-slate-50/30">{c.total}</td>
                                 </tr>
                             ))}
+                            {displayData.length === 0 && (
+                                <tr>
+                                    <td colSpan={10} className="px-6 py-24 text-center">
+                                        {isTodayEmpty && !showYesterday ? (
+                                            <div className="flex flex-col items-center justify-center max-w-md mx-auto p-8 bg-blue-50/50 rounded-2xl border border-blue-100 shadow-[inset_0_2px_10px_rgba(30,58,138,0.03)] animate-in fade-in slide-in-from-bottom-2 duration-700">
+                                                <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4 shadow-sm border border-blue-200">
+                                                    <Calendar size={32} />
+                                                </div>
+                                                <h4 className="text-lg font-black text-blue-950 uppercase tracking-tight mb-2">No Command Returns Available</h4>
+                                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6 leading-relaxed">
+                                                    There are currently no parade states submitted for {selectedParadeType} formation today. Officers may not have completed their daily submissions yet.
+                                                </p>
+                                                <button 
+                                                    onClick={() => setShowYesterday(true)}
+                                                    className="group flex items-center gap-3 px-8 py-3.5 bg-blue-900 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-xl hover:bg-blue-800 hover:shadow-blue-900/30 hover:-translate-y-0.5 transition-all active:scale-95 border border-blue-700"
+                                                >
+                                                    <History size={16} className="group-hover:-rotate-45 transition-transform duration-300" />
+                                                    View Yesterday's Archive
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center gap-3 opacity-60">
+                                                <AlertCircle size={24} className="text-slate-400" />
+                                                <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] italic">No Historical Data Available in Command Buffer</p>
+                                            </div>
+                                        )}
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
 
                     {/* Mobile List/Card View */}
                     <div className="md:hidden divide-y divide-slate-100">
-                        {courseSummary.map((item: any, idx) => {
+                        {displayData.map((item: any, idx) => {
                             const rcLabel = formatRC(item.courseNumber);
                             const yearLabel = item.currentLevel;
                             return (
@@ -130,10 +245,51 @@ export const DashboardOverview: React.FC = () => {
                                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">DETN</span>
                                             <span className="text-xs font-black text-indigo-600 font-mono">{item.detention}</span>
                                         </div>
+                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">PASS</span>
+                                            <span className="text-xs font-black text-cyan-600 font-mono">{item.pass}</span>
+                                        </div>
+                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SUSP</span>
+                                            <span className="text-xs font-black text-slate-500 font-mono">{item.suspension}</span>
+                                        </div>
+                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between col-span-2">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">YET TO REPORT</span>
+                                            <span className="text-xs font-black text-orange-600 font-mono">{item.yet_to_report}</span>
+                                        </div>
                                     </div>
                                 </div>
                             );
                         })}
+                        {displayData.length === 0 && (
+                            <div className="p-8 text-center pb-12">
+                                {isTodayEmpty && !showYesterday ? (
+                                    <div className="flex flex-col items-center gap-4 bg-blue-50/50 p-6 rounded-2xl border border-blue-100 shadow-[inset_0_2px_10px_rgba(30,58,138,0.03)] animate-in fade-in zoom-in-95 duration-500">
+                                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shadow-sm border border-blue-200">
+                                            <Calendar size={24} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <h5 className="font-black text-blue-950 uppercase tracking-tight text-sm">Awaiting Submissions</h5>
+                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
+                                                No returns for {selectedParadeType} formation today.
+                                            </p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setShowYesterday(true)}
+                                            className="mt-2 w-full flex justify-center items-center gap-2 px-5 py-3 bg-blue-900 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl shadow-lg active:scale-95 transition-transform"
+                                        >
+                                            <History size={14} />
+                                            View Archive
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2 opacity-60 pt-4">
+                                        <AlertCircle size={20} className="text-slate-400" />
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">No Historical Data</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

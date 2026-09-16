@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCcw, LogOut, Bell, Menu } from 'lucide-react';
+import { RefreshCcw, LogOut, Bell, Menu, Volume2, VolumeX } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
 import { UserRole } from '../../types';
 import { dbService } from '../../services/dbService';
 import { ConfirmationModal } from './ConfirmationModal';
 import { NotificationDrawer } from './NotificationDrawer';
+import { audioService } from '../../services/audioService';
 
 interface HeaderProps {
     title: string;
@@ -15,10 +17,11 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onProfileClick, onMenuClick }) => {
-const { currentUser, logout } = useAuth();
+    const { currentUser, logout } = useAuth();
     const { isDataLoading, refreshData, notifications, markNotificationRead, markAllAsRead } = useParade();
     const [showDrawer, setShowDrawer] = useState(false);
     const [showConfirmClear, setShowConfirmClear] = useState(false);
+    const [isAudioArmed, setIsAudioArmed] = useState(false);
 
     // Determine if user is commandant (sees all) or course officer (sees only own)
     const isCommandant = currentUser?.role === UserRole.COMMANDANT;
@@ -35,9 +38,20 @@ const { currentUser, logout } = useAuth();
     const unreadCount = displayNotifications.filter(n => !n.read).length;
 
     const handleOpenDrawer = () => {
+        // Unlock audio on first interaction if not already armed
+        if (!isAudioArmed) {
+            audioService.unlock().then(() => setIsAudioArmed(true));
+        }
         setShowDrawer(true);
-        // Load notifications with appropriate filter based on role
         refreshData(officerNameFilter);
+    };
+
+    const toggleAudio = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        audioService.unlock().then(() => {
+            setIsAudioArmed(true);
+            audioService.play('success');
+        });
     };
 
     const handleClearLogs = async () => {
@@ -52,7 +66,7 @@ const { currentUser, logout } = useAuth();
     };
 
     return (
-        <header className="bg-blue-900 border-b border-white/10 h-20 flex items-center justify-between px-4 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+        <header className="bg-blue-900 border-b border-white/10 h-20 flex items-center justify-between px-4 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
             <div className="flex items-center gap-1 md:gap-4 min-w-0">
                 {onMenuClick && (
                     <button
@@ -66,24 +80,59 @@ const { currentUser, logout } = useAuth();
                     <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
                     <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight">{title}</h2>
                 </div>
-                <span className="hidden sm:inline-block px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded border border-blue-400/20 shrink-0 uppercase tracking-widest ml-2">Secure</span>
+                <span className="hidden sm:inline-block px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded border border-blue-400/20 shrink-0 uppercase tracking-widest ml-2">Secure Live Feed</span>
             </div>
 
             <div className="flex items-center gap-1 md:gap-4 shrink-0">
+                {/* Audio Status Guard */}
+                <button
+                    onClick={toggleAudio}
+                    className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full transition-all border ${
+                        isAudioArmed 
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400 animate-pulse'
+                    }`}
+                    title={isAudioArmed ? 'Audio Alerts Armed' : 'Click to Arm Audio Alerts'}
+                >
+                    {isAudioArmed ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                    <span className="text-[9px] font-black uppercase tracking-wider">
+                        {isAudioArmed ? 'Armed' : 'Muted'}
+                    </span>
+                </button>
+
                 {/* Notification Bell */}
                 <button
                     onClick={handleOpenDrawer}
-                    className="p-2.5 rounded-md transition-all relative text-blue-200 hover:bg-white/5 hover:border-white/10 border border-transparent"
+                    className="p-2.5 rounded-xl transition-all relative text-blue-200 hover:bg-white/10 hover:border-white/20 border border-white/5 bg-white/5 group"
                 >
-                    <Bell size={18} />
-                    {unreadCount > 0 && (
-                        <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full shadow-[0_0_8px_rgba(244,63,94,0.6)] animate-pulse" />
-                    )}
+                    <motion.div
+                        animate={{ 
+                            rotate: unreadCount > 0 ? [0, -15, 15, -15, 15, 0] : 0,
+                            scale: unreadCount > 0 ? [1, 1.1, 1] : 1
+                        }}
+                        transition={{ 
+                            duration: 0.5, 
+                            repeat: unreadCount > 0 ? Infinity : 0, 
+                            repeatDelay: 4 
+                        }}
+                    >
+                        <Bell size={20} className="group-hover:text-white transition-colors" />
+                    </motion.div>
+                    <AnimatePresence>
+                        {unreadCount > 0 && (
+                            <motion.span 
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                exit={{ scale: 0 }}
+                                className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 rounded-full shadow-[0_0_12px_rgba(244,63,94,0.8)] border-2 border-blue-900"
+                            />
+                        )}
+                    </AnimatePresence>
                 </button>
 
                 {showRefresh && (
                     <button
-                        onClick={() => refreshData()}
+                        onClick={() => refreshData(officerNameFilter)}
                         className={`p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 ${isDataLoading ? 'animate-spin' : ''}`}
                     >
                         <RefreshCcw size={18} />
@@ -95,17 +144,16 @@ const { currentUser, logout } = useAuth();
                 <div
                     onClick={onProfileClick}
                     className={`flex items-center gap-1 md:gap-4 ${onProfileClick ? 'cursor-pointer group hover:bg-white/5 p-1 md:px-3 md:py-2 rounded-md border border-transparent hover:border-white/10 transition-all' : ''}`}
-                    title={onProfileClick ? 'Open System Settings' : ''}
                 >
                     <div className="text-right hidden md:block">
-                        <p className="text-[11px] font-black text-white uppercase tracking-wider group-hover:text-blue-400 transition-colors uppercase">{currentUser?.fullName}</p>
-                        <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest">{currentUser?.role === 'commandant' ? 'Administrative Lead' : 'Service Officer'}</p>
+                        <p className="text-[11px] font-black text-white uppercase tracking-wider group-hover:text-blue-400 transition-colors">{currentUser?.fullName}</p>
+                        <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest leading-none mt-0.5">{currentUser?.role === 'commandant' ? 'Commandant' : 'Course Officer'}</p>
                     </div>
-                    <div className="w-8 h-8 md:w-9 md:h-9 shrink-0 bg-blue-500/10 rounded border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_10px_rgba(59,130,246,0.1)] text-xs md:text-sm">
+                    <div className="w-9 h-9 shrink-0 bg-blue-600/20 rounded-xl border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_15px_rgba(59,130,246,0.1)] text-sm">
                         {(currentUser?.fullName || 'U').charAt(0)}
                     </div>
                 </div>
-                <button onClick={logout} className="hidden md:block p-2 text-blue-100/30 hover:text-rose-400 transition-colors" title="Sign Out">
+                <button onClick={logout} className="hidden md:block p-2 text-white/20 hover:text-rose-400 transition-colors" title="Sign Out">
                     <LogOut size={18} />
                 </button>
             </div>

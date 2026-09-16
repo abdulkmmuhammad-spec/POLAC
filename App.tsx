@@ -8,6 +8,16 @@ import { CommandantDashboard } from './components/Dashboard/Commandant/Commandan
 import { OfficerDashboard } from './components/Dashboard/Officer/OfficerDashboard';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/Layout/ErrorBoundary';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 3,
+      retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 30000),
+    },
+  },
+});
 
 // ─── Full-screen loading spinner ────────────────────────────────
 const FullScreenSpinner: React.FC = () => (
@@ -23,6 +33,10 @@ const FullScreenSpinner: React.FC = () => (
 // Protects routes that require authentication and a specific role.
 const ProtectedRoute: React.FC<{ allowedRoles: UserRole[] }> = ({ allowedRoles }) => {
   const { authState } = useAuth();
+
+  if (authState.status === 'initializing') {
+    return <FullScreenSpinner />;
+  }
 
   if (authState.status !== 'authenticated') {
     return <Navigate to="/login" replace />;
@@ -42,6 +56,10 @@ const ProtectedRoute: React.FC<{ allowedRoles: UserRole[] }> = ({ allowedRoles }
 const PublicRoute: React.FC = () => {
   const { authState } = useAuth();
 
+  if (authState.status === 'initializing') {
+    return <FullScreenSpinner />;
+  }
+
   if (authState.status === 'authenticated') {
     // Already logged in — redirect to appropriate dashboard
     const destination = authState.user.role === UserRole.COMMANDANT
@@ -57,6 +75,10 @@ const PublicRoute: React.FC = () => {
 // Smart redirect based on auth state.
 const RootRoute: React.FC = () => {
   const { authState } = useAuth();
+
+  if (authState.status === 'initializing') {
+    return <FullScreenSpinner />;
+  }
 
   if (authState.status !== 'authenticated') {
     return <Navigate to="/login" replace />;
@@ -109,13 +131,15 @@ const AppContent: React.FC = () => {
 // ─── App Root ───────────────────────────────────────────────────
 const App: React.FC = () => {
   return (
-    <BrowserRouter>
-      <ErrorBoundary>
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-      </ErrorBoundary>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ErrorBoundary>
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+        </ErrorBoundary>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 };
 

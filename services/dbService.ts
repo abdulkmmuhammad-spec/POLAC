@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { ParadeRecord, User, Notification, CadetStatus, AuditEvent } from '../types';
+import { ParadeRecord, ParadeRecordMetadata, FullParadeRecord, CadetDetail, User, Notification, CadetStatus, AuditEvent } from '../types';
 
 /**
  * The Supabase client requires a valid URL and Anon Key.
@@ -25,9 +25,9 @@ export const dbService = {
         .single();
       if (error) throw error;
       return { data: parseInt(data?.value || '12', 10), error: null };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Supabase Error (getActiveRC):', err);
-      return { data: 12, error: err };
+      throw new Error(err.message || 'Database execution failure');
     }
   },
 
@@ -79,16 +79,9 @@ export const dbService = {
       });
 
       return { data: settings, error: null };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Supabase Error (getSubmissionSettings):', err);
-      return {
-        data: {
-          musterStartHour: MUSTER_START_DEFAULT,
-          musterEndHour: MUSTER_END_DEFAULT,
-          tattooStartHour: TATTOO_START_DEFAULT,
-        },
-        error: err
-      };
+      throw new Error(err.message || 'Database execution failure');
     }
   },
 
@@ -153,7 +146,8 @@ export const dbService = {
       const { data, error } = await supabase
         .from('users')
         .select('*')
-        .eq('role', 'course_officer');
+        .eq('role', 'course_officer')
+        .limit(100);
       if (error) {
         console.error('getOfficers error:', error.message);
         throw error;
@@ -166,7 +160,7 @@ export const dbService = {
         courseName: d.course_name,
         yearGroup: d.year_group,
         courseNumber: d.course_number ? parseInt(d.course_number) : undefined,
-        totalCadets: d.total_cadets,
+        total_cadets: d.total_cadets,
         profileImage: d.profile_image_url,
         serviceNumber: d.service_number || d.username
       }));
@@ -175,9 +169,36 @@ export const dbService = {
       throw err;
     }
   },
+  registerOfficer: async (commandantId: string | number, officerData: { email: string; password: string; username: string; role: string }) => {
+    try {
+      // Backend Cap Enforcement
+      if (officerData.role === 'course_officer') {
+        const { count, error: countError } = await supabase
+          .from('users')
+          .select('*', { count: 'exact', head: true })
+          .eq('role', 'course_officer')
+          .eq('is_active', true);
 
+        if (countError) throw countError;
+        if (count !== null && count >= 5) {
+          throw new Error("Maximum operational capacity reached. Route replacements through the Lifecycle Engine.");
+        }
+      }
 
-
+      const { data, error } = await supabase.rpc('admin_register_officer', {
+        p_commandant_id: commandantId,
+        p_email: officerData.email.toLowerCase().trim(),
+        p_password: officerData.password,
+        p_username: officerData.username.trim(),
+        p_role: officerData.role
+      });
+      if (error) throw error;
+      return { data, error: null };
+    } catch (err: any) {
+      console.error('Supabase Error (registerOfficer):', err);
+      throw err;
+    }
+  },
   updateOfficerAssignment: async (officerId: string | number, courseNumber: number): Promise<void> => {
     try {
       const { error } = await supabase
@@ -195,12 +216,32 @@ export const dbService = {
     }
   },
 
+  deactivateOfficerForCourse: async (courseNumber: number): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({
+          is_active: false,
+          course_number: null,
+          course_name: null
+        })
+        .eq('course_number', courseNumber)
+        .eq('role', 'course_officer');
+
+      if (error) throw error;
+    } catch (err) {
+      console.error('Supabase Error (deactivateOfficerForCourse):', err);
+      throw err;
+    }
+  },
+
   getAllUsers: async (): Promise<User[]> => {
     try {
       const { data, error } = await supabase
         .from('users')
         .select('*')
-        .order('role', { ascending: true });
+        .order('role', { ascending: true })
+        .limit(100);
       if (error) throw error;
       return (data || []).map(d => ({
         id: d.id,
@@ -213,8 +254,9 @@ export const dbService = {
         totalCadets: d.total_cadets,
         profileImage: d.profile_image_url,
         serviceNumber: d.service_number || d.username,
-        email: d.email, // Explicitly include email/password for override view
-        password: d.password
+        email: d.email,
+        password: '••••••••', // Security Redaction
+        isActive: d.is_active
       }));
     } catch (err) {
       console.error('Supabase Error (getAllUsers):', err);
@@ -222,60 +264,70 @@ export const dbService = {
     }
   },
 
-  updateUserCredentials: async (userId: string | number, payload: { email?: string; password?: string; course_name?: string }, actorName: string) => {
+  verifyCommandantAccess: async (userId: string | number, password: string): Promise<boolean> => {
     try {
-      // 1. Perform Update
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('users')
-        .update(payload)
-        .eq('id', userId);
+        .select('id')
+        .eq('id', userId)
+        .eq('role', 'commandant')
+        .eq('password', password)
+        .limit(1);
       
-      if (error) throw error;
-
-      // 2. Log Forensic Audit Event
-      await dbService.logAuditEvent({
-        actorId: 'COMMAND_OVERRIDE',
-        actorName: actorName,
-        actionType: 'CREDENTIAL_OVERRIDE',
-        targetId: String(userId),
-        payload: {
-          timestamp: new Date().toISOString(),
-          changedFields: Object.keys(payload),
-          note: "Sensitive credential modification via Commandant Control"
-        }
-      });
-
-      // 3. Add system notification
-      await dbService.addNotification({
-        type: 'settings_change',
-        title: 'Security Credential Override',
-        content: `Commandant [${actorName}] forcefully updated credentials for User ID: ${userId}`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        officerName: 'COMMANDANT',
-        yearGroup: 1,
-        courseNumber: 0
-      });
-
-    } catch (err) {
-      console.error('Supabase Error (updateUserCredentials):', err);
-      throw err;
+      if (error || !data || data.length === 0) return false;
+      return true;
+    } catch {
+      return false;
     }
   },
 
+    // updateUserCredentials moved to standalone function
+
   // ─── Parade Records ───────────────────────────────────────────────────────
 
-  getRecords: async (from: number, to: number): Promise<{ data: ParadeRecord[]; error: any }> => {
+  getRecords: async ({ viewerId, role, courseNumber, cursor, limit = 20 }: { viewerId?: string | number; role?: string; courseNumber?: number; cursor?: string; limit?: number } = {}): Promise<{ data: ParadeRecordMetadata[]; nextCursor: string | null; error: any }> => {
     try {
-      const { data, error } = await supabase
-        .from('parade_records')
-        .select('*, cadet_details(*) ')
+      // ── Explicit column projection ─────────────────────────────────────────
+      // Never use select('*') on parade_records. Pinning to named columns
+      // ensures future schema additions (e.g. large text blobs, audit trails)
+      // can never accidentally bloat the payload returned to the client.
+      // All aggregate counts are pre-computed columns — no JOINs needed here.
+      const selectFields = `id, officer_id, officer_name, course_name, year_group, course_number,
+           date, parade_type, present_count, absent_count, sick_count, detention_count,
+           pass_count, suspension_count, yet_to_report_count, grand_total, created_at`;
+
+      let query;
+      
+      if (role === 'commandant' && viewerId) {
+        query = supabase
+          .rpc('get_commandant_parade_overview', { p_viewer_id: String(viewerId) })
+          .select(selectFields);
+      } else {
+        query = supabase
+          .from('parade_records')
+          .select(selectFields);
+
+        if (courseNumber !== undefined) {
+          query = query.eq('course_number', courseNumber);
+        }
+      }
+
+      query = query
         .order('created_at', { ascending: false })
-        .range(from, to);
+        .limit(limit);
+
+      // Cursor-based pagination: fetch records older than the last seen cursor.
+      // This is O(log n) via the created_at index regardless of dataset size,
+      // unlike OFFSET pagination which degrades to O(n) on large tables.
+      if (cursor) {
+        query = query.lt('created_at', cursor);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
-      return {
-        data: (data || []).map(r => ({
+      
+      const formattedData: ParadeRecordMetadata[] = (data || []).map(r => ({
           id: r.id,
           date: r.date,
           paradeType: r.parade_type,
@@ -292,14 +344,48 @@ export const dbService = {
           officerName: r.officer_name,
           officerId: r.officer_id,
           courseName: r.course_name,
-          cadets: r.cadet_details || [],
-          status: r.status,
           createdAt: r.created_at
-        })),
+      }));
+
+      // The next cursor is the `created_at` of the last record in this batch.
+      // Subsequent calls pass this as the `cursor` argument to continue paging.
+      const nextCursor = formattedData.length > 0 ? formattedData[formattedData.length - 1].createdAt : null;
+
+      return {
+        data: formattedData,
+        nextCursor,
         error: null
       };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Supabase Error (getRecords):', err);
+      throw new Error(err.message || 'Database execution failure');
+    }
+  },
+
+  getParadeDetails: async (paradeId: string | number): Promise<{ data: CadetDetail[]; error: any }> => {
+    try {
+      // ── Lazy-load query ────────────────────────────────────────────────────
+      // This function is the ONLY place where cadet-level data is fetched.
+      // It fires on-demand (when an officer opens a submission preview) and
+      // is powered by the covering index idx_cadet_details_record_id_covering
+      // created in migration 20260701_bottleneck_1b_lazy_load_index.sql.
+      //
+      // The DB engine satisfies this SELECT entirely from the index (index-only
+      // scan) — no heap access needed, even with thousands of cadet rows.
+      //
+      // Column set: name, squad, status — exactly what the UI needs. Nothing more.
+      const { data, error } = await supabase
+        .from('cadet_details')
+        .select('name, squad, status')
+        .eq('record_id', paradeId)
+        .order('squad', { ascending: true })   // Group by squad for readable display
+        .order('name', { ascending: true });    // Alphabetical within each squad
+
+      if (error) throw error;
+
+      return { data: (data || []) as CadetDetail[], error: null };
+    } catch (err) {
+      console.error('Supabase Error (getParadeDetails):', err);
       return { data: [], error: err };
     }
   },
@@ -308,13 +394,61 @@ export const dbService = {
     try {
       const { count, error } = await supabase
         .from('parade_records')
-        .select('*', { count: 'exact', head: true });
+        .select('id', { count: 'exact', head: true });
 
       if (error) throw error;
       return count || 0;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Supabase Error (getTotalRecordsCount):', err);
-      return 0;
+      throw new Error(err.message || 'Database execution failure');
+    }
+  },
+
+  fetchHistoricalTrace: async (filters: { startDate?: string; endDate?: string; courseNumber?: number; status?: string; searchTerm?: string }) => {
+    try {
+      const { data, error } = await supabase.rpc('get_historical_trace', {
+        p_start_date: filters.startDate || null,
+        p_end_date: filters.endDate || null,
+        p_course_number: filters.courseNumber || null,
+        p_status: filters.status || 'all',
+        p_search_term: filters.searchTerm || null
+      });
+
+      if (error) throw error;
+      return { data: data || [], error: null };
+    } catch (err) {
+      console.error('Supabase Error (fetchHistoricalTrace):', err);
+      return { data: [], error: err };
+    }
+  },
+
+  // ─── Analytics ────────────────────────────────────────────────────────────
+
+  /**
+   * Queries the high-performance Materialized View for dashboard analytics.
+   * This is O(1) index lookup and prevents scanning the massive operational tables.
+   */
+  fetchHistoricalAnalytics: async (filters: { courseNumber?: number; limit?: number } = {}) => {
+    try {
+      let query = supabase
+        .from('mv_historical_parade_analytics')
+        .select('*')
+        .order('record_date', { ascending: false });
+
+      if (filters.courseNumber) {
+        query = query.eq('course_number', filters.courseNumber);
+      }
+      
+      if (filters.limit) {
+        query = query.limit(filters.limit);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return { data: data || [], error: null };
+    } catch (err) {
+      console.error('Supabase Error (fetchHistoricalAnalytics):', err);
+      return { data: [], error: err };
     }
   },
 
@@ -336,43 +470,32 @@ export const dbService = {
     // ─── END MATH VERIFICATION ─────────────────────────────────────────────
 
     try {
-      const { data: recordData, error: recordError } = await supabase
-        .from('parade_records')
-        .insert({
-          officer_id: record.officerId,
-          officer_name: record.officerName,
-          course_name: record.courseName,
-          year_group: record.yearGroup,
-          course_number: record.courseNumber ? String(record.courseNumber) : null,
-          date: record.date,
-          parade_type: record.paradeType,
-          present_count: record.presentCount,
-          absent_count: record.absentCount,
-          sick_count: record.sickCount,
-          detention_count: record.detentionCount,
-          pass_count: record.passCount || 0,
-          suspension_count: record.suspensionCount || 0,
-          yet_to_report_count: record.yetToReportCount || 0,
-          grand_total: record.grandTotal
-        })
-        .select()
-        .single();
-
-      if (recordError) throw recordError;
-
-      if (record.cadets.length > 0) {
-        const cadetsToInsert = record.cadets.map(c => ({
-          record_id: recordData.id,
+      const { data, error } = await supabase.rpc('submit_parade_state', {
+        p_officer_id: String(record.officerId),
+        p_officer_name: record.officerName,
+        p_course_name: record.courseName,
+        p_year_group: record.yearGroup,
+        p_course_number: record.courseNumber ? String(record.courseNumber) : null,
+        p_date: record.date,
+        p_parade_type: record.paradeType,
+        p_present_count: record.presentCount,
+        p_absent_count: record.absentCount,
+        p_sick_count: record.sickCount,
+        p_detention_count: record.detentionCount,
+        p_pass_count: record.passCount || 0,
+        p_suspension_count: record.suspensionCount || 0,
+        p_yet_to_report_count: record.yetToReportCount || 0,
+        p_grand_total: record.grandTotal,
+        p_cadet_records: record.cadets.map(c => ({
           name: c.name,
           squad: c.squad,
           status: c.status
-        }));
+        }))
+      });
 
-        const { error: cadetError } = await supabase
-          .from('cadet_details')
-          .insert(cadetsToInsert);
-
-        if (cadetError) throw cadetError;
+      if (error) {
+        console.error('Failed to submit atomic parade state:', error);
+        throw new Error(`Database transaction aborted: ${error.message}`);
       }
 
       await dbService.addNotification({
@@ -385,6 +508,8 @@ export const dbService = {
         yearGroup: record.yearGroup,
         courseNumber: record.courseNumber
       });
+      
+      return data;
     } catch (err) {
       console.error('Supabase Error (saveRecord):', err);
       throw err;
@@ -397,7 +522,8 @@ export const dbService = {
     try {
       let query = supabase
         .from('notifications')
-        .select('*')
+        .select('id, type, title, content, timestamp, read, officer_name, year_group, course_number, archived_at')
+        .is('archived_at', null) // Only fetch non-archived items by default
         .order('timestamp', { ascending: false });
 
       // If officerName provided, filter by it (for course officers)
@@ -418,29 +544,35 @@ export const dbService = {
           read: n.read,
           officerName: n.officer_name,
           yearGroup: n.year_group,
-          courseNumber: n.course_number // Correct semantic mapping
+          courseNumber: n.course_number,
+          archivedAt: n.archived_at
         })),
         error: null
       };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Supabase Error (getNotifications):', err);
-      return { data: [], error: err };
+      throw new Error(err.message || 'Database execution failure');
     }
   },
 
   // ─── Audit Log (Querying audit_events table) ──────────────────────────────
-
   getAuditLogs: async (filters?: {
     actorName?: string;
     actionType?: string;
     startDate?: string;
     endDate?: string;
+    page?: number;
     limit?: number;
-  }): Promise<{ data: AuditEvent[]; error: any }> => {
+  }): Promise<{ data: AuditEvent[]; count: number | null; error: any }> => {
     try {
+      const page = filters?.page || 1;
+      const limit = filters?.limit || 20;
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+
       let query = supabase
         .from('audit_events')
-        .select('*')
+        .select('id, actor_id, actor_name, action_type, target_id, payload, created_at', { count: 'exact' })
         .order('created_at', { ascending: false });
 
       if (filters?.actorName) {
@@ -459,7 +591,7 @@ export const dbService = {
         query = query.lte('created_at', filters.endDate + 'T23:59:59');
       }
 
-      const { data, error } = await query.limit(filters?.limit || 200);
+      const { data, error, count } = await query.range(from, to);
 
       if (error) throw error;
       return {
@@ -472,25 +604,26 @@ export const dbService = {
           payload: a.payload,
           createdAt: a.created_at
         })),
+        count: count,
         error: null
       };
     } catch (err) {
       console.error('Supabase Error (getAuditLogs):', err);
-      return { data: [], error: err };
+      return { data: [], count: 0, error: err };
     }
   },
-
   logAuditEvent: async (event: Omit<AuditEvent, 'id' | 'createdAt'>) => {
     try {
-      const { error } = await supabase
-        .from('audit_events')
-        .insert({
-          actor_id: event.actorId,
-          actor_name: event.actorName,
-          action_type: event.actionType,
-          target_id: event.targetId,
-          payload: event.payload
-        });
+      // Use the Secure RPC instead of direct INSERT (Blocked by RLS)
+      const { error } = await supabase.rpc('log_audit_event_secure', {
+        p_action_type: event.actionType,
+        p_target_id: event.targetId,
+        p_payload: {
+          ...event.payload,
+          protocol: 'SECURE_DASHBOARD_V2',
+          client_timestamp: new Date().toISOString()
+        }
+      });
       if (error) throw error;
     } catch (err) {
       console.error('Audit Logging Failed:', err);
@@ -541,8 +674,9 @@ export const dbService = {
     try {
       const { error } = await supabase
         .from('notifications')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000');
+        .update({ archived_at: new Date().toISOString() })
+        .is('archived_at', null);
+
       if (error) throw error;
     } catch (err) {
       console.error('Supabase Error (clearNotifications):', err);
@@ -563,14 +697,26 @@ export const dbService = {
 
   // ─── Cadet Registry ───────────────────────────────────────────────────────
 
-  getCadetRegistry: async (from?: number, to?: number, searchTerm?: string, courseNumber?: number): Promise<any[]> => {
+  getCadetRegistry: async (from?: number, to?: number, searchTerm?: string, courseNumber?: number, statusFilter?: string): Promise<any[]> => {
     try {
       let query = supabase
         .from('cadet_registry')
-        .select('*')
+        .select('id, name, squad, course_number, year_group, avatar_url, status, relegated_from_rc')
         .order('course_number', { ascending: true }) // Year 5 at the top, Year 1 at the bottom
         .order('squad', { ascending: true })
         .order('name', { ascending: true });
+
+      if (statusFilter === 'DISMISSED') {
+        query = query.eq('status', 'DISMISSED');
+      } else if (statusFilter === 'GRADUATED') {
+        query = query.eq('status', 'GRADUATED');
+      } else if (statusFilter === 'RELEGATED') {
+        query = query.eq('status', 'ACTIVE').not('relegated_from_rc', 'is', null);
+      } else if (statusFilter === 'ACTIVE') {
+        query = query.eq('status', 'ACTIVE').is('relegated_from_rc', null);
+      } else {
+        query = query.eq('status', 'ACTIVE'); // Exclude dismissed and graduated efficiently by default
+      }
 
       // Filter by course number if provided
       if (courseNumber !== undefined && courseNumber > 0) {
@@ -594,14 +740,34 @@ export const dbService = {
     }
   },
 
-  getNominalRollData: async (courseNumber: number): Promise<any[]> => {
+  getGraduatedCohortsSummary: async (): Promise<any[]> => {
     try {
-      // 1. Lean Fetch: Selected fields only for maximum speed
-      // Sort by squad (numeric ascending) then by name (alpha ascending)
+      const { data, error } = await supabase
+        .from('graduated_cohorts_summary')
+        .select('*');
+        
+      if (error) throw error;
+      
+      // Map to the expected frontend interface
+      return (data || []).map(r => ({
+        courseNumber: r.course_number,
+        totalCadets: r.cadet_count,
+        graduationDate: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('Supabase Error (getGraduatedCohortsSummary):', err);
+      return [];
+    }
+  },
+
+  getNominalRollData: async (courseNumber: number, includeGraduated = false): Promise<any[]> => {
+    try {
+      const statusToQuery = includeGraduated ? 'GRADUATED' : 'ACTIVE';
       const { data: registry, error: regError } = await supabase
         .from('cadet_registry')
         .select('id, name, squad')
         .eq('course_number', courseNumber)
+        .eq('status', statusToQuery)
         .order('squad', { ascending: true })
         .order('name', { ascending: true });
 
@@ -616,39 +782,39 @@ export const dbService = {
   updateCadetRegistry: async (id: string | number, updates: any, officer: User) => {
     try {
       // Perform atomic update via RPC to ensure consistent read-before-write state
-      const { data, error: rpcError } = await supabase.rpc('update_cadet_registry_with_audit', {
+      const { error: rpcError } = await supabase.rpc('update_cadet_registry_with_audit', {
         p_id: id,
         p_name: updates.name,
         p_squad: updates.squad,
         p_course_number: updates.course_number,
-        p_year_group: updates.year_group
+        p_year_group: updates.year_group,
+        p_avatar_url: updates.avatar_url
       });
 
       if (rpcError) throw rpcError;
 
-      const result = Array.isArray(data) ? data[0] : data;
-      const oldRec = result.old_record;
-      const newRec = result.new_record;
-
-      // 3. Log to Forensic Audit Table (Decoupled from Notifications)
-      await dbService.logAuditEvent({
-        actorId: String(officer.id),
-        actorName: officer.fullName,
-        actionType: 'CADET_MODIFIED',
-        targetId: String(id),
-        payload: {
-          cadetName: newRec.name,
-          before: oldRec,
-          after: newRec,
-          diff: Object.keys(updates)
-            .filter(key => oldRec[key] !== newRec[key])
-            .map(key => ({ field: key, from: oldRec[key], to: newRec[key] }))
-        }
-      });
+      // NOTE: Manual logAuditEvent removed. 
+      // Handled by DB Trigger 'trg_audit_cadet_registry_mod' for 100% reliability.
 
       return { error: null };
     } catch (err) {
       console.error('Supabase Error (updateCadetRegistry):', err);
+      return { error: err };
+    }
+  },
+
+  dismissCadetV2: async (cadetId: string, reason: string, actorId: string, actorName: string) => {
+    try {
+      const { error } = await supabase.rpc('dismiss_cadet_v2', {
+        p_cadet_id: cadetId,
+        p_reason: reason,
+        p_actor_id: actorId,
+        p_actor_name: actorName
+      });
+      if (error) throw error;
+      return { error: null };
+    } catch (err) {
+      console.error('Supabase Error (dismissCadetV2):', err);
       return { error: err };
     }
   },
@@ -670,15 +836,15 @@ export const dbService = {
       if (error) throw error;
 
       const stats = {
-        absent: (data || []).filter(c => c.status === 'absent').length,
-        sick: (data || []).filter(c => c.status === 'sick').length,
-        detention: (data || []).filter(c => c.status === 'detention').length,
+        absent: (data || []).filter(c => c.status?.toLowerCase() === 'absent').length,
+        sick: (data || []).filter(c => c.status?.toLowerCase() === 'sick').length,
+        detention: (data || []).filter(c => c.status?.toLowerCase() === 'detention').length,
         lastEvent: null as any
       };
 
       // Find the most recent non-present event
       const nonPresentHistory = (data || [])
-        .filter(c => c.status !== 'present' && c.parade_records)
+        .filter(c => c.status?.toLowerCase() !== 'present' && c.parade_records)
         .sort((a: any, b: any) =>
           new Date(b.parade_records.created_at).getTime() - new Date(a.parade_records.created_at).getTime()
         );
@@ -795,5 +961,69 @@ export const dbService = {
     } catch {
       return false;
     }
+  },
+
+  uploadCadetPhoto: async (cadetId: string, file: File) => {
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${cadetId}_${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { data, error: uploadError } = await supabase.storage
+        .from('cadet-photos')
+        .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('cadet-photos')
+        .getPublicUrl(filePath);
+
+      return { publicUrl, error: null };
+    } catch (err) {
+      console.error('Photo Upload Error:', err);
+      return { publicUrl: null, error: err };
+    }
   }
 };
+
+export async function updateUserCredentials(payload: {
+  adminId: string;
+  targetUserId: string;
+  newEmail?: string;
+  newCourseAssignment?: number | string;
+  auditDetails: string;
+  newPassword?: string;
+}) {
+  // Ensure we don't have empty UUIDs
+  if (!payload.adminId || !payload.targetUserId) {
+    throw new Error("Missing critical security identifiers (UUIDs).");
+  }
+
+  // Format the course assignment to match our updated SQL TEXT parameter
+  let formattedCourse: string | null = null;
+  if (payload.newCourseAssignment !== undefined && payload.newCourseAssignment !== null) {
+    const trimmed = payload.newCourseAssignment.toString().trim();
+    formattedCourse = trimmed === '' ? null : trimmed;
+  }
+
+  const rpcPayload = {
+    p_admin_id: payload.adminId,
+    p_target_user_id: payload.targetUserId,
+    p_new_email: payload.newEmail?.trim() || null,
+    p_new_course_assignment: formattedCourse, // Now safely passes a string (e.g. "9", "nil", or null)
+    p_audit_action_details: payload.auditDetails || 'Manual credential override',
+    p_new_password: payload.newPassword || null
+  };
+
+  console.log("Sending Sanitized RPC Payload:", rpcPayload);
+
+  const { data, error } = await supabase.rpc('admin_override_credentials', rpcPayload);
+
+  if (error) {
+    console.error('Credential override transaction failed. MESSAGE:', error.message, 'DETAILS:', error.details, 'HINT:', error.hint);
+    throw new Error(`Database rejected update: ${error.message}`);
+  }
+
+  return data;
+}

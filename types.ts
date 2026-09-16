@@ -26,7 +26,6 @@ export interface User {
   serviceNumber?: string;
   role: UserRole;
   fullName: string;
-  assignedCourseNumber?: number;
   courseName?: string;
   /**
    * @deprecated Use courseNumber instead. Kept for backward compatibility
@@ -39,6 +38,7 @@ export interface User {
   profileImage?: string;
   email?: string;
   password?: string;
+  isActive?: boolean;
 }
 
 export interface CadetDetail {
@@ -47,7 +47,7 @@ export interface CadetDetail {
   status: CadetStatus;
 }
 
-export interface ParadeRecord {
+export interface ParadeRecordMetadata {
   id: string | number;
   officerId: string | number;
   officerName: string;
@@ -68,10 +68,15 @@ export interface ParadeRecord {
   suspensionCount?: number;
   yetToReportCount?: number;
   grandTotal: number;
-  cadets: CadetDetail[];
   status?: string;
   createdAt: string;
 }
+
+export interface FullParadeRecord extends ParadeRecordMetadata {
+  cadets: CadetDetail[];
+}
+
+export type ParadeRecord = FullParadeRecord; // Temporary alias for backward compatibility for other components that might still reference it
 
 export interface Notification {
   id: string;
@@ -84,6 +89,7 @@ export interface Notification {
   /** @deprecated Use courseNumber instead. */
   yearGroup: number;
   courseNumber?: number;
+  archivedAt?: string; // For Lapse 2: Audit Immutability
 }
 
 export interface DashboardStats {
@@ -103,7 +109,7 @@ export interface AuditEvent {
   id: string;
   actorId: string | null;
   actorName: string | null;
-  actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED' | 'CREDENTIAL_OVERRIDE';
+  actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED' | 'CREDENTIAL_OVERRIDE' | 'COURSE_GRADUATION' | 'CADET_DISMISSED';
   targetId?: string;
   payload: any;
   createdAt: string;

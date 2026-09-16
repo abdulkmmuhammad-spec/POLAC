@@ -55,6 +55,209 @@ export const reportService = {
         doc.save(`Command_Return_${new Date().toISOString().split('T')[0]}.pdf`);
     },
 
+    generateAuditReport: async (data: {
+        filteredRecords: any[],
+        title: string,
+        officerName: string
+    }) => {
+        const doc = new jsPDF() as any;
+        const { filteredRecords, title, officerName } = data;
+
+        const generateAuditId = () => {
+            try {
+                if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                    return crypto.randomUUID().toUpperCase();
+                }
+                if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
+                    return window.crypto.randomUUID().toUpperCase();
+                }
+                return Math.random().toString(36).substring(2, 15).toUpperCase();
+            } catch (e) {
+                return 'AR-' + Date.now().toString(36).toUpperCase();
+            }
+        };
+
+        const auditId = generateAuditId();
+        const logoImg = '/logo.png';
+
+        // 1. Structural Border
+        doc.setDrawColor(30, 58, 138);
+        doc.setLineWidth(1);
+        doc.rect(5, 5, 200, 287);
+
+        // 2. Monochromatic Watermark Component
+        const addWatermark = (pdf: any) => {
+            try {
+                pdf.saveGraphicsState();
+                pdf.setGState(new pdf.GState({ opacity: 0.06 }));
+                const w = 120;
+                const h = 120;
+                pdf.addImage(logoImg, 'PNG', (210 - w) / 2, (297 - h) / 2, w, h);
+                pdf.restoreGraphicsState();
+            } catch (e) {
+                // Fallback text watermark if logo/GState fails
+                pdf.setTextColor(245);
+                pdf.setFontSize(40);
+                pdf.text("NIGERIAN POLICE ACADEMY", 105, 140, { align: 'center', angle: 45 });
+            }
+        };
+
+        addWatermark(doc);
+
+        // 3. Briefing Header (Left-Aligned Logo)
+        try {
+            doc.addImage(logoImg, 'PNG', 15, 12, 22, 22);
+        } catch (e) {
+            console.warn('Logo missing');
+        }
+
+        doc.setTextColor(30, 58, 138);
+        doc.setFontSize(24.3); // 18 * 1.35
+        doc.setFont('helvetica', 'bold');
+        doc.text('ATTENDANCE AUDIT LEDGER', 42, 22);
+
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'normal');
+        doc.text(title.toUpperCase(), 42, 30);
+
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.text(`REQUESTING OFFICER: ${officerName.toUpperCase()} | AUDIT ID: ${auditId}`, 42, 36);
+
+        // 4. Section Separation
+        doc.setDrawColor(30, 58, 138);
+        doc.setLineWidth(0.5);
+        doc.line(15, 45, 195, 45); // Divider
+
+        doc.setFontSize(14.8);
+        doc.setTextColor(30, 58, 138);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`OFFICIAL AUDIT TRACE (${filteredRecords.length} ENTRIES)`, 15, 55);
+
+        let currentY = 62;
+
+        if (filteredRecords.length === 0) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(20, currentY, 170, 20, 'F');
+            doc.setFontSize(11);
+            doc.setTextColor(100);
+            doc.text("NO RECORDS FOUND MATCHING SEARCH PARAMETERS", 105, currentY + 12, { align: 'center' });
+            currentY += 30;
+        } else {
+            // Group the filtered records by RC (like in the UI)
+            const groupedRecords = filteredRecords.reduce((acc: any, curr: any) => {
+                const rc = curr.r.courseNumber || 0;
+                if (!acc[rc]) acc[rc] = [];
+                acc[rc].push(curr);
+                return acc;
+            }, {});
+
+            Object.entries(groupedRecords)
+                .sort(([rcA], [rcB]) => parseInt(rcB) - parseInt(rcA))
+                .forEach(([rcStr, items]) => {
+                    const rc = parseInt(rcStr);
+                    const groupItems = items as any[];
+                    if (currentY > 230) {
+                        doc.addPage();
+                        doc.setDrawColor(30, 58, 138);
+                        doc.rect(5, 5, 200, 287);
+                        addWatermark(doc);
+                        currentY = 25;
+                    }
+
+                    // RC Sub-header
+                    doc.setDrawColor(30, 58, 138);
+                    doc.setLineWidth(1.5);
+                    doc.line(15, currentY - 5, 15, currentY + 5);
+
+                    doc.setFontSize(13.5);
+                    doc.setTextColor(30, 58, 138);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(rc === 0 ? 'LEGACY ARCHIVE' : `REGULAR COURSE ${rc}`, 20, currentY);
+                    
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(100);
+                    doc.text(`${groupItems.length} ENTRIES TRACED IN THIS BLOCK`, 195, currentY, { align: 'right' });
+
+                    currentY += 10;
+
+                    const tableBody = groupItems.map((item) => {
+                        const dateStr = new Date(item.r.date).toLocaleDateString();
+                        return [
+                            item.squad?.toUpperCase() || 'N/A',
+                            item.name.toUpperCase(),
+                            item.status.toUpperCase(),
+                            `${dateStr} (${item.r.paradeType})`
+                        ];
+                    });
+
+                    autoTable(doc, {
+                        startY: currentY,
+                        head: [['SQUAD', 'CADET IDENTIFIER', 'STATUS PIP', 'DATE / TRAINING TYPE']],
+                        body: tableBody,
+                        headStyles: { fillColor: [30, 58, 138], fontSize: 10, halign: 'left' },
+                        styles: { fontSize: 10, cellPadding: 5 },
+                        columnStyles: {
+                            0: { fontStyle: 'bold', cellWidth: 30 },
+                            1: { fontStyle: 'bold', cellWidth: 60 },
+                            2: { fontStyle: 'bold', cellWidth: 40 },
+                            3: { fontStyle: 'italic' }
+                        },
+                        didParseCell: (data: any) => {
+                            if (data.section === 'body' && data.column.index === 2) {
+                                // Status styling
+                                const text = data.cell.raw;
+                                if (text === 'ABSENT') data.cell.styles.textColor = [159, 18, 57]; // Rose 700
+                                else if (text === 'SICK') data.cell.styles.textColor = [180, 83, 9]; // Amber 700
+                                else if (text === 'DETENTION') data.cell.styles.textColor = [67, 56, 202]; // Indigo 700
+                            }
+                        },
+                        margin: { left: 20, right: 20 }
+                    });
+                    
+                    currentY = (doc as any).lastAutoTable.finalY + 15;
+                });
+        }
+
+        // 6. Security Footing & Sign-off
+        if (currentY > 240) {
+            doc.addPage();
+            doc.setDrawColor(30, 58, 138);
+            doc.rect(5, 5, 200, 287);
+            addWatermark(doc);
+            currentY = 25;
+        }
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.setTextColor(0);
+        doc.text('__________________________', 140, currentY + 15);
+        doc.text('OFFICE OF THE COMMANDANT', 140, currentY + 21);
+        doc.setFontSize(9);
+        doc.setTextColor(150);
+        doc.text(`VALIDATED SECURE_ID: ${auditId}`, 140, currentY + 27);
+
+        // Footer
+        doc.setFontSize(9);
+        doc.text(`ATTENDANCE AUDIT LOG • GENERATED: ${new Date().toLocaleString()} • SECURE_COPY`, 105, 282, { align: 'center' });
+
+        // Execute synchronous save to preserve user gesture context
+        doc.save(`AUDIT_LEDGER_${new Date().toISOString().split('T')[0]}.pdf`);
+
+        // Traceability Notification (Fire async without awaiting to prevent gesture loss)
+        dbService.addNotification({
+            type: 'system',
+            title: 'Audit Ledger Printed',
+            content: `Attendance Audit PDF Generated (Audit ID: ${auditId})`,
+            timestamp: new Date().toISOString(),
+            read: false,
+            officerName: officerName,
+            yearGroup: 1,
+            courseNumber: 0
+        }).catch(err => console.error('Failed to log audit notification:', err));
+    },
+
     generateCommandantReport: async (data: {
         volumeStats: { absences: number, medical: number, detention: number },
         activeRC: number,
@@ -320,8 +523,11 @@ export const reportService = {
         doc.setFontSize(9);
         doc.text(`LONGITUDINAL ACADEMY REPORT • GENERATED: ${new Date().toLocaleString()} • SECURE_COPY`, 105, 282, { align: 'center' });
 
-        // Traceability Notification
-        await dbService.addNotification({
+        // Execute synchronous save to preserve user gesture context
+        doc.save(`WEEKLY_ACADEMY_REPORT_${new Date().toISOString().split('T')[0]}.pdf`);
+
+        // Traceability Notification (Fire async without awaiting to prevent gesture loss)
+        dbService.addNotification({
             type: 'system',
             title: 'Weekly Academy Report Produced',
             content: `Longitudinal Performance Report (Audit ID: ${auditId})`,
@@ -330,9 +536,7 @@ export const reportService = {
             officerName: officerName,
             yearGroup: derivedYearGroup,
             courseNumber: activeRC
-        });
-
-        doc.save(`WEEKLY_ACADEMY_REPORT_${new Date().toISOString().split('T')[0]}.pdf`);
+        }).catch(err => console.error('Failed to log report notification:', err));
     },
 
     generateNominalRoll: async (data: {

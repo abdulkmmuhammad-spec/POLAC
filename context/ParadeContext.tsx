@@ -1,9 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo, useCallback } from 'react';
-import { ParadeRecord, Notification, DashboardStats, UserRole, ParadeType, AuditEvent } from '../types';
+import { ParadeRecordMetadata, Notification, DashboardStats, UserRole, ParadeType, AuditEvent } from '../types';
 import { dbService, supabase } from '../services/dbService';
 import { useAuth } from './AuthContext';
 import { calculateCurrentLevel } from '../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
+import { audioService } from '../services/audioService';
+import { inferSeverity } from '../utils/notificationUtils';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Bell, X } from 'lucide-react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 
 interface CourseSummaryEntry {
     courseNumber: number;
@@ -19,7 +24,7 @@ interface CourseSummaryEntry {
 }
 
 interface ParadeContextType {
-    records: ParadeRecord[];
+    records: ParadeRecordMetadata[];
     notifications: Notification[];
     isDataLoading: boolean;
     refreshData: (officerNameFilter?: string) => Promise<void>;
@@ -34,6 +39,12 @@ interface ParadeContextType {
     loadMoreRecords: () => Promise<void>;
     /** Whether there are more records to load. */
     hasMoreRecords: boolean;
+    /** Whether the records query failed. */
+    isError: boolean;
+    /** The actual error object from the records query. */
+    error: Error | null;
+    /** Manual refetch handler for the records query. */
+    refetchRecords: () => void;
     /** Helper: compute current year level for a given course number. */
     getLevelForCourse: (courseNumber: number) => number;
     /** Dynamic submission window settings. */
@@ -77,17 +88,15 @@ interface ParadeContextType {
 const ParadeContext = createContext<ParadeContextType | undefined>(undefined);
 
 export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-const { currentUser } = useAuth();
-    const [records, setRecords] = useState<ParadeRecord[]>([]);
+    const { currentUser } = useAuth();
     const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [isDataLoading, setIsDataLoading] = useState(false);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [activeRC, setActiveRC] = useState<number>(12); // sensible default
     const [submissionSettings, setSubmissionSettings] = useState({
         musterStartHour: 6,
         musterEndHour: 12,
         tattooStartHour: 17
     });
-    const [hasMoreRecords, setHasMoreRecords] = useState(true);
     const [selectedParadeType, setSelectedParadeType] = useState<ParadeType>(ParadeType.MUSTER);
     const [totalRecordsCount, setTotalRecordsCount] = useState<number>(0);
 
@@ -97,6 +106,42 @@ const { currentUser } = useAuth();
     const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
 
     const PAGE_SIZE = 20;
+
+    // ── TanStack Query Infinite Query ────────────────────────────────────────
+    // Migrated from manual array accumulation. Prevents memory bloat by allowing
+    // pagination pages to be cached, stale-checked, and garbage collected.
+    const {
+        data: queryData,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+        refetch: refetchRecords,
+        isLoading: isRecordsLoading,
+        isError,
+        error
+    } = useInfiniteQuery({
+        queryKey: ['paradeRecords', currentUser?.courseNumber],
+        queryFn: ({ pageParam }) => dbService.getRecords({
+            viewerId: currentUser?.id,
+            role: currentUser?.role,
+            courseNumber: currentUser?.courseNumber,
+            cursor: pageParam as string | undefined,
+            limit: PAGE_SIZE
+        }),
+        initialPageParam: undefined as string | undefined,
+        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+        staleTime: 1000 * 60 * 5, // 5 minutes
+        gcTime: 1000 * 60 * 10,   // 10 minutes (formerly cacheTime)
+        enabled: !!currentUser
+    });
+
+    // Flatten pages to reconstruct records array in memory reactively.
+    const records = useMemo(() => {
+        return queryData ? queryData.pages.flatMap(page => page.data) : [];
+    }, [queryData]);
+
+    const isDataLoading = isRecordsLoading || isFetchingNextPage || isRefreshing;
+    const hasMoreRecords = !!hasNextPage;
 
     const totalPages = useMemo(() => Math.ceil(totalRecordsCount / PAGE_SIZE), [totalRecordsCount, PAGE_SIZE]);
     const currentPage = useMemo(() => Math.ceil(records.length / PAGE_SIZE), [records.length, PAGE_SIZE]);
@@ -129,29 +174,33 @@ const { currentUser } = useAuth();
     };
 
     const refreshData = async (officerNameFilter?: string) => {
-        setIsDataLoading(true);
+        setIsRefreshing(true);
         try {
-            const [recordsRes, notifsRes, rcRes, settingsRes, count] = await Promise.all([
-                dbService.getRecords(0, PAGE_SIZE - 1),
-                dbService.getNotifications(officerNameFilter),
-                dbService.getActiveRC(),
-                dbService.getSubmissionSettings(),
-                dbService.getTotalRecordsCount()
-            ]);
+            try {
+                const [notifsRes, rcRes, settingsRes, count] = await Promise.all([
+                    dbService.getNotifications(officerNameFilter),
+                    dbService.getActiveRC(),
+                    dbService.getSubmissionSettings(),
+                    dbService.getTotalRecordsCount()
+                ]);
 
-            const fetchedRecords = recordsRes.data;
-            const fetchedNotifs = notifsRes.data;
+                setNotifications(notifsRes.data);
+                setActiveRC(rcRes.data);
+                setSubmissionSettings(settingsRes.data);
+                setTotalRecordsCount(count);
+            } catch (err) {
+                console.error('refreshData Promise.all error:', err);
+                toast.error('Network error while refreshing core metrics.');
+            }
 
-            setRecords(fetchedRecords);
-            setNotifications(fetchedNotifs);
-            setActiveRC(rcRes.data);
-            setSubmissionSettings(settingsRes.data);
-            setTotalRecordsCount(count);
-            setHasMoreRecords(fetchedRecords.length === PAGE_SIZE && fetchedRecords.length < count);
+            await refetchRecords();
 
             // AUTO-DETECT LATEST PARADE TYPE FOR TODAY
-            const today = new Date().toISOString().split('T')[0];
-            const todayRecords = fetchedRecords.filter(r => r.date === today);
+            const now = new Date();
+            const watOffsetMs = 60 * 60 * 1000;
+            const watDate = new Date(now.getTime() + watOffsetMs);
+            const today = watDate.toISOString().split('T')[0];
+            const todayRecords = records.filter(r => r.date === today);
             if (todayRecords.length > 0) {
                 const latest = [...todayRecords].sort((a, b) =>
                     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -162,33 +211,19 @@ const { currentUser } = useAuth();
             console.error('Error refreshing data:', error);
             toast.error('Failed to sync master parade data. Please check your connection.');
         } finally {
-            setIsDataLoading(false);
+            setIsRefreshing(false);
         }
     };
 
     const loadMoreRecords = async () => {
         if (!hasMoreRecords || isDataLoading) return;
-
-        setIsDataLoading(true);
         try {
-            const from = records.length;
-            const to = from + PAGE_SIZE - 1;
-
-            const [moreRecordsRes, count] = await Promise.all([
-                dbService.getRecords(from, to),
-                dbService.getTotalRecordsCount()
-            ]);
-
-            const moreRecords = moreRecordsRes.data;
-
-            setRecords(prev => [...prev, ...moreRecords]);
+            await fetchNextPage();
+            const count = await dbService.getTotalRecordsCount();
             setTotalRecordsCount(count);
-            setHasMoreRecords(moreRecords.length === PAGE_SIZE && (records.length + moreRecords.length) < count);
         } catch (error) {
             console.error('Error loading more records:', error);
             toast.error('Failed to load older records.');
-        } finally {
-            setIsDataLoading(false);
         }
     };
 
@@ -229,9 +264,8 @@ const { currentUser } = useAuth();
 
     // ── Realtime Notifications (Supabase WebSockets) ──
     useEffect(() => {
-        if (!currentUser) return; // Do not subscribe when unauthenticated
+        if (!currentUser) return;
 
-        // Perform initial fetch
         const fetchInitial = async () => {
             try {
                 const officerNameFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.fullName;
@@ -243,28 +277,115 @@ const { currentUser } = useAuth();
         };
         fetchInitial();
 
-        // Subscribe to real-time inserts
         const channel = supabase
-            .channel('public:notifications')
+            .channel('public:notifications_and_records')
             .on(
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'notifications' },
                 (payload) => {
-                    const newNotif = {
-                        id: payload.new.id,
-                        type: payload.new.type,
-                        title: payload.new.title,
-                        content: payload.new.content,
-                        timestamp: payload.new.timestamp,
-                        read: payload.new.read,
-                        officerName: payload.new.officer_name,
-                        yearGroup: payload.new.year_group,
-                        courseNumber: payload.new.course_number
-                    } as Notification;
-                    
+                    const raw = payload.new as any;
+                    const newNotif: Notification = {
+                        id: raw.id,
+                        type: raw.type,
+                        title: raw.title,
+                        content: raw.content,
+                        timestamp: raw.timestamp,
+                        read: raw.read,
+                        officerName: raw.officer_name,
+                        yearGroup: raw.year_group,
+                        courseNumber: raw.course_number,
+                        archivedAt: raw.archived_at
+                    };
+
                     if (currentUser.role === UserRole.COMMANDANT || newNotif.officerName === currentUser.fullName) {
                         setNotifications((prev) => [newNotif, ...prev]);
+
+                        const severity = inferSeverity(newNotif);
+                        
+                        if (severity === 'critical') {
+                            audioService.play('alert');
+                        } else {
+                            audioService.play('intel');
+                        }
+
+                        toast.custom((t) => (
+                            <motion.div
+                                initial={{ opacity: 0, y: -20, scale: 0.9 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className={`flex items-center gap-4 px-6 py-4 rounded-2xl border shadow-2xl backdrop-blur-xl ${
+                                    severity === 'critical' 
+                                    ? 'bg-rose-900/90 border-rose-500/50 text-white' 
+                                    : 'bg-blue-900/90 border-blue-500/50 text-white'
+                                }`}
+                                onClick={() => toast.dismiss(t.id)}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 ${severity === 'critical' ? 'animate-pulse' : ''}`}>
+                                    <Bell size={18} />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-0.5">
+                                        {severity === 'critical' ? 'Priority Alert' : 'Inbound Intel'}
+                                    </p>
+                                    <p className="text-sm font-black leading-tight truncate max-w-[200px]">
+                                        {newNotif.title}
+                                    </p>
+                                </div>
+                                <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        toast.dismiss(t.id);
+                                    }}
+                                    className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                                >
+                                    <X size={16} />
+                                </button>
+                            </motion.div>
+                        ), { duration: 5000, position: 'top-center' });
                     }
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'notifications' },
+                (payload) => {
+                    const raw = payload.new as any;
+                    if (raw.archived_at) {
+                        setNotifications((prev) => prev.filter(n => n.id !== raw.id));
+                    } else {
+                        const updatedNotif: Notification = {
+                            id: raw.id,
+                            type: raw.type,
+                            title: raw.title,
+                            content: raw.content,
+                            timestamp: raw.timestamp,
+                            read: raw.read,
+                            officerName: raw.officer_name,
+                            yearGroup: raw.year_group,
+                            courseNumber: raw.course_number,
+                            archivedAt: raw.archived_at
+                        };
+
+                        setNotifications((prev) => prev.map(n => 
+                            n.id === updatedNotif.id ? updatedNotif : n
+                        ));
+                    }
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'parade_records' },
+                () => {
+                    refetchRecords();
+                    // Optionally, could play an intel sound specifically for state submission
+                    // audioService.play('intel');
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'parade_records' },
+                () => {
+                    refetchRecords();
                 }
             )
             .subscribe();
@@ -281,7 +402,10 @@ const { currentUser } = useAuth();
     );
 
     const stats = useMemo<DashboardStats>(() => {
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const watOffsetMs = 60 * 60 * 1000;
+        const watDate = new Date(now.getTime() + watOffsetMs);
+        const today = watDate.toISOString().split('T')[0];
         // Statistics should also respect the filter for "Present Today" and "Hospitalized"
         const todayRecords = records.filter(r => r.date === today && r.paradeType === selectedParadeType);
 
@@ -313,7 +437,10 @@ const { currentUser } = useAuth();
      * calculates the current year level dynamically using activeRC.
      */
     const courseSummary = useMemo<CourseSummaryEntry[]>(() => {
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const watOffsetMs = 60 * 60 * 1000;
+        const watDate = new Date(now.getTime() + watOffsetMs);
+        const today = watDate.toISOString().split('T')[0];
         // FILTER BY SELECTED PARADE TYPE
         const todayRecords = records.filter(r => r.date === today && r.paradeType === selectedParadeType);
 
@@ -359,6 +486,9 @@ const { currentUser } = useAuth();
             updateSubmissionSetting,
             loadMoreRecords,
             hasMoreRecords,
+            isError,
+            error,
+            refetchRecords,
             getLevelForCourse,
             selectedParadeType,
             setSelectedParadeType,

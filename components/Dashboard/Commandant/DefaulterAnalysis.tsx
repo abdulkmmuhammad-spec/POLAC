@@ -2,12 +2,36 @@ import React, { useState, useMemo } from 'react';
 import { AlertCircle, Calendar, ShieldAlert } from 'lucide-react';
 import { useParade } from '../../../context/ParadeContext';
 import { CadetStatus } from '../../../types';
+import { dbService } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 
 export const DefaulterAnalysis: React.FC = () => {
     const { records, activeRC } = useParade();
     const [defaulterPeriod, setDefaulterPeriod] = useState<'week' | 'month' | 'all'>('week');
     const [absentCourseFilter, setAbsentCourseFilter] = useState<string>('all');
+    const [absencesData, setAbsencesData] = useState<any[]>([]);
+
+    React.useEffect(() => {
+        const fetchAbsences = async () => {
+            let start = undefined;
+            const now = new Date();
+            
+            if (defaulterPeriod === 'week') {
+                const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                start = weekAgo.toISOString().split('T')[0];
+            } else if (defaulterPeriod === 'month') {
+                const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+                start = monthAgo.toISOString().split('T')[0];
+            }
+
+            const { data } = await dbService.fetchHistoricalTrace({
+                startDate: start,
+                status: 'absent'
+            });
+            setAbsencesData(data || []);
+        };
+        fetchAbsences();
+    }, [defaulterPeriod]);
 
     // Get unique course numbers for the filter dropdown
     const availableCourses = useMemo(() => {
@@ -59,42 +83,31 @@ export const DefaulterAnalysis: React.FC = () => {
             lastAbsence: string
         }> = {};
 
-        const now = new Date();
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+        absencesData.forEach(item => {
+            const cadet = item;
+            
+            if (absentCourseFilter !== 'all' && cadet.r.courseNumber !== parseInt(absentCourseFilter)) return;
 
-        records.forEach(record => {
-            const recordDate = new Date(record.date);
-
-            if (defaulterPeriod === 'week' && recordDate < weekAgo) return;
-            if (defaulterPeriod === 'month' && recordDate < monthAgo) return;
-
-            if (absentCourseFilter !== 'all' && record.courseNumber !== parseInt(absentCourseFilter)) return;
-
-            record.cadets.forEach(cadet => {
-                if (cadet.status === CadetStatus.ABSENT) {
-                    const key = `${cadet.name}-${cadet.squad}`;
-                    if (!cadetStats[key]) {
-                        cadetStats[key] = {
-                            name: cadet.name,
-                            squad: cadet.squad,
-                            absences: 0,
-                            officer: record.officerName,
-                            yearGroup: record.yearGroup,
-                            courseNumber: record.courseNumber,
-                            lastAbsence: record.date
-                        };
-                    }
-                    cadetStats[key].absences += 1;
-                    if (new Date(record.date) > new Date(cadetStats[key].lastAbsence)) {
-                        cadetStats[key].lastAbsence = record.date;
-                    }
-                }
-            });
+            const key = `${cadet.name}-${cadet.squad}`;
+            if (!cadetStats[key]) {
+                cadetStats[key] = {
+                    name: cadet.name,
+                    squad: cadet.squad,
+                    absences: 0,
+                    officer: cadet.r.officerName,
+                    yearGroup: cadet.r.yearGroup,
+                    courseNumber: cadet.r.courseNumber,
+                    lastAbsence: cadet.r.date
+                };
+            }
+            cadetStats[key].absences += 1;
+            if (new Date(cadet.r.date) > new Date(cadetStats[key].lastAbsence)) {
+                cadetStats[key].lastAbsence = cadet.r.date;
+            }
         });
 
         return Object.values(cadetStats).sort((a, b) => b.absences - a.absences);
-    }, [records, defaulterPeriod, absentCourseFilter]);
+    }, [absencesData, absentCourseFilter]);
 
     return (
         <div className="space-y-6">

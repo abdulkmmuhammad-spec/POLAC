@@ -16,26 +16,38 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
     const [isOpen, setIsOpen] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
 
-    useEffect(() => {
-        const fetchRegistry = async () => {
-            try {
-                setLoadError(null);
-                console.log(`[CadetSelector] Fetching cadets for RC: ${courseNumber}`);
-                // Pass courseNumber to the database query for server-side filtering
-                const data = await dbService.getCadetRegistry(undefined, undefined, undefined, courseNumber);
-                console.log(`[CadetSelector] Found ${data.length} cadets for RC ${courseNumber}`);
-                setRegistry(data);
+    const fetchRegistry = async () => {
+        try {
+            setLoadError(null);
+            console.log(`[CadetSelector] Fetching cadets for RC: ${courseNumber}`);
+            // Pass courseNumber to the database query for server-side filtering
+            const data = await dbService.getCadetRegistry(undefined, undefined, undefined, courseNumber);
+            const activeData = data.filter(c => c.status !== 'DISMISSED');
+            console.log(`[CadetSelector] Found ${activeData.length} cadets for RC ${courseNumber}`);
+            setRegistry(activeData);
 
-                // Also fetch all cadets as fallback
-                const allData = await dbService.getCadetRegistry();
-                console.log(`[CadetSelector] Total cadets in registry: ${allData.length}`);
-                setAllCadets(allData);
-            } catch (err) {
-                console.error('Error fetching cadets:', err);
-                setLoadError('Failed to load cadet registry');
-            }
-        };
+            // Also fetch all cadets as fallback
+            const allData = await dbService.getCadetRegistry();
+            const activeAllData = allData.filter(c => c.status !== 'DISMISSED');
+            console.log(`[CadetSelector] Total cadets in registry: ${activeAllData.length}`);
+            setAllCadets(activeAllData);
+        } catch (err) {
+            console.error('Error fetching cadets:', err);
+            setLoadError('Failed to load cadet registry');
+        }
+    };
+
+    useEffect(() => {
         fetchRegistry();
+
+        const handleUpdate = () => {
+            setSearchTerm('');
+            setIsOpen(false);
+            fetchRegistry();
+        };
+
+        window.addEventListener('cadet-registry-updated', handleUpdate);
+        return () => window.removeEventListener('cadet-registry-updated', handleUpdate);
     }, [courseNumber]);
 
     const filtered = registry.filter(c =>

@@ -11,7 +11,11 @@ import { CadetManager } from '../../CadetRegistry/CadetManager';
 import { CommandAnalytics } from './CommandAnalytics';
 import { OfficerManager } from './OfficerManager';
 import { AuditLogView } from '../../Settings/AuditLogView';
+import { HistoricalAlertsView } from '../../Settings/HistoricalAlertsView';
+import { TacticalHUD } from './TacticalHUD';
 import { CredentialSettings } from './CredentialSettings';
+import { GraduationPanel } from './GraduationPanel';
+import { HandoverWizard } from './HandoverWizard';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
@@ -79,9 +83,9 @@ const { currentUser } = useAuth();
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <div className="space-y-1.5 flex-1">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Update Parameter</label>
+                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Update Parameter</label>
                         <input
                             type="number"
                             min={1}
@@ -93,7 +97,7 @@ const { currentUser } = useAuth();
                     <button
                         onClick={handleSave}
                         disabled={isSaving || newRC === activeRC}
-                        className={`mt-4 flex items-center justify-center gap-2 px-6 h-[46px] rounded-md font-black text-[10px] uppercase tracking-widest transition-all shadow-sm ${saved
+                        className={`sm:mt-4 flex items-center justify-center gap-2 px-6 h-[46px] rounded-md font-black text-[10px] uppercase tracking-widest transition-all shadow-sm ${saved
                             ? 'bg-emerald-600 text-white'
                             : 'bg-blue-900 hover:bg-blue-800 text-white disabled:opacity-20 disabled:grayscale'
                             }`}
@@ -156,7 +160,7 @@ const { currentUser } = useAuth();
             <div className="p-6 space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="space-y-4">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Muster State Window</label>
+                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Muster State Window</label>
                         <div className="flex items-center gap-3">
                             <div className="flex-1">
                                 <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Start (0-23)</p>
@@ -187,7 +191,7 @@ const { currentUser } = useAuth();
                     </div>
 
                     <div className="space-y-4">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Tattoo Phase Gate</label>
+                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Tattoo Phase Gate</label>
                         <div className="flex items-center gap-3">
                             <div className="flex-2">
                                 <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Entry Threshold (24H)</p>
@@ -220,37 +224,56 @@ const { currentUser } = useAuth();
 };
 
 const SettingsContainer: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'general' | 'audit' | 'credentials'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'audit' | 'credentials' | 'alerts' | 'lifecycle'>('general');
+    const [incomingRC, setIncomingRC] = useState<number | null>(null);
 
     return (
         <div className="space-y-8">
-            <div className="flex p-1 bg-slate-100 rounded-xl w-fit border border-slate-200 shadow-inner">
+            <div className="flex flex-nowrap md:flex-wrap items-center overflow-x-auto md:overflow-visible scrollbar-none snap-x p-1 w-full md:w-fit gap-1.5 bg-blue-50 border border-blue-100/60 rounded-xl shadow-sm">
                 <button
                     onClick={() => setActiveTab('general')}
-                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'general'
+                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'general'
                             ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-slate-500 hover:text-slate-700'
+                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
                         }`}
                 >
                     Administrative Parameters
                 </button>
                 <button
                     onClick={() => setActiveTab('audit')}
-                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'audit'
+                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'audit'
                             ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-slate-500 hover:text-slate-700'
+                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
                         }`}
                 >
                     Forensic Archive
                 </button>
                 <button
                     onClick={() => setActiveTab('credentials')}
-                    className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'credentials'
+                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'credentials'
                             ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-slate-500 hover:text-slate-700'
+                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
                         }`}
                 >
                     Tactical Access Control
+                </button>
+                <button
+                    onClick={() => setActiveTab('alerts')}
+                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'alerts'
+                            ? 'bg-blue-900 text-white shadow-md'
+                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
+                        }`}
+                >
+                    Alert History
+                </button>
+                <button
+                    onClick={() => setActiveTab('lifecycle')}
+                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'lifecycle'
+                            ? 'bg-blue-900 text-white shadow-md'
+                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
+                        }`}
+                >
+                    Lifecycle Engine
                 </button>
             </div>
 
@@ -262,6 +285,16 @@ const SettingsContainer: React.FC = () => {
                     </div>
                 ) : activeTab === 'credentials' ? (
                     <CredentialSettings />
+                ) : activeTab === 'alerts' ? (
+                    <HistoricalAlertsView />
+                ) : activeTab === 'lifecycle' ? (
+                    <div className="max-w-2xl space-y-8">
+                        <HandoverWizard prefilledTargetRC={incomingRC} onClearPrefill={() => setIncomingRC(null)} />
+                        <GraduationPanel onCommissionIncoming={(newRC) => {
+                            setIncomingRC(newRC);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }} />
+                    </div>
                 ) : (
                     <AuditLogView />
                 )}
@@ -273,6 +306,7 @@ const SettingsContainer: React.FC = () => {
 export const CommandantDashboard: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { notifications, markNotificationRead } = useParade();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     const getTitle = () => {
@@ -299,20 +333,28 @@ export const CommandantDashboard: React.FC = () => {
                 />
 
                 <main className="flex-1 overflow-y-auto p-4 md:p-8">
-                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        <Routes>
-                            <Route index element={<DashboardOverview />} />
-                            <Route path="audit" element={<AttendanceAudit />} />
-                            <Route path="cadet_registry" element={<CadetManager />} />
-                            <Route path="analytics" element={<CommandAnalytics />} />
-                            <Route path="settings" element={
-                                <div className="py-8">
-                                    <div className="max-w-4xl mx-auto px-4">
-                                        <SettingsContainer />
+                    <div className="max-w-6xl mx-auto">
+                        <TacticalHUD 
+                            notifications={notifications}
+                            onResolve={markNotificationRead} // In this context, resolving is acknowledging
+                            onView={() => navigate('/commandant/analytics')}
+                        />
+                        
+                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <Routes>
+                                <Route index element={<DashboardOverview />} />
+                                <Route path="audit" element={<AttendanceAudit />} />
+                                <Route path="cadet_registry" element={<CadetManager />} />
+                                <Route path="analytics" element={<CommandAnalytics />} />
+                                <Route path="settings" element={
+                                    <div className="py-8">
+                                        <div className="max-w-4xl mx-auto px-4">
+                                            <SettingsContainer />
+                                        </div>
                                     </div>
-                                </div>
-                            } />
-                        </Routes>
+                                } />
+                            </Routes>
+                        </div>
                     </div>
                 </main>
             </div>

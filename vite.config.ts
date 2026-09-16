@@ -18,6 +18,20 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        chunkSizeWarningLimit: 1000,
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'vendor-react': ['react', 'react-dom', 'react-router-dom', '@tanstack/react-query'],
+              'vendor-supabase': ['@supabase/supabase-js'],
+              'vendor-ui': ['framer-motion', 'lucide-react', 'react-hot-toast'],
+              'vendor-export': ['jspdf', 'jspdf-autotable', 'xlsx'],
+              'vendor-charts': ['recharts']
+            }
+          }
+        }
       }
     };
 });

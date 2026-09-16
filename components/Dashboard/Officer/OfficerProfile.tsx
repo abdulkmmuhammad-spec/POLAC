@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Users, Info } from 'lucide-react';
+import { Users, Info, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useParade } from '../../../context/ParadeContext';
 import { dbService } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
+import AtRiskCadetsWidget from '../Commandant/AtRiskCadetsWidget';
 
 export const OfficerProfile: React.FC = () => {
 const { currentUser, setCurrentUser } = useAuth();
-    const { isDataLoading, refreshData, activeRC } = useParade();
+    const { isDataLoading, refreshData, activeRC, records } = useParade();
     const [showEdit, setShowEdit] = useState(false);
 
     const handleUpdate = async () => {
@@ -41,6 +42,8 @@ const { currentUser, setCurrentUser } = useAuth();
                     </div>
                 </div>
             </div>
+
+            <AtRiskCadetsWidget courseNumber={currentUser.courseNumber || undefined} />
 
             <div className="bg-white p-4 md:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center space-y-6 md:space-y-0 md:space-x-8">
                 <div className="w-32 h-32 bg-blue-100 rounded-3xl border-4 border-white shadow-xl flex items-center justify-center text-blue-600 text-4xl font-bold overflow-hidden relative group">
@@ -78,6 +81,8 @@ const { currentUser, setCurrentUser } = useAuth();
                     {showEdit ? 'Cancel' : 'Profile Settings'}
                 </button>
             </div>
+
+                        {/* Removed empty state hint */}
 
             {showEdit && (
                 <div className="bg-slate-800 text-white p-4 md:p-8 rounded-3xl space-y-6 animate-in fade-in duration-300">

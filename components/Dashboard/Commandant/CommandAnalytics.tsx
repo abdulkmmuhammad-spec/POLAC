@@ -5,6 +5,7 @@ import { HistoricalTrends } from '../../Analytics/HistoricalTrends';
 import { DefaulterAnalysis } from './DefaulterAnalysis';
 import { Calendar, Activity, TrendingUp, TrendingDown, AlertTriangle, Users, ChevronDown, ChevronUp, Clock, BarChart3, Stethoscope, ShieldAlert, FileText, Download, CheckCircle } from 'lucide-react';
 import { reportService } from '../../../services/reportService';
+import { dbService } from '../../../services/dbService';
 
 const SummaryCard = ({ title, value, subtext, icon: Icon, color, onClick, isExpanded, range }: any) => {
     return (
@@ -145,6 +146,29 @@ const RCComparisonChart = ({ data }: any) => {
 export const CommandAnalytics: React.FC = () => {
     const { records, selectedParadeType, activeRC } = useParade();
     const [expandedSection, setExpandedSection] = React.useState<string | null>(null);
+    const [weeklyAbsencesData, setWeeklyAbsencesData] = React.useState<any[]>([]);
+
+    React.useEffect(() => {
+        const fetchWeeklyAbsences = async () => {
+            const now = new Date();
+            const day = now.getDay();
+            const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+            const monday = new Date(now.setDate(diff));
+            monday.setHours(0, 0, 0, 0);
+
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            sunday.setHours(23, 59, 59, 999);
+
+            const { data } = await dbService.fetchHistoricalTrace({
+                startDate: monday.toISOString().split('T')[0],
+                endDate: sunday.toISOString().split('T')[0],
+                status: 'absent'
+            });
+            setWeeklyAbsencesData(data || []);
+        };
+        fetchWeeklyAbsences();
+    }, []);
 
     const handleBoxClick = (section: string, elementId: string) => {
         const isOpening = expandedSection !== section;
@@ -196,20 +220,22 @@ export const CommandAnalytics: React.FC = () => {
 
         currentWeekRecordsAll.forEach(r => {
             const rc = r.courseNumber;
+            if (rc === null) return;
             if (!courseMap[rc]) courseMap[rc] = { volume: 0, expected: 0, present: 0, cadets: {} };
 
             courseMap[rc].volume += (r.grandTotal - r.presentCount);
             courseMap[rc].expected += r.grandTotal;
             courseMap[rc].present += r.presentCount;
+        });
 
-            r.cadets?.forEach(c => {
-                if (c.status === 'absent') {
-                    if (!courseMap[rc].cadets[c.name]) {
-                        courseMap[rc].cadets[c.name] = { count: 0, squad: c.squad || 'N/A' };
-                    }
-                    courseMap[rc].cadets[c.name].count += 1;
-                }
-            });
+        weeklyAbsencesData.forEach(item => {
+            const rc = item.r?.courseNumber;
+            if (!rc) return;
+            if (!courseMap[rc]) courseMap[rc] = { volume: 0, expected: 0, present: 0, cadets: {} };
+            if (!courseMap[rc].cadets[item.name]) {
+                courseMap[rc].cadets[item.name] = { count: 0, squad: item.squad || 'N/A' };
+            }
+            courseMap[rc].cadets[item.name].count += 1;
         });
 
         const courseWiseData = Object.entries(courseMap).map(([rcStr, data]) => {
@@ -273,7 +299,7 @@ export const CommandAnalytics: React.FC = () => {
             rangeLabelFull,
             rangeLabel: rangeLabelFull
         };
-    }, [records]);
+    }, [records, weeklyAbsencesData, selectedParadeType]);
 
     const miniMapData = useMemo(() => {
         const dailyStats: Record<string, { date: string, percentage: number, total: number, present: number }> = {};

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Plus, History, LogOut } from 'lucide-react';
+import { LayoutDashboard, Plus, History, LogOut, AlertCircle } from 'lucide-react';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { Header } from '../../Layout/Header';
@@ -7,8 +7,11 @@ import { OfficerProfile } from './OfficerProfile';
 import { ParadeForm } from '../../Parade/ParadeForm';
 import { SubmissionHistory } from './SubmissionHistory';
 
+import { useParade } from '../../../context/ParadeContext';
+
 export const OfficerDashboard: React.FC = () => {
-const { logout } = useAuth();
+    const { logout, currentUser } = useAuth();
+    const { records } = useParade();
     const location = useLocation();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -100,6 +103,32 @@ const { logout } = useAuth();
                         </NavLink>
                     ))}
                 </div>
+
+                {/* Urgent Submission Empty State Hint */}
+                {currentUser && (() => {
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const hasSubmittedToday = records.some(r => r.officerId === currentUser.id && r.date === todayStr);
+
+                    if (!hasSubmittedToday) {
+                        return (
+                            <div className="bg-gradient-to-r from-red-950 to-slate-900 mt-2 mb-8 p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 border-l-4 md:border-l-[6px] border-rose-600 animate-in fade-in slide-in-from-top-4 duration-500 relative overflow-hidden group">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/10 rounded-full translate-x-1/3 -translate-y-1/2 blur-2xl group-hover:bg-rose-500/20 transition-colors"></div>
+                                <div className="absolute bottom-0 left-0 w-40 h-40 bg-orange-500/10 rounded-full -translate-x-1/2 translate-y-1/2 blur-xl"></div>
+                                
+                                <div className="relative z-10 flex text-center md:text-left items-center flex-col md:flex-row gap-5 md:gap-6 w-full">
+                                    <div className="w-14 h-14 md:w-16 md:h-16 bg-rose-950/50 rounded-full flex items-center justify-center backdrop-blur-md border border-rose-500/50 shadow-inner shrink-0 text-rose-500 ring-4 ring-rose-500/20">
+                                        <AlertCircle className="w-8 h-8 md:w-9 md:h-9 animate-pulse" strokeWidth={2.5} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="text-white text-lg md:text-xl font-black mb-1 md:mb-1.5 tracking-widest uppercase">URGENT COMMAND DIRECTIVE: PENDING PARADE RETURN</h3>
+                                        <p className="text-rose-200/90 text-[13px] md:text-sm font-medium leading-relaxed max-w-2xl">Regimental standards require absolute compliance. You have not submitted the daily accountability state for your assigned squad. File your return immediately to maintain institutional readiness.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    }
+                    return null;
+                })()}
 
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
                     <Routes>

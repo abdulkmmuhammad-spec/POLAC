@@ -1,0 +1,9 @@
+﻿context/ParadeContext.tsx(139,38): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+context/ParadeContext.tsx(149,24): error TS2345: Argument of type 'ParadeRecordMetadata[]' is not assignable to parameter of type 'SetStateAction<FullParadeRecord[]>'.
+  Type 'ParadeRecordMetadata[]' is not assignable to type 'FullParadeRecord[]'.
+    Property 'cadets' is missing in type 'ParadeRecordMetadata' but required in type 'FullParadeRecord'.
+context/ParadeContext.tsx(182,38): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+context/ParadeContext.tsx(188,24): error TS2345: Argument of type '(prev: FullParadeRecord[]) => ParadeRecordMetadata[]' is not assignable to parameter of type 'SetStateAction<FullParadeRecord[]>'.
+  Type '(prev: FullParadeRecord[]) => ParadeRecordMetadata[]' is not assignable to type '(prevState: FullParadeRecord[]) => FullParadeRecord[]'.
+    Type 'ParadeRecordMetadata[]' is not assignable to type 'FullParadeRecord[]'.
+      Property 'cadets' is missing in type 'ParadeRecordMetadata' but required in type 'FullParadeRecord'.

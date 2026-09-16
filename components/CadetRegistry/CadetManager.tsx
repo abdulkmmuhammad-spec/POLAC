@@ -20,6 +20,10 @@ export const CadetManager: React.FC = () => {
     const [showPreview, setShowPreview] = useState(false);
     const [previewData, setPreviewData] = useState<any>(null);
     const [courseFilter, setCourseFilter] = useState<number | 'all'>('all');
+    const [statusFilter, setStatusFilter] = useState<'ACTIVE' | 'RELEGATED' | 'DISMISSED' | 'GRADUATED'>('ACTIVE');
+    const [graduatedCohorts, setGraduatedCohorts] = useState<any[]>([]);
+    const [selectedGradCohort, setSelectedGradCohort] = useState<number | null>(null);
+    const [gradCohortCadets, setGradCohortCadets] = useState<any[]>([]);
 
     const PAGE_SIZE = 50;
 
@@ -28,13 +32,13 @@ export const CadetManager: React.FC = () => {
     const [newSquad, setNewSquad] = useState('');
     const [newCourseNumber, setNewCourseNumber] = useState<number>(activeRC);
 
-    const fetchCadets = async (isInitial = true, search = debouncedSearch, filter = courseFilter) => {
+    const fetchCadets = async (isInitial = true, search = debouncedSearch, filter = courseFilter, status = statusFilter) => {
         setIsLoading(true);
         try {
             const from = isInitial ? 0 : cadets.length;
             const to = from + PAGE_SIZE - 1;
             const rcFilter = filter === 'all' ? undefined : filter;
-            const data = await dbService.getCadetRegistry(from, to, search, rcFilter);
+            const data = await dbService.getCadetRegistry(from, to, search, rcFilter, status);
 
             if (isInitial) {
                 setCadets(data);
@@ -59,8 +63,45 @@ export const CadetManager: React.FC = () => {
 
     // Re-fetch when debounced search or filter changes
     useEffect(() => {
-        fetchCadets(true, debouncedSearch, courseFilter);
-    }, [debouncedSearch, courseFilter]);
+        if (statusFilter === 'GRADUATED') {
+            setIsLoading(true);
+            dbService.getGraduatedCohortsSummary()
+                .then(data => {
+                    setGraduatedCohorts(data);
+                    setIsLoading(false);
+                })
+                .catch(err => {
+                    console.error(err);
+                    setIsLoading(false);
+                });
+        } else {
+            fetchCadets(true, debouncedSearch, courseFilter, statusFilter);
+        }
+
+        const handleUpdate = () => {
+            if (statusFilter === 'GRADUATED') {
+                dbService.getGraduatedCohortsSummary().then(setGraduatedCohorts);
+            } else {
+                fetchCadets(true, debouncedSearch, courseFilter, statusFilter);
+            }
+        };
+        window.addEventListener('cadet-registry-updated', handleUpdate);
+        return () => window.removeEventListener('cadet-registry-updated', handleUpdate);
+    }, [debouncedSearch, courseFilter, statusFilter]);
+
+    const handleExploreCohort = async (courseNum: number) => {
+        setSelectedGradCohort(courseNum);
+        setIsLoading(true);
+        try {
+            const rollData = await dbService.getNominalRollData(courseNum, true);
+            setGradCohortCadets(rollData);
+        } catch (err) {
+            console.error('Failed to load graduated nominal roll', err);
+            toast.error('Failed to load nominal roll');
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleGenerateNominalRoll = async () => {
         if (courseFilter === 'all') {
@@ -315,6 +356,13 @@ export const CadetManager: React.FC = () => {
     };
 
 
+    const displayCadets = cadets.filter(c => {
+        if (statusFilter === 'GRADUATED') return c.status === 'GRADUATED';
+        if (statusFilter === 'RELEGATED') return c.status !== 'DISMISSED' && c.relegated_from_rc;
+        if (statusFilter === 'DISMISSED') return c.status === 'DISMISSED';
+        return c.status === 'ACTIVE' && !c.relegated_from_rc;
+    });
+
     return (
         <div className="space-y-8 max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
@@ -412,6 +460,23 @@ export const CadetManager: React.FC = () => {
                         />
                     </div>
                     <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex bg-slate-100/50 p-1 rounded-md border border-slate-200/60 backdrop-blur-sm">
+                            {[
+                                { id: 'ACTIVE', label: 'ACTIVE' },
+                                { id: 'RELEGATED', label: 'RELEGATED' },
+                                { id: 'DISMISSED', label: 'DISMISSED' },
+                                { id: 'GRADUATED', label: 'GRADUATED' }
+                            ].map(opt => (
+                                <button
+                                    key={opt.id}
+                                    onClick={() => setStatusFilter(opt.id as any)}
+                                    className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-tight transition-all ${statusFilter === opt.id ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+
                         <div className="flex bg-slate-100 p-1 rounded-md border border-slate-200">
                             {[
                                 { id: 'all', label: 'ALL MODULES' },
@@ -443,8 +508,45 @@ export const CadetManager: React.FC = () => {
                 </div>
 
                 <div className="overflow-auto max-h-[700px]">
-                    {/* Desktop Table */}
-                    <table className="w-full text-left hidden md:table">
+                    {statusFilter === 'GRADUATED' ? (
+                        <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 bg-slate-50/50 animate-in fade-in duration-300">
+                            {graduatedCohorts.map(cohort => (
+                                <div key={cohort.courseNumber} className="bg-blue-50/40 hover:bg-blue-50/80 rounded-xl shadow-md border border-blue-100/80 overflow-hidden group hover:border-blue-900 transition-all flex flex-col justify-between">
+                                    <div className="p-6">
+                                        <div className="w-12 h-12 rounded-lg bg-white text-blue-900 flex items-center justify-center font-mono font-black text-lg border border-blue-200 group-hover:bg-blue-900 group-hover:text-white transition-all shadow-sm">
+                                            RC{cohort.courseNumber}
+                                        </div>
+                                        <h4 className="mt-4 font-black text-slate-900 uppercase tracking-tight text-sm">
+                                            Regular Course {cohort.courseNumber}
+                                        </h4>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2">
+                                            Graduated: {new Date(cohort.graduationDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                                        </p>
+                                        <div className="mt-4 flex items-center justify-between text-xs border-t border-blue-100/50 pt-3 font-mono">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase">Commissioned Officers</span>
+                                            <span className="font-black text-slate-900">{cohort.totalCadets} Cadets</span>
+                                        </div>
+                                    </div>
+                                    <div className="p-4 bg-blue-100/20 border-t border-blue-100/40">
+                                        <button
+                                            onClick={() => handleExploreCohort(cohort.courseNumber)}
+                                            className="w-full py-2.5 bg-white border border-blue-200 rounded-lg text-[9px] font-black uppercase tracking-widest text-blue-900 hover:bg-blue-900 hover:text-white transition-all shadow-sm flex items-center justify-center gap-2"
+                                        >
+                                            Explore Nominal Roll
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {graduatedCohorts.length === 0 && (
+                                <div className="col-span-full py-16 text-center">
+                                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Graduated Cohorts Archived</p>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            {/* Desktop Table */}
+                            <table className="w-full text-left hidden md:table">
                         <thead className="bg-blue-900 text-white sticky top-0 z-10">
                             <tr>
                                 <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest">IDENTIFICATION NAME</th>
@@ -455,22 +557,30 @@ export const CadetManager: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                            {cadets.map((cadet) => {
+                            {displayCadets.map((cadet) => {
                                 const cn = cadet.course_number;
                                 const level = cn ? calculateCurrentLevel(cn, activeRC) : cadet.year_group;
                                 return (
-                                    <tr key={cadet.id} className="hover:bg-slate-50/80 transition-all group font-mono">
+                                    <tr key={cadet.id} className={`hover:bg-slate-50/80 transition-all group font-mono ${cadet.status === 'DISMISSED' ? 'opacity-40 grayscale' : ''}`}>
                                         <td className="px-8 py-4">
                                             <button
                                                 onClick={() => setSelectedCadet(cadet)}
-                                                className="font-black text-blue-900 hover:text-blue-700 text-[11px] uppercase tracking-tighter"
+                                                className={`font-black uppercase tracking-tighter text-[11px] ${cadet.status === 'DISMISSED' ? 'text-slate-600' : 'text-blue-900 hover:text-blue-700'}`}
                                             >
                                                 {cadet.name}
                                             </button>
                                         </td>
-                                        <td className="px-8 py-4 text-[11px] font-bold text-slate-500 uppercase">{cadet.squad}</td>
-                                        <td className="px-8 py-4 text-[11px] font-black text-blue-900">RC {cn || '??'}</td>
-                                        <td className="px-8 py-4 text-[11px] font-bold text-slate-400 uppercase">YEAR {level || '?'}</td>
+                                        {cadet.status === 'DISMISSED' ? (
+                                            <td className="px-8 py-4" colSpan={3}>
+                                                <span className="px-3 py-1 bg-rose-700 text-white rounded text-[10px] font-black uppercase tracking-widest">DISMISSED</span>
+                                            </td>
+                                        ) : (
+                                            <>
+                                                <td className="px-8 py-4 text-[11px] font-bold text-slate-500 uppercase">{cadet.squad}</td>
+                                                <td className="px-8 py-4 text-[11px] font-black text-blue-900">RC {cn || '??'}</td>
+                                                <td className="px-8 py-4 text-[11px] font-bold text-slate-400 uppercase">YEAR {level || '?'}</td>
+                                            </>
+                                        )}
                                         <td className="px-8 py-4 text-right">
                                             <button
                                                 onClick={() => handleDeleteCadet(cadet.id, cadet.name)}
@@ -482,7 +592,7 @@ export const CadetManager: React.FC = () => {
                                     </tr>
                                 );
                             })}
-                            {cadets.length === 0 && (
+                            {displayCadets.length === 0 && (
                                 <tr>
                                     <td colSpan={5} className="px-8 py-24 text-center">
                                         <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Zero Records in Filter Range</p>
@@ -496,15 +606,15 @@ export const CadetManager: React.FC = () => {
                     <div className="md:hidden">
                         {debouncedSearch.length > 0 ? (
                             <div className="divide-y divide-slate-100 bg-white">
-                                {cadets.map((cadet) => {
+                                {displayCadets.map((cadet) => {
                                     const cn = cadet.course_number;
                                     const level = cn ? calculateCurrentLevel(cn, activeRC) : cadet.year_group;
                                     return (
-                                        <div key={cadet.id} className="p-5 font-mono">
+                                        <div key={cadet.id} className={`p-5 font-mono ${cadet.status === 'DISMISSED' ? 'opacity-40 grayscale' : ''}`}>
                                             <div className="flex justify-between items-start mb-3">
                                                 <button
                                                     onClick={() => setSelectedCadet(cadet)}
-                                                    className="font-black text-blue-900 text-xs uppercase tracking-tighter hover:underline text-left leading-tight"
+                                                    className={`font-black text-xs uppercase tracking-tighter hover:underline text-left leading-tight ${cadet.status === 'DISMISSED' ? 'text-slate-600' : 'text-blue-900'}`}
                                                 >
                                                     {cadet.name}
                                                 </button>
@@ -516,12 +626,20 @@ export const CadetManager: React.FC = () => {
                                                 </button>
                                             </div>
                                             <div className="flex items-center gap-3">
-                                                <span className="text-[9px] font-black bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase">
-                                                    {cadet.squad}
-                                                </span>
-                                                <span className="text-[9px] font-black bg-blue-50 text-blue-900 px-2 py-0.5 rounded uppercase">
-                                                    RC {cn} | YEAR {level}
-                                                </span>
+                                                {cadet.status === 'DISMISSED' ? (
+                                                    <span className="text-[9px] font-black bg-rose-700 text-white px-2 py-0.5 rounded uppercase">
+                                                        DISMISSED
+                                                    </span>
+                                                ) : (
+                                                    <>
+                                                        <span className="text-[9px] font-black bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase">
+                                                            {cadet.squad}
+                                                        </span>
+                                                        <span className="text-[9px] font-black bg-blue-50 text-blue-900 px-2 py-0.5 rounded uppercase">
+                                                            RC {cn} | YEAR {level}
+                                                        </span>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -536,11 +654,13 @@ export const CadetManager: React.FC = () => {
                                 </div>
                             </div>
                         )}
-                    </div>
+                        </div>
+                        </>
+                    )}
                 </div>
-            </div>
+                </div>
 
-            {hasMore && (
+            {hasMore && statusFilter !== 'GRADUATED' && (
                 <div className="flex justify-center pt-2">
                     <button
                         onClick={() => fetchCadets(false)}
@@ -575,6 +695,90 @@ export const CadetManager: React.FC = () => {
                 type="cadet"
                 data={previewData}
             />
+
+            {selectedGradCohort !== null && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] animate-in fade-in duration-200">
+                        <div className="p-6 border-b bg-blue-900 text-white flex items-center justify-between">
+                            <div>
+                                <p className="text-[8px] font-black text-blue-200 uppercase tracking-[0.2em] mb-1">Archived Nominal Roll</p>
+                                <h3 className="font-black text-lg tracking-tight uppercase">Regular Course {selectedGradCohort}</h3>
+                            </div>
+                            <button
+                                onClick={() => setSelectedGradCohort(null)}
+                                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white font-bold"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 overflow-y-auto flex-1">
+                            <div className="flex justify-between items-center mb-6">
+                                <p className="text-[10px] text-slate-500 font-black uppercase tracking-wider">
+                                    Total Commissioned: <span className="font-mono text-blue-900 font-black">{gradCohortCadets.length} Officers</span>
+                                </p>
+                                <button
+                                    onClick={async () => {
+                                        const loadingToast = toast.loading(`Generating PDF Nominal Roll...`);
+                                        try {
+                                            await reportService.generateNominalRoll({
+                                                rc: selectedGradCohort,
+                                                cadets: gradCohortCadets,
+                                                officerName: 'COMMANDANT'
+                                            });
+                                            toast.success('Nominal Roll generated!');
+                                        } catch (err) {
+                                            console.error(err);
+                                            toast.error('Failed to generate nominal roll');
+                                        } finally {
+                                            toast.dismiss(loadingToast);
+                                        }
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-700 transition-all border border-slate-200"
+                                >
+                                    <Download size={12} />
+                                    Download Nominal Roll
+                                </button>
+                            </div>
+
+                            <table className="w-full text-left border-collapse font-mono text-sm">
+                                <thead>
+                                    <tr className="bg-slate-50 border-b border-slate-100">
+                                        <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">No.</th>
+                                        <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Name</th>
+                                        <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Squad</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {gradCohortCadets.map((cadet, idx) => (
+                                        <tr key={cadet.id} className="hover:bg-slate-50/50">
+                                            <td className="px-4 py-3 text-slate-400 font-bold">{idx + 1}</td>
+                                            <td className="px-4 py-3 font-black text-slate-900 uppercase">{cadet.name}</td>
+                                            <td className="px-4 py-3 text-slate-500 font-bold uppercase">{cadet.squad}</td>
+                                        </tr>
+                                    ))}
+                                    {gradCohortCadets.length === 0 && (
+                                        <tr>
+                                            <td colSpan={3} className="px-4 py-12 text-center text-slate-400">
+                                                No cadets enrolled in this cohort registry.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                            <button
+                                onClick={() => setSelectedGradCohort(null)}
+                                className="px-6 py-2.5 bg-blue-900 text-white rounded-lg text-[9px] font-black uppercase tracking-widest shadow-md hover:bg-blue-800 transition-all"
+                            >
+                                Close Roster
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

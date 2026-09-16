@@ -4,40 +4,16 @@ import { UserRole } from '../../types';
 import { supabase } from '../../services/dbService';
 
 export const LoginScreen: React.FC = () => {
-  const { login, signUp } = useAuth();
+  const { login } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-  const [role, setRole] = useState<UserRole>(UserRole.COMMANDANT);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [occupancy, setOccupancy] = useState({ cmd: 0, off: 0 });
 
-  useEffect(() => {
-    const fetchOccupancy = async () => {
-      const { data, error } = await supabase
-        .from('users')
-        .select('role');
-      
-      if (!error && data) {
-        const cmdCount = data.filter(u => u.role === UserRole.COMMANDANT).length;
-        const offCount = data.filter(u => u.role === UserRole.COURSE_OFFICER).length;
-        setOccupancy({ cmd: cmdCount, off: offCount });
-        
-        // Default role logic: if commandant is taken, switch default to officer
-        if (cmdCount > 0) {
-          setRole(UserRole.COURSE_OFFICER);
-        }
-      }
-    };
-    fetchOccupancy();
-  }, []);
+  // Occupancy checks removed since signup is now Commandant-only internal
 
-  const isFull = (occupancy.cmd + occupancy.off) >= 6;
-  const canShowCommandant = occupancy.cmd === 0;
-  const canShowOfficer = occupancy.off < 5;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,11 +21,7 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
 
     try {
-      if (mode === 'signup') {
-        await signUp(email, password, username, role);
-      } else {
-        await login(email, password);
-      }
+      await login(email, password);
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     } finally {
@@ -85,7 +57,7 @@ export const LoginScreen: React.FC = () => {
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Nigeria Police Academy</h2>
           <p className="text-xs text-white/50 uppercase tracking-widest mt-2">
-            {mode === 'login' ? 'Secure Authentication' : 'Personnel Onboarding'}
+            Secure Authentication
           </p>
         </div>
 
@@ -95,34 +67,7 @@ export const LoginScreen: React.FC = () => {
           </div>
         )}
 
-        <div className="flex bg-black/50 p-1 rounded-lg mb-6 border border-white/5">
-          <button
-            type="button"
-            className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${mode === 'login' ? 'bg-white/10 text-white shadow-sm' : 'text-white/40 hover:text-white'}`}
-            onClick={() => { setMode('login'); setError(''); }}
-          >
-            Grant Access
-          </button>
-          {!isFull ? (
-            <button
-              type="button"
-              className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${mode === 'signup' ? 'bg-white/10 text-white shadow-sm' : 'text-white/40 hover:text-white'}`}
-              onClick={() => { setMode('signup'); setError(''); }}
-            >
-              Initialize Profile
-            </button>
-          ) : (
-            <div className="flex-1 py-2 text-[9px] font-bold text-white/30 uppercase tracking-tighter flex items-center justify-center text-center leading-none px-2 border border-white/5 rounded-md bg-white/5">
-              System Registry Full • Access Restricted
-            </div>
-          )}
-        </div>
-
-        {isFull && mode === 'signup' && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/5 border border-red-500/10 text-red-400 text-xs text-center font-medium">
-            Registry capacity reached. New personnel onboarding is currently suspended by Command.
-          </div>
-        )}
+        {/* Registry navigation and full warning removed */}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -149,40 +94,14 @@ export const LoginScreen: React.FC = () => {
             />
           </div>
 
-          {mode === 'signup' && (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-white/60 uppercase mb-1">Display Username</label>
-                <input
-                  type="text"
-                  required
-                  className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-colors"
-                  placeholder="e.g. Commandant1"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-white/60 uppercase mb-1">Assigned Role</label>
-                <select
-                  className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-colors appearance-none"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as UserRole)}
-                >
-                  {canShowCommandant && <option value={UserRole.COMMANDANT}>Commandant (Max 1)</option>}
-                  {canShowOfficer && <option value={UserRole.COURSE_OFFICER}>Course Officer (Max 5)</option>}
-                </select>
-              </div>
-            </>
-          )}
+          {/* Registration form inputs removed */}
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || !email || !password}
             className="w-full bg-white hover:bg-gray-200 text-black font-bold uppercase tracking-widest text-sm py-4 rounded-lg mt-6 shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? 'Processing...' : (mode === 'login' ? 'Acknowledge & Enter' : 'Register Identity')}
+            {isLoading ? 'Processing...' : 'Acknowledge & Enter'}
           </button>
         </form>
       </div>

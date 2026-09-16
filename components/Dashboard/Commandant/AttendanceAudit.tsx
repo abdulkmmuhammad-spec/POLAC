@@ -3,7 +3,7 @@ import { Download, FileText, Calendar, RotateCcw, Search, ChevronDown, ChevronUp
 import { useParade } from '../../../context/ParadeContext';
 import { CadetStatus } from '../../../types';
 import { reportService } from '../../../services/reportService';
-import { dbService } from '../../../services/dbService';
+import { dbService, supabase } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import * as XLSX from 'xlsx';
 
@@ -28,6 +28,10 @@ export const AttendanceAudit: React.FC = () => {
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
     const [isDefaultView, setIsDefaultView] = useState(true);
     const [expandedRCs, setExpandedRCs] = useState<Record<number, boolean>>({});
+    
+    // New RPC States
+    const [historicalData, setHistoricalData] = useState<any[]>([]);
+    const [isHistoricalLoading, setIsHistoricalLoading] = useState(false);
 
     // Toggle accordion for an RC
     const toggleRC = (rc: number) => {
@@ -35,13 +39,29 @@ export const AttendanceAudit: React.FC = () => {
     };
 
     // Get unique course numbers for the filter dropdown
-    const availableCourses = useMemo(() => {
-        const numbers = new Set<number>();
-        records.forEach(r => {
-            if (r.courseNumber) numbers.add(r.courseNumber);
-        });
-        return Array.from(numbers).sort((a, b) => b - a);
-    }, [records]);
+    const [availableCourses, setAvailableCourses] = useState<number[]>([]);
+
+    React.useEffect(() => {
+        const fetchActiveCourses = async () => {
+            try {
+                // Highly performant RPC call that natively handles DISTINCT extraction 
+                // and bypasses the 1,000-row pagination limit
+                const { data, error } = await supabase.rpc('get_active_cohorts');
+                
+                if (error) {
+                    throw error;
+                }
+                
+                if (data) {
+                    // The RPC already returns distinct integers ordered DESC, so we can map directly
+                    setAvailableCourses(data.map((row: any) => row.course_number));
+                }
+            } catch (err) {
+                console.error("Failed to fetch active courses", err);
+            }
+        };
+        fetchActiveCourses();
+    }, []);
 
     // Default to Current Week (Monday to Sunday)
     const currentWeekRange = useMemo(() => {
@@ -59,38 +79,52 @@ export const AttendanceAudit: React.FC = () => {
         return { monday, sunday };
     }, []);
 
-    const filteredRecords = useMemo(() => {
-        return records.flatMap(r => r.cadets.map(c => ({ ...c, r })))
-            .filter(item => {
-                const itemDate = new Date(item.r.date);
+    const handleHistoricalSearch = async () => {
+        setIsHistoricalLoading(true);
+        try {
+            let start, end;
+            if (isDefaultView) {
+                // Ensure dates are strings for the RPC
+                start = currentWeekRange.monday.toISOString().split('T')[0];
+                end = currentWeekRange.sunday.toISOString().split('T')[0];
+            } else {
+                start = dateRange.start || undefined;
+                end = dateRange.end || undefined;
+            }
 
-                if (isDefaultView) {
-                    if (itemDate < currentWeekRange.monday || itemDate > currentWeekRange.sunday) return false;
-                } else if (dateRange.start && dateRange.end) {
-                    const start = new Date(dateRange.start);
-                    const end = new Date(dateRange.end);
-                    if (itemDate < start || itemDate > end) return false;
-                }
-
-                if (auditStatusFilter !== 'all' && item.status !== auditStatusFilter) return false;
-                if (auditCourseFilter !== 'all' && item.r.courseNumber !== parseInt(auditCourseFilter)) return false;
-
-                if (auditSearchTerm) {
-                    const search = auditSearchTerm.toLowerCase();
-                    return item.name.toLowerCase().includes(search) || item.squad.toLowerCase().includes(search);
-                }
-
-                return true;
+            const { data } = await dbService.fetchHistoricalTrace({
+                startDate: start,
+                endDate: end,
+                courseNumber: auditCourseFilter !== 'all' ? parseInt(auditCourseFilter) : undefined,
+                status: auditStatusFilter,
+                searchTerm: auditSearchTerm
             });
-    }, [records, isDefaultView, dateRange, auditStatusFilter, auditCourseFilter, auditSearchTerm, currentWeekRange]);
+            setHistoricalData(data || []);
+        } catch (err) {
+            console.error("Historical search failed", err);
+        } finally {
+            setIsHistoricalLoading(false);
+        }
+    };
 
-    // Grouping logic for Accordions
+    // Auto-fetch data when view or filters change
+    React.useEffect(() => {
+        handleHistoricalSearch();
+    }, [isDefaultView, auditStatusFilter, auditCourseFilter, auditSearchTerm, currentWeekRange, dateRange.start, dateRange.end]);
+
+    const filteredRecords = useMemo(() => {
+        return historicalData;
+    }, [historicalData]);
+
+    // Grouping logic for Accordion: Group by RC, then sub-group by Parade Event ID
     const groupedRecords = useMemo(() => {
-        const groups: Record<number, any[]> = {};
+        const groups: Record<number, Record<string, any[]>> = {};
         filteredRecords.forEach(item => {
-            const rc = item.r.courseNumber || 0; // 0 for Legacy
-            if (!groups[rc]) groups[rc] = [];
-            groups[rc].push(item);
+            const rc = item.r?.courseNumber || 0;
+            const eventId = item.r?.id || `${item.r?.date}-${item.r?.paradeType}`;
+            if (!groups[rc]) groups[rc] = {};
+            if (!groups[rc][eventId]) groups[rc][eventId] = [];
+            groups[rc][eventId].push(item);
         });
         return groups;
     }, [filteredRecords]);
@@ -116,17 +150,18 @@ export const AttendanceAudit: React.FC = () => {
         setAuditStatusFilter('all');
         setAuditCourseFilter('all');
         setAuditSearchTerm('');
+        setHistoricalData([]);
     };
 
     const handleExport = () => {
         const data = filteredRecords.map(item => ({
-            'Date': item.r.date,
+            'Date': item.r?.date,
             'Cadet Name': item.name,
             'Squad': item.squad,
             'Status': item.status,
-            'Course': item.r.courseNumber ? formatRC(item.r.courseNumber) : 'Legacy',
-            'Year Level': item.r.courseNumber ? calculateCurrentLevel(item.r.courseNumber, activeRC) : item.r.yearGroup,
-            'Officer': item.r.officerName
+            'Course': item.r?.courseNumber ? formatRC(item.r.courseNumber) : 'Legacy',
+            'Year Level': item.r?.courseNumber ? calculateCurrentLevel(item.r.courseNumber, activeRC) : item.r?.yearGroup,
+            'Officer': item.r?.officerName
         }));
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
@@ -170,6 +205,13 @@ export const AttendanceAudit: React.FC = () => {
                                     value={dateRange.end}
                                     onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                                 />
+                                <button
+                                    onClick={handleHistoricalSearch}
+                                    disabled={isHistoricalLoading}
+                                    className="px-4 py-2 bg-blue-900 text-white rounded-md text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                                >
+                                    {isHistoricalLoading ? 'SEARCHING...' : 'SEARCH DATABASE'}
+                                </button>
                             </div>
                         )}
                     </div>
@@ -183,7 +225,7 @@ export const AttendanceAudit: React.FC = () => {
                             EXPORT XLS
                         </button>
                         <button
-                            onClick={() => reportService.generateCommandReturn(records, "ATTENDANCE AUDIT REPORT")}
+                            onClick={() => reportService.generateAuditReport({ filteredRecords, title: "OFFICIAL AUDIT REPORT", officerName: "COMMANDANT" })}
                             className="flex items-center gap-3 px-5 py-2.5 bg-blue-900 text-white rounded-md text-sm font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-sm"
                         >
                             <FileText size={16} />
@@ -247,25 +289,26 @@ export const AttendanceAudit: React.FC = () => {
                 </div>
             </div>
 
-            {/* Tactical Audit Table with RC Accordions */}
+            {/* Tactical Audit Table - High-Density Event-Based Layout */}
             <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto relative">
                     {/* Desktop Table Header - STICKY */}
                     <table className="w-full text-left hidden md:table border-collapse">
                         <thead className="bg-blue-900 text-white border-b border-blue-800 sticky top-0 z-20">
                             <tr>
-                                <th className="px-8 py-5 text-sm font-black uppercase tracking-wider">Cadet & Squad Identifier</th>
-                                <th className="px-6 py-5 text-sm font-black uppercase tracking-wider text-center">Status Pip</th>
-                                <th className="px-6 py-5 text-sm font-black uppercase tracking-wider">Date / Training Type</th>
+                                <th className="px-8 py-5 text-sm font-black uppercase tracking-wider w-[240px]">Parade Event Details</th>
+                                <th className="px-6 py-5 text-sm font-black uppercase tracking-wider text-center w-[120px]">Entries</th>
+                                <th className="px-6 py-5 text-sm font-black uppercase tracking-wider">Identified Cadets (Compact Chips)</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {Object.entries(groupedRecords)
                                 .sort(([rcA], [rcB]) => parseInt(rcB) - parseInt(rcA)) // Sort RC descending
-                                .map(([rcStr, items]) => {
+                                .map(([rcStr, eventsMap]) => {
                                     const rc = parseInt(rcStr);
-                                    const groupItems = items as any[];
                                     const isExpanded = expandedRCs[rc] !== false; // Default to expanded
+                                    const totalEntriesInRC = Object.values(eventsMap).reduce((acc, curr) => acc + curr.length, 0);
+                                    
                                     return (
                                         <React.Fragment key={rc}>
                                             {/* RC Group Header */}
@@ -280,88 +323,104 @@ export const AttendanceAudit: React.FC = () => {
                                                             {rc === 0 ? 'LEGACY ARCHIVE' : `${formatRC(rc)} • LEVEL ${calculateCurrentLevel(rc, activeRC)}`}
                                                         </span>
                                                         <span className="text-[11px] font-bold text-slate-400 uppercase ml-auto tracking-wider">
-                                                            {groupItems.length} ENTRIES IN BLOCK
+                                                            {totalEntriesInRC} TOTAL IDENTIFIED
                                                         </span>
                                                     </div>
                                                 </td>
                                             </tr>
 
-                                            {isExpanded && groupItems.map((item, idx) => (
-                                                <tr key={`${rc}-${idx}`} className="even:bg-slate-50/50 hover:bg-blue-50/30 transition-colors group">
-                                                    <td className="px-8 py-6">
-                                                        <p className="font-black text-slate-900 text-base uppercase tracking-tight">{item.name}</p>
-                                                        <p className="text-[11px] text-slate-400 font-mono tracking-tighter mt-1">SQUAD: {item.squad.toUpperCase()}</p>
-                                                    </td>
-                                                    <td className="px-6 py-6">
-                                                        <div className="flex items-center justify-center gap-4">
-                                                            <div className={`w-3.5 h-3.5 rounded-sm ${item.status === CadetStatus.ABSENT ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' :
-                                                                item.status === CadetStatus.SICK ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' :
-                                                                    'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.4)]'
-                                                                }`} />
-                                                            <span className="text-sm font-black uppercase tracking-tight text-slate-700 min-w-[70px]">
-                                                                {item.status === CadetStatus.YET_TO_REPORT ? 'YTR' : item.status}
-                                                            </span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-6">
-                                                        <div className="flex items-center gap-3 text-slate-600 mb-1">
-                                                            <Calendar size={14} className="text-slate-400" />
-                                                            <span className="text-sm font-mono font-bold">{new Date(item.r.date).toLocaleDateString()}</span>
-                                                        </div>
-                                                        <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest">{item.r.paradeType}</p>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                            {isExpanded && Object.entries(eventsMap)
+                                                .sort(([, itemsA], [, itemsB]) => new Date(itemsB[0].r.date).getTime() - new Date(itemsA[0].r.date).getTime())
+                                                .map(([eventId, items]) => {
+                                                    const firstItem = items[0];
+                                                    return (
+                                                        <tr key={eventId} className="even:bg-slate-50/50 hover:bg-blue-50/30 transition-colors group">
+                                                            <td className="px-8 py-6">
+                                                                <div className="flex items-center gap-3 text-slate-900 mb-1">
+                                                                    <Calendar size={14} className="text-blue-900" />
+                                                                    <span className="text-sm font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
+                                                                </div>
+                                                                <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest italic">{firstItem.r.paradeType}</p>
+                                                            </td>
+                                                            <td className="px-6 py-6 text-center">
+                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 text-slate-900 text-xs font-black border border-slate-200 shadow-sm">
+                                                                    {items.length}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-6">
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {items.map((cadet, cIdx) => (
+                                                                        <div 
+                                                                            key={cIdx} 
+                                                                            className="group/chip flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-md border border-slate-200 shadow-sm hover:border-blue-900/30 transition-all"
+                                                                        >
+                                                                            <div className={`w-2 h-2 rounded-full ${
+                                                                                cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.3)]' :
+                                                                                cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.3)]' :
+                                                                                'bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.3)]'
+                                                                            }`} />
+                                                                            <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight">
+                                                                                {cadet.name.split(' ').slice(0, 2).join(' ')}
+                                                                            </span>
+                                                                            <span className="text-[9px] text-slate-400 font-mono font-bold border-l pl-2 ml-1">
+                                                                                {cadet.squad}
+                                                                            </span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                         </React.Fragment>
                                     );
                                 })}
                         </tbody>
                     </table>
 
-                    {/* Mobile View - Hardened Cards */}
-                    <div className="md:hidden divide-y divide-slate-100 bg-slate-50/50">
-                        {filteredRecords.map((item, idx) => {
-                            const cn = item.r.courseNumber;
-                            const level = cn ? calculateCurrentLevel(cn, activeRC) : item.r.yearGroup;
-                            return (
-                                <div key={idx} className="p-5 space-y-4 hover:bg-blue-50/30 transition-colors">
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <h4 className="font-black text-slate-900 text-xs uppercase tracking-tight">{item.name}</h4>
-                                            <p className="text-[9px] text-slate-500 font-mono font-black uppercase tracking-tighter mt-1">{item.squad} • LEVEL {level}</p>
-                                        </div>
-                                        <div className="flex items-center gap-2 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
-                                            <div className={`w-2 h-2 rounded-sm ${item.status === CadetStatus.ABSENT ? 'bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.3)]' :
-                                                item.status === CadetStatus.SICK ? 'bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.3)]' :
-                                                    'bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.3)]'
-                                                }`} />
-                                            <span className="text-[9px] font-black uppercase tracking-tighter">
-                                                {item.status === CadetStatus.YET_TO_REPORT ? 'YTR' : item.status}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4 bg-white/60 p-3 rounded border border-slate-200 shadow-[inset_0_1px_4px_rgba(0,0,0,0.02)]">
-                                        <div>
-                                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">LOCK TIMESTAMP</p>
-                                            <div className="flex items-center gap-1.5 text-slate-600">
-                                                <Calendar size={10} className="text-slate-400" />
-                                                <span className="text-[10px] font-mono font-black">{new Date(item.r.date).toLocaleDateString()}</span>
-                                            </div>
-                                            <p className="text-[9px] text-blue-900 mt-1 font-black uppercase tracking-tighter italic">{item.r.paradeType}</p>
-                                        </div>
-                                        {cn && (
+                    {/* Mobile View - Tactical Event Cards */}
+                    <div className="md:hidden space-y-4 p-4 bg-slate-50/50">
+                        {Object.entries(groupedRecords).flatMap(([rcStr, eventsMap]) => 
+                            Object.entries(eventsMap).map(([eventId, items]) => {
+                                const firstItem = items[0];
+                                const rc = parseInt(rcStr);
+                                return (
+                                    <div key={eventId} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                                        <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                                             <div>
-                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">DESIGNATION</p>
-                                                <span className="font-mono text-[9px] font-black text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                                                    {formatRC(cn)}
+                                                <p className="text-[10px] font-black text-blue-900 uppercase tracking-widest mb-1">
+                                                    {rc === 0 ? 'LEGACY' : formatRC(rc)}
+                                                </p>
+                                                <div className="flex items-center gap-2 text-slate-800">
+                                                    <Calendar size={12} className="text-slate-400" />
+                                                    <span className="text-[11px] font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter italic mb-1">{firstItem.r.paradeType}</p>
+                                                <span className="text-[10px] font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                    {items.length} CADETS
                                                 </span>
                                             </div>
-                                        )}
+                                        </div>
+                                        <div className="p-4">
+                                            <div className="flex flex-wrap gap-2">
+                                                {items.map((cadet, cIdx) => (
+                                                    <div key={cIdx} className="flex items-center gap-1.5 bg-slate-50/50 px-2 py-1 rounded-lg border border-slate-100">
+                                                        <div className={`w-1.5 h-1.5 rounded-full ${
+                                                            cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-500' :
+                                                            cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-500' :
+                                                            'bg-indigo-500'
+                                                        }`} />
+                                                        <span className="text-[9px] font-bold text-slate-700 uppercase tracking-tight">{cadet.name}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })
+                        )}
                     </div>
                     {filteredRecords.length === 0 && (
                         <div className="p-24 text-center flex flex-col items-center">

@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { X, FileText, TrendingUp, AlertCircle, CheckCircle, Shield, Calendar, User as UserIcon, Medal, BadgeAlert } from 'lucide-react';
-import { dbService } from '../../services/dbService';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, FileText, TrendingUp, AlertCircle, CheckCircle, Shield, User as UserIcon, Medal, BadgeAlert, History, Camera, Loader2, Edit3, Save, ShieldAlert } from 'lucide-react';
+import { dbService, supabase } from '../../services/dbService';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'react-hot-toast';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
 import { calculateCurrentLevel } from '../../utils/rcHelpers';
 import { useAuth } from '../../context/AuthContext';
-import { Edit3, Save, ShieldAlert } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const logo = '/logo.png';
 
@@ -18,38 +18,135 @@ interface CadetRecordModalProps {
 }
 
 export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activeRC, onClose }) => {
-const { currentUser } = useAuth();
+    const { currentUser } = useAuth();
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    
     const [stats, setStats] = useState({ absent: 0, sick: 0, detention: 0, lastEvent: null as any });
+    const [alertHistory, setAlertHistory] = useState<any[]>([]);
+    const [absenceTrace, setAbsenceTrace] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isUploading, setIsUploading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
+    
+    // Dismissal States
+    const [showDismissal, setShowDismissal] = useState(false);
+    const [dismissalReason, setDismissalReason] = useState('');
+    const [dismissalAuthority, setDismissalAuthority] = useState('');
+    const [dismissalConfirmText, setDismissalConfirmText] = useState('');
+    const [dismissalAudit, setDismissalAudit] = useState<any>(null);
+    const [logoBase64, setLogoBase64] = useState<string | null>(null);
 
-    // Editable Fields
+    // Controlled Fields
     const [editName, setEditName] = useState(cadet.name);
     const [editSquad, setEditSquad] = useState(cadet.squad);
     const [editCourse, setEditCourse] = useState(cadet.course_number);
+    const [avatarUrl, setAvatarUrl] = useState(cadet.avatar_url);
 
     const level = cadet.course_number ? (activeRC - cadet.course_number + 1) : cadet.year_group;
+
+    useEffect(() => {
+        const loadLogo = async () => {
+            try {
+                const response = await fetch(logo);
+                const blob = await response.blob();
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setLogoBase64(reader.result as string);
+                };
+                reader.readAsDataURL(blob);
+            } catch (err) {
+                console.warn('Failed to preload logo', err);
+            }
+        };
+        loadLogo();
+    }, []);
 
     useEffect(() => {
         setEditName(cadet.name);
         setEditSquad(cadet.squad);
         setEditCourse(cadet.course_number);
-    }, [cadet.id, cadet.name, cadet.squad, cadet.course_number]);
+        setAvatarUrl(cadet.avatar_url);
+    }, [cadet]);
 
     useEffect(() => {
-        const fetchStats = async () => {
+        const fetchData = async () => {
             try {
                 const data = await dbService.getCadetStats(cadet.name);
                 setStats(data);
+
+                const { data: alerts } = await supabase
+                    .from('cadet_alerts')
+                    .select('*')
+                    .eq('cadet_name', cadet.name)
+                    .order('created_at', { ascending: false });
+                setAlertHistory(alerts || []);
+
+                const { data: traces } = await supabase
+                    .from('cadet_details')
+                    .select(`
+                      status,
+                      parade_records (date, parade_type, created_at)
+                    `)
+                    .eq('name', cadet.name);
+
+                if (traces) {
+                    const flatTraces = traces
+                        .filter((t: any) => t.status?.toLowerCase() !== 'present')
+                        .map((t: any) => ({
+                            status: t.status,
+                            date: Array.isArray(t.parade_records) ? t.parade_records[0]?.date : (t.parade_records as any)?.date,
+                            type: Array.isArray(t.parade_records) ? t.parade_records[0]?.parade_type : (t.parade_records as any)?.parade_type,
+                            created_at: Array.isArray(t.parade_records) ? t.parade_records[0]?.created_at : (t.parade_records as any)?.created_at
+                        }))
+                        .filter((t: any) => t.date)
+                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                    setAbsenceTrace(flatTraces);
+                }
+
+                if (cadet.status === 'DISMISSED') {
+                    const { data: auditData } = await supabase
+                        .from('audit_events')
+                        .select('*')
+                        .eq('action_type', 'CADET_DISMISSAL')
+                        .eq('target_id', cadet.id)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .single();
+                    if (auditData) setDismissalAudit(auditData);
+                }
             } catch (err) {
                 console.error('Failed to load stats', err);
             } finally {
                 setIsLoading(false);
             }
         };
-        fetchStats();
+        fetchData();
     }, [cadet.name]);
+
+    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        const loadingToast = toast.loading('Uploading official photograph...');
+        
+        try {
+            const { publicUrl, error } = await dbService.uploadCadetPhoto(cadet.id, file);
+            if (error) throw error;
+
+            // Update Database Registry
+            await dbService.updateCadetRegistry(cadet.id, { ...cadet, avatar_url: publicUrl }, currentUser!);
+            
+            setAvatarUrl(publicUrl);
+            toast.success('Cadet photograph synchronized successfully.');
+        } catch (err: any) {
+            toast.error('Uplink failed: ' + (err.message || 'Check storage permissions.'));
+        } finally {
+            setIsUploading(false);
+            toast.dismiss(loadingToast);
+        }
+    };
 
     // Calculation Constants
     const ABSENCE_PENALTY = 0.5;
@@ -74,65 +171,82 @@ const { currentUser } = useAuth();
         return "MEDICAL REVIEW";
     };
 
-    // Year-weighted attendance thresholds (confirmed: EXEMPLARY ≤ yearLevel × 6.5)
     const getAttendanceAssessment = (absences: number, yearLevel: number) => {
-        const exemplaryLimit = Math.round(yearLevel * 6.5);  // Year4 → 26
-        const satisfactoryLimit = Math.round(yearLevel * 15);  // Year4 → 60
-        const underReviewLimit = Math.round(yearLevel * 26);  // Year4 → 104
-
+        const exemplaryLimit = Math.round(yearLevel * 6.5);
+        const satisfactoryLimit = Math.round(yearLevel * 15);
         if (absences <= exemplaryLimit) return { label: 'EXEMPLARY', color: 'text-emerald-600' };
         if (absences <= satisfactoryLimit) return { label: 'SATISFACTORY', color: 'text-blue-600' };
-        if (absences <= underReviewLimit) return { label: 'UNDER REVIEW', color: 'text-amber-600' };
-        return { label: 'ACTION REQUIRED', color: 'text-rose-700' };
+        return { label: 'UNDER REVIEW', color: 'text-rose-700' };
     };
 
     const currentScore = calculateStandingScore(stats.absent, stats.detention);
+    const standing = (() => {
+        if (currentScore >= 89) return { label: 'EXEMPLARY', color: 'text-emerald-600', bg: 'bg-emerald-600', icon: <Medal size={14} /> };
+        if (currentScore >= 70) return { label: 'SATISFACTORY', color: 'text-blue-600', bg: 'bg-blue-600', icon: <CheckCircle size={14} /> };
+        if (currentScore >= 50) return { label: 'UNDER REVIEW', color: 'text-amber-600', bg: 'bg-amber-600', icon: <AlertCircle size={14} /> };
+        return { label: 'CRITICAL', color: 'text-rose-600', bg: 'bg-rose-600', icon: <BadgeAlert size={14} /> };
+    })();
 
-    const getStatusInfo = (score: number) => {
-        if (score >= 89) return { label: 'EXEMPLARY', color: 'text-emerald-600', bg: 'bg-emerald-600', icon: <Medal size={14} className="w-4 h-4" /> };
-        if (score >= 70) return { label: 'SATISFACTORY', color: 'text-blue-600', bg: 'bg-blue-600', icon: <CheckCircle size={14} className="w-4 h-4" /> };
-        if (score >= 50) return { label: 'UNDER REVIEW', color: 'text-amber-600', bg: 'bg-amber-600', icon: <AlertCircle size={14} className="w-4 h-4" /> };
-        return { label: 'CRITICAL', color: 'text-rose-600', bg: 'bg-rose-600', icon: <BadgeAlert size={14} className="w-4 h-4" /> };
-    };
-
-    const getCommandantAssessment = (score: number, currentStats: { absent: number, detention: number }) => {
-        let narrative = "";
-
-        if (score >= 89) {
-            narrative = "This cadet maintains an exemplary record of discipline and institutional presence. Performance is within the highest standards of the Academy.";
-        } else if (score >= 70) {
-            narrative = "Cadet demonstrates satisfactory conduct. Minor inconsistencies in accountability are noted but do not currently impact overall standing.";
-        } else if (score >= 50) {
-            narrative = "Conduct is under administrative review. Improvement in personal accountability and adherence to academy regulations is required to maintain standing.";
-        } else {
-            narrative = "CRITICAL: Cadet's standing has fallen below acceptable institutional thresholds. Immediate intervention and disciplinary counseling are mandated.";
+    const handleSave = async () => {
+        setIsLoading(true);
+        try {
+            const { error } = await dbService.updateCadetRegistry(cadet.id, {
+                name: editName,
+                squad: editSquad,
+                course_number: editCourse
+            }, currentUser!);
+            if (error) throw error;
+            toast.success('Cadet records updated.');
+            setIsEditing(false);
+            setShowConfirm(false);
+        } catch (err: any) {
+            toast.error(`Save failed: ${err.message || 'Network disconnected'}`);
+        } finally {
+            setIsLoading(false);
         }
-
-        const punches = [];
-        const exemplaryLimit = Math.round(level * 6.5);
-        const satisfactoryLimit = Math.round(level * 15);
-        if (currentStats.absent > satisfactoryLimit) punches.push("Persistent unauthorized absences are a primary concern.");
-        if (currentStats.absent > exemplaryLimit && currentStats.absent <= satisfactoryLimit) punches.push("Absence count is trending above exemplary thresholds — review is advised.");
-        if (currentStats.detention > 3) punches.push("Frequent disciplinary detentions indicate a failure to adhere to command hierarchy.");
-
-        return punches.length > 0 ? `${narrative} ${punches.join(" ")}` : narrative;
     };
 
-    const exportToPDF = async () => {
+    const handleDismissal = async () => {
+        if (dismissalConfirmText.trim().toUpperCase() !== `DISMISS ${cadet.course_number || activeRC}`.toUpperCase()) {
+            toast.error('Confirmation phrase mismatch.');
+            return;
+        }
+        if (!dismissalReason.trim() || !dismissalAuthority.trim()) {
+            toast.error('Reason and Authority Reference are required.');
+            return;
+        }
+        setIsLoading(true);
+        try {
+            const { error } = await dbService.dismissCadetV2(
+                cadet.id,
+                `${dismissalReason.trim()} (Authority: ${dismissalAuthority.trim()})`,
+                '', // Bypass ghost session ID mapping to prevent strict FK violations
+                currentUser!.fullName || currentUser!.username
+            );
+            if (error) throw error;
+            
+            toast.success('Cadet formally dismissed.');
+            window.dispatchEvent(new Event('cadet-registry-updated'));
+            setShowDismissal(false);
+            onClose(); // Close modal to refresh list in parent
+        } catch (err: any) {
+            console.error(err);
+            toast.error(`Failed: ${err.message || 'Cannot reach database.'}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const exportToPDF = () => {
+        const toastId = toast.loading('Synthesizing Official Dossier...');
         try {
             const doc = new jsPDF();
-            const status = getStatusInfo(currentScore);
+            const status = standing;
             const cadetName = cadet?.name || 'Unknown Cadet';
+            
             const generateAuditId = () => {
                 try {
-                    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-                        return crypto.randomUUID().toUpperCase();
-                    }
-                    if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
-                        return window.crypto.randomUUID().toUpperCase();
-                    }
-                    return Math.random().toString(36).substring(2, 15).toUpperCase() +
-                        Math.random().toString(36).substring(2, 15).toUpperCase();
+                    return crypto.randomUUID().toUpperCase();
                 } catch (e) {
                     return 'CR-' + Date.now().toString(36).toUpperCase();
                 }
@@ -140,108 +254,108 @@ const { currentUser } = useAuth();
 
             const auditId = generateAuditId();
 
-            // 1. Formal Command Border
-            doc.setDrawColor(30, 58, 138); // Blue 900
+            // 1. Formal Border & Authority Header
+            doc.setDrawColor(30, 58, 138); 
             doc.setLineWidth(1);
             doc.rect(5, 5, 200, 287);
 
-            // 2. High-Authority Header (35% Upscale)
-            doc.setFillColor(30, 58, 138);
-            doc.rect(10, 10, 190, 45, 'F');
+            doc.setFillColor(15, 23, 42); // Slate 900
+            doc.rect(10, 10, 190, 40, 'F');
 
-            try {
-                doc.addImage(logo, 'PNG', 15, 17, 24, 24);
-            } catch (e) {
-                console.warn('Logo missing');
+            if (logoBase64) {
+                try {
+                    doc.addImage(logoBase64, 'PNG', 15, 15, 30, 30);
+                } catch (e) { console.warn('Logo missing', e); }
             }
 
-            doc.setFontSize(24.3); // 18 * 1.35
+            doc.setFontSize(22);
             doc.setTextColor(255);
             doc.setFont('helvetica', 'bold');
-            doc.text('NIGERIAN POLICE ACADEMY', 110, 28, { align: 'center' });
-
-            doc.setFontSize(11.5); // Reduced from 13.5 to prevent logo overlap
+            doc.text('NIGERIAN POLICE ACADEMY', 110, 25, { align: 'center' });
+            
+            doc.setFontSize(10);
             doc.setFont('helvetica', 'normal');
-            doc.text('OFFICE OF THE COMMANDANT • OFFICIAL PERFORMANCE DOSSIER', 110, 38, { align: 'center' });
-            doc.setFontSize(10.8);
-            doc.text(`AUDIT_ID: ${auditId} | STATUS: AUTHORITATIVE_UNCLASSIFIED`, 110, 46, { align: 'center' });
+            doc.text('OFFICE OF THE COMMANDANT • TAC-REPORT V4.0', 110, 32, { align: 'center' });
+            doc.text(`AUDIT_ID: ${auditId} | AUTHORITATIVE_FILE`, 110, 38, { align: 'center' });
 
-            // 3. Identification Section
-            doc.setTextColor(0);
-            doc.setFontSize(14.8); // 11 * 1.35
+            // 2. Identification Block (with Photo if available)
+            doc.setTextColor(15, 23, 42);
+            doc.setFontSize(14);
             doc.setFont('helvetica', 'bold');
-            doc.text('I. CADET IDENTIFICATION', 20, 75);
-            doc.line(20, 77, 90, 77);
+            doc.text('I. PERSONNEL IDENTIFICATION', 20, 65);
+            doc.line(20, 67, 100, 67);
 
-            doc.setFontSize(12);
+            if (avatarUrl) {
+                try {
+                    doc.rect(140, 60, 50, 60);
+                    doc.setFontSize(8);
+                    doc.text('OFFICIAL PHOTO', 165, 90, { align: 'center' });
+                } catch (e) { console.warn('Photo skip'); }
+            } else {
+                doc.rect(140, 60, 50, 60);
+                doc.setFontSize(8);
+                doc.text('PHOTO_PENDING', 165, 90, { align: 'center' });
+            }
+
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text(`NAME: ${cadetName.toUpperCase()}`, 25, 78);
             doc.setFont('helvetica', 'normal');
-            doc.text(`NAME: ${cadetName.toUpperCase()}`, 25, 88);
-            doc.text(`COURSE: REGULAR COURSE ${cadet.course_number || 'N/A'}`, 25, 96);
-            doc.text(`LEVEL: YEAR ${level}`, 25, 104);
-            doc.text(`SQUAD: ${cadet.squad?.toUpperCase() || 'N/A'}`, 25, 112);
+            doc.text(`RC: REGULAR COURSE ${cadet.course_number}`, 25, 86);
+            doc.text(`SQUAD: ${cadet.squad?.toUpperCase()}`, 25, 94);
+            doc.text(`STANDING: ${status.label}`, 25, 102);
 
-            // Standing Module (Visual)
-            const fScore = calculateFitness(stats.sick || 0, level);
-            doc.setFont('helvetica', 'bold');
-            doc.text('INSTITUTIONAL STANDING:', 130, 88);
-            doc.setFontSize(18.9); // 14 * 1.35
-            if (status.bg === 'bg-rose-600') doc.setTextColor(159, 18, 57);
-            else doc.setTextColor(30, 58, 138);
-            doc.text(status.label, 130, 98);
-
-            // Bar
-            doc.setFillColor(241, 245, 249);
-            doc.roundedRect(20, 125, 170, 6, 1, 1, 'F');
-            if (currentScore >= 89) doc.setFillColor(5, 150, 105);
-            else if (currentScore >= 70) doc.setFillColor(37, 99, 235);
-            else if (currentScore >= 50) doc.setFillColor(217, 119, 6);
-            else doc.setFillColor(185, 28, 28);
-            doc.roundedRect(20, 125, (currentScore / 100) * 170, 6, 1, 1, 'F');
-
-            // 4. Detailed Accountability Table (NIL Rendering)
+            // 3. Performance Metrics Table
             autoTable(doc, {
-                startY: 145,
-                head: [['Accountability Logic', 'Metric Index', 'Command Assessment']],
+                startY: 130,
+                head: [['Accountability Category', 'Metric Index', 'Institutional Assessment']],
                 body: [
-                    ['Duty Attendance', `${attendanceScore}%`, `${getAttendanceAssessment(stats.absent, level).label} (${stats.absent} ABSENCES)`],
-                    ['Fitness Index (Weighted)', `${fitnessScore.toFixed(1)}%`, getFitnessAssessment(fitnessScore)],
-                    ['Disciplinary Record', stats.detention > 0 ? `${stats.detention} INFRACTIONS` : 'NIL (DISTINGUISHED)', stats.detention === 0 ? 'NIL_OFFENSES' : 'ACTION_REQUIRED']
+                    ['Duty Attendance', `${(100 - (stats.absent * 0.5)).toFixed(1)}%`, getAttendanceAssessment(stats.absent, level).label],
+                    ['Fitness Index', `${calculateFitness(stats.sick, level).toFixed(1)}%`, getFitnessAssessment(calculateFitness(stats.sick, level))],
+                    ['Disciplinary Record', stats.detention > 0 ? `${stats.detention} INFRACTIONS` : 'DISTINGUISHED', stats.detention === 0 ? 'NIL' : 'ACTION_REQUIRED']
                 ],
-                headStyles: { fillColor: [30, 58, 138], fontSize: 11, fontStyle: 'bold' },
-                styles: { fontSize: 10.8, cellPadding: 6 },
-                alternateRowStyles: { fillColor: [248, 250, 252] }
+                headStyles: { fillColor: [15, 23, 42], fontSize: 10, fontStyle: 'bold' },
+                styles: { fontSize: 10, cellPadding: 5 },
+                alternateRowStyles: { fillColor: [248, 250, 252] },
+                didDrawPage: function (data) {
+                    if (cadet.status === 'DISMISSED') {
+                        doc.setTextColor(230, 230, 230);
+                        doc.setFontSize(50);
+                        doc.text('DISMISSED - NOT FOR ACTIVE DUTY', 30, 200, { angle: 45 });
+                        doc.setTextColor(15, 23, 42); // Reset color
+                    }
+                }
             });
 
+            // 4. Command Assessment
             const finalY = (doc as any).lastAutoTable.finalY + 20;
-
-            // 5. Commandant's Assessment (Serif for Gravity)
-            doc.setFont('times', 'bold');
-            doc.setFontSize(14.8);
-            doc.setTextColor(30, 58, 138);
+            doc.setFont('helvetica', 'bold');
             doc.text("II. COMMANDANT'S ASSESSMENT", 20, finalY);
-
             doc.setFont('times', 'italic');
-            doc.setFontSize(13);
-            doc.setTextColor(0);
-            const assessment = getCommandantAssessment(currentScore, stats);
+            doc.setFontSize(12);
+            doc.setTextColor(70);
+            const assessment = status.label === 'EXEMPLARY' 
+                ? "This cadet represents the highest institutional standard of discipline. Maintain current trajectory."
+                : "Administrative oversight is required to reconcile deviations in accountability.";
             const splitContent = doc.splitTextToSize(`"${assessment}"`, 170);
             doc.text(splitContent, 20, finalY + 10);
 
-            // 6. Secure Sign-off
+            // 5. Audit Trail & Sign-off
             doc.setFont('helvetica', 'normal');
-            doc.setFontSize(11);
-            doc.text('__________________________', 140, 260);
-            doc.text('OFFICE OF THE COMMANDANT', 140, 266);
-            doc.setFontSize(9);
+            doc.setFontSize(8);
             doc.setTextColor(150);
-            doc.text(`VALIDATED SECURE_ID: ${auditId}`, 140, 272);
+            doc.text(`VALIDATED SECURE_ID: ${auditId}`, 20, 275);
+            doc.text(`GENERATED: ${new Date().toLocaleString()} | NPA_FORENSIC_CMS`, 20, 280);
 
-            // Footer
-            doc.setFontSize(9);
-            doc.text(`CONFIDENTIAL CADET RECORD • GENERATED: ${new Date().toLocaleString()} • NPA_CMS_V2_AUDIT`, 105, 282, { align: 'center' });
+            doc.text('__________________________', 140, 270);
+            doc.text('OFFICE OF THE COMMANDANT', 140, 275);
 
-            // Traceability Notification
-            await dbService.addNotification({
+            // Execute synchronous save to preserve user gesture context
+            doc.save(`${cadetName.replace(/\s+/g, '_')}_AUTHORITATIVE_DOSSIER.pdf`);
+            toast.success('Dossier Synchronized.', { id: toastId });
+
+            // Fire async notification as a background promise without awaiting
+            dbService.addNotification({
                 type: 'system',
                 title: 'Official Dossier Produced',
                 content: `Commandant Dossier generated for Cadet ${cadetName} (Audit ID: ${auditId})`,
@@ -250,303 +364,332 @@ const { currentUser } = useAuth();
                 officerName: 'COMMANDANT',
                 yearGroup: 5,
                 courseNumber: cadet.course_number || activeRC
+            }).catch(notifyErr => {
+                console.warn('Failed to add notification for dossier generation', notifyErr);
             });
-
-            doc.save(`${cadetName.replace(/\s+/g, '_')}_AUTHORITATIVE_DOSSIER.pdf`);
-            toast.success('Dossier Generated with Search ID: ' + auditId);
-        } catch (err) {
-            console.error(err);
-            toast.error('Dossier Generation Failed');
+            
+        } catch (err: any) {
+            console.error('PDF Generation Error:', err);
+            toast.error(`Synthesis Failed: ${err.message || 'Check console'}`, { id: toastId });
         }
     };
 
-
-
-    const handleSave = async () => {
-        // Validation Layer
-        const trimmedName = editName?.trim();
-        const trimmedSquad = editSquad?.trim();
-        const parsedCourse = parseInt(String(editCourse), 10);
-
-        if (!trimmedName) {
-            toast.error('Name cannot be empty');
-            return;
-        }
-
-        if (isNaN(parsedCourse) || parsedCourse < 1 || parsedCourse > 20) {
-            toast.error('RC Number must be between 1 and 20');
-            return;
-        }
-
-        if (!trimmedSquad) {
-            toast.error('Squad assignment is required');
-            return;
-        }
-
-        setIsLoading(true);
-        try {
-            const updates = {
-                name: trimmedName,
-                squad: trimmedSquad,
-                course_number: parsedCourse,
-                year_group: calculateCurrentLevel(parsedCourse, activeRC)
-            };
-
-            const { error } = await dbService.updateCadetRegistry(cadet.id, updates, currentUser!);
-            if (error) throw error;
-
-            toast.success('Master Record updated and audit-logged.');
-            setIsEditing(false);
-            setShowConfirm(false);
-            // The CadetManager will refresh when we close/modify
-        } catch (err) {
-            console.error('Save failed:', err);
-            toast.error('Failed to update Master Registry.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const standing = getStatusInfo(currentScore);
-    const attendanceScore = (100 - (stats.absent * 0.5)).toFixed(1);
-    const fitnessScore = calculateFitness(stats.sick || 0, level);
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
-            <div className="bg-white w-full max-w-2xl rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300 flex flex-col max-h-[95vh] sm:max-h-[90vh]">
-                {/* Premium Header */}
-                <div className="bg-[#0f172a] text-white p-6 md:p-8 relative overflow-hidden shrink-0">
-                    <div className="relative z-10 flex flex-col sm:flex-row items-start justify-between gap-4">
-                        <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 items-center sm:items-start text-center sm:text-left w-full sm:w-auto">
-                            <div className="relative">
-                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-slate-800 border-2 border-slate-700 flex items-center justify-center overflow-hidden shadow-2xl">
-                                    <UserIcon size={40} className="text-slate-600 sm:w-12 sm:h-12" />
-                                </div>
-                                <div className="absolute -bottom-2 -right-2 w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-blue-600 border-2 sm:border-4 border-[#0f172a] flex items-center justify-center shadow-lg">
-                                    <img src={logo} alt="Academy Logo" className="w-5 h-5 sm:w-6 sm:h-6 object-contain" />
-                                </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-xl animate-in fade-in duration-300">
+            <div className="bg-white w-full max-w-6xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+                
+                {/* Header (Condensed) */}
+                <div className="bg-[#0f172a] text-white px-8 py-6 relative overflow-hidden shrink-0">
+                    <div className="flex justify-between items-center relative z-10">
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
+                                <img src={logo} alt="NPA" className="w-6 h-6 object-contain" />
                             </div>
-                            <div className="space-y-1 w-full">
-                                {isEditing ? (
-                                    <div className="space-y-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700 animate-in fade-in slide-in-from-top-2">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <ShieldAlert size={12} className="text-amber-500" />
-                                            <span className="text-[9px] font-black uppercase tracking-widest text-amber-500">Administrative Override Mode</span>
-                                        </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                            <div className="sm:col-span-2">
-                                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Full Name</label>
-                                                <input
-                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none uppercase"
-                                                    value={editName}
-                                                    onChange={e => setEditName(e.target.value)}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">RC Number</label>
-                                                <input
-                                                    type="number"
-                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs font-mono font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none"
-                                                    value={editCourse || ''}
-                                                    onChange={e => {
-                                                        const val = e.target.value;
-                                                        if (val === '') {
-                                                            setEditCourse(null);
-                                                        } else {
-                                                            setEditCourse(parseInt(val, 10));
-                                                        }
-                                                    }}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1">Assigned Squad</label>
-                                                <input
-                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none uppercase"
-                                                    value={editSquad}
-                                                    onChange={e => setEditSquad(e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <h2 className="text-xl sm:text-2xl font-black tracking-tight">{cadet.name}</h2>
-                                        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 sm:gap-3">
-                                            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Regular Course {cadet.course_number}</span>
-                                            <span className="hidden sm:inline-block w-1 h-1 bg-slate-700 rounded-full"></span>
-                                            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Squad {cadet.squad}</span>
-                                        </div>
-                                    </>
-                                )}
+                            <div>
+                                <h2 className="text-lg font-black tracking-tight uppercase">Performance Dossier</h2>
+                                <p className="text-[9px] font-bold text-slate-400 tracking-[0.3em] uppercase opacity-60">Authoritative Administrative View</p>
                             </div>
                         </div>
-                        <button onClick={onClose} className="absolute top-0 right-0 sm:relative p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
+                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
                             <X size={24} />
                         </button>
                     </div>
-
-                    {/* Background Accents */}
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
-                    <div className="absolute bottom-0 left-0 w-32 h-32 bg-slate-400/5 rounded-full translate-y-1/2 -translate-x-1/2 blur-2xl" />
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 sm:space-y-8">
-                    {isLoading ? (
-                        <div className="py-20 flex flex-col items-center gap-4 text-slate-400">
-                            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                            <p className="text-xs font-black uppercase tracking-widest animate-pulse">Scanning Intelligence Database...</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* Institutional Standing Visualizer & Accountability Data Table */}
-                            <div className="flex flex-col gap-y-12 mt-10">
-                                {/* 1. Header & Progress Bar Section */}
-                                <section className="space-y-4">
-                                    <div className="flex justify-between items-end">
-                                        <span className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Institutional Standing</span>
-                                        <span className="text-xl font-mono font-bold text-slate-700">{currentScore.toFixed(1)}%</span>
-                                    </div>
-                                    <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                                        <div
-                                            className={`h-full transition-all duration-1000 ease-out ${standing.bg} relative`}
-                                            style={{ width: `${currentScore}%` }}
-                                        >
-                                            {/* Glossy overlay for a premium look */}
-                                            <div className="absolute inset-0 bg-white/10 w-full h-1/2"></div>
-                                        </div>
-                                    </div>
-                                </section>
+                {cadet.status === 'DISMISSED' && (
+                    <div className="bg-rose-900/10 border-b border-rose-900/20 px-8 py-3 flex items-center justify-center gap-3 backdrop-blur-md shrink-0">
+                        <BadgeAlert size={16} className="text-rose-600" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-rose-700">Record Closed • Cadet Dismissed from Academy</span>
+                    </div>
+                )}
 
-                                {/* 2. Professional Metrics Table */}
-                                <section className="rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-                                    <table className="w-full text-left">
-                                        <thead className="bg-[#1e3a8a] text-white text-[10px] uppercase tracking-wider">
+                {/* Main 3-Column Content (High Density) */}
+                <div className="flex-1 overflow-y-auto p-8 pt-6">
+                    <div className="grid grid-cols-12 gap-8">
+                        
+                        {/* COL 1: IDENTITY & STANDING (3/12) */}
+                        <div className="col-span-12 lg:col-span-3 space-y-6">
+                            <div className="relative group mx-auto lg:mx-0 w-48 h-48 lg:w-full lg:h-64 rounded-3xl bg-slate-100 border-2 border-slate-200 overflow-hidden shadow-inner">
+                                {avatarUrl ? (
+                                    <img src={avatarUrl} alt={cadet.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                                        <UserIcon size={64} strokeWidth={1} />
+                                        <p className="text-[10px] font-black uppercase tracking-widest mt-2">No Photo On Record</p>
+                                    </div>
+                                )}
+                                
+                                <div 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="absolute inset-0 bg-blue-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer backdrop-blur-sm"
+                                >
+                                    {isUploading ? <Loader2 size={32} className="animate-spin text-white" /> : <Camera size={32} className="text-white" />}
+                                    <span className="text-white text-[10px] font-black uppercase tracking-widest mt-2">Upload Identification</span>
+                                </div>
+                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoUpload} />
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Cadet Identity</p>
+                                    <h3 className="text-xl font-black text-slate-800 leading-tight uppercase">{cadet.name}</h3>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-black rounded border border-blue-100 uppercase">RC {cadet.course_number}</span>
+                                        <span className="px-2 py-0.5 bg-slate-50 text-slate-600 text-[10px] font-black rounded border border-slate-100 uppercase">{cadet.squad}</span>
+                                    </div>
+                                </div>
+
+                                <div className={`p-4 rounded-2xl border ${standing.bg.replace('bg-', 'bg-')}/5 ${standing.color.replace('text-', 'border-')}/20 flex flex-col items-center text-center`}>
+                                    <div className={`w-12 h-12 rounded-full ${standing.bg} text-white flex items-center justify-center mb-2 shadow-lg`}>
+                                        {standing.icon}
+                                    </div>
+                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Standing Status</p>
+                                    <p className={`text-lg font-black uppercase ${standing.color}`}>{standing.label}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* COL 2: METRICS & ASSESSMENT (5/12) */}
+                        <div className="col-span-12 lg:col-span-5 space-y-6">
+                            <section className="bg-slate-50 border border-slate-200 rounded-3xl p-6">
+                                <div className="flex justify-between items-end mb-4">
+                                    <h4 className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                        <TrendingUp size={14} className="text-blue-500" />
+                                        Performance Index
+                                    </h4>
+                                    <span className="text-2xl font-mono font-black text-slate-700">{currentScore.toFixed(1)}%</span>
+                                </div>
+                                <div className="h-4 w-full bg-white rounded-full overflow-hidden border border-slate-200 relative mb-6">
+                                    <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${currentScore}%` }}
+                                        className={`h-full ${standing.bg} relative`}
+                                    >
+                                        <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent" />
+                                    </motion.div>
+                                </div>
+
+                                <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-slate-800 text-white font-black uppercase tracking-widest text-[8px]">
                                             <tr>
-                                                <th className="p-4">Accountability Category</th>
-                                                <th className="p-4">Metric</th>
-                                                <th className="p-4">Assessment</th>
+                                                <th className="p-3">Category</th>
+                                                <th className="p-3">Index</th>
+                                                <th className="p-3">Assessment</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-100 text-sm">
-                                            <tr className="bg-white">
-                                                <td className="p-4 font-medium text-slate-600">Duty Attendance</td>
-                                                <td className="p-4 font-mono">{attendanceScore}%</td>
-                                                <td className={`p-4 font-bold ${getAttendanceAssessment(stats.absent, level).color}`}>
-                                                    {getAttendanceAssessment(stats.absent, level).label}
-                                                </td>
+                                        <tbody className="divide-y divide-slate-100 font-bold">
+                                            <tr>
+                                                <td className="p-3 text-slate-500 uppercase">Attendance</td>
+                                                <td className="p-3 font-mono">{(100 - (stats.absent * 0.5)).toFixed(1)}%</td>
+                                                <td className={`p-3 ${getAttendanceAssessment(stats.absent, level).color}`}>{getAttendanceAssessment(stats.absent, level).label}</td>
                                             </tr>
-                                            <tr className="bg-slate-50/50">
-                                                <td className="p-4 font-medium text-slate-600">Fitness Index</td>
-                                                <td className="p-4 font-mono">{fitnessScore.toFixed(1)}%</td>
-                                                <td className={`p-4 font-bold ${fitnessScore >= 95 ? 'text-blue-700' : (fitnessScore >= 80 ? 'text-emerald-600' : 'text-amber-600')}`}>
-                                                    {getFitnessAssessment(fitnessScore)}
-                                                </td>
+                                            <tr>
+                                                <td className="p-3 text-slate-500 uppercase">Fitness</td>
+                                                <td className="p-3 font-mono">{calculateFitness(stats.sick, level).toFixed(1)}%</td>
+                                                <td className="p-3 text-blue-600">{getFitnessAssessment(calculateFitness(stats.sick, level))}</td>
                                             </tr>
-                                            <tr className="bg-white">
-                                                <td className="p-4 font-medium text-slate-600">Conduct & Discipline</td>
-                                                <td className="p-4 font-mono text-slate-400 italic">
-                                                    {stats.detention > 0 ? `${stats.detention} Infractions` : "NIL"}
-                                                </td>
-                                                <td className={`p-4 font-bold ${stats.detention === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                    {stats.detention === 0 ? "DISTINGUISHED" : "ACTION REQUIRED"}
-                                                </td>
+                                            <tr>
+                                                <td className="p-3 text-slate-500 uppercase">Conduct</td>
+                                                <td className="p-3 font-mono">{stats.detention > 0 ? stats.detention : 'NIL'}</td>
+                                                <td className={`p-3 ${stats.detention === 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{stats.detention === 0 ? 'DISTINGUISHED' : 'REVIEW REQ'}</td>
                                             </tr>
                                         </tbody>
                                     </table>
-                                </section>
-                            </div>
+                                </div>
+                            </section>
 
-                            {/* Accountability Focus */}
-                            <div className="p-5 sm:p-6 rounded-2xl sm:rounded-[2rem] bg-[#f8fafc] border border-slate-200 relative overflow-hidden group">
-                                <div className="relative z-10">
-                                    <h4 className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">
-                                        <Calendar size={14} className="text-blue-500" />
-                                        Last Recorded Accountability
-                                    </h4>
-                                    {stats.lastEvent ? (
-                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
-                                            <div className="space-y-1">
-                                                <p className="text-sm font-bold text-slate-800 capitalize">Incident: {stats.lastEvent.status}</p>
-                                                <p className="text-xs text-slate-500">{new Date(stats.lastEvent.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} • {stats.lastEvent.type}</p>
+                            <section className="p-6 bg-[#f8fafc] border-l-4 border-slate-800 rounded-r-2xl h-fit">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                    <Shield size={12} className="text-slate-800" />
+                                    Commandant's Institutional Assessment
+                                </p>
+                                <p className="text-sm font-medium text-slate-600 italic leading-relaxed">
+                                    "{standing.label === 'EXEMPLARY' 
+                                        ? "This cadet represents the highest institutional standard of discipline and reliability. Maintain current trajectory."
+                                        : "Administrative oversight is required to reconcile deviations in accountability. High-frequency monitoring advised."}"
+                                </p>
+                            </section>
+                        </div>
+
+                        {/* COL 3: FORENSIC HISTORY (4/12) */}
+                        <div className="col-span-12 lg:col-span-4 space-y-4 h-full flex flex-col">
+                            <div className="flex-1 bg-white border border-slate-200 rounded-3xl p-5 flex flex-col min-h-[300px]">
+                                <h4 className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
+                                    <History size={14} className="text-blue-500" />
+                                    Accountability Trace
+                                </h4>
+                                <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                                    {cadet.status === 'DISMISSED' && dismissalAudit && (
+                                        <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 flex justify-between items-center z-10 relative">
+                                            <div>
+                                                <p className="text-[10px] font-black text-rose-800 uppercase tracking-tight">DISMISSED</p>
+                                                <p className="text-[8px] font-bold text-rose-600 uppercase">AUTH: {dismissalAudit.actor_name}</p>
+                                                <p className="text-[8px] text-rose-500 mt-1 italic max-w-[150px] truncate">{dismissalAudit.payload?.reason}</p>
                                             </div>
-                                            <div className={`px-4 py-2 rounded-xl text-xs font-black border ${stats.lastEvent.status === 'absent' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
-                                                FLAGGED
+                                            <div className="text-right flex flex-col items-end">
+                                                <p className="text-[9px] font-mono font-bold text-rose-700">{new Date(dismissalAudit.created_at).toLocaleDateString()}</p>
+                                                <span className="text-[7px] font-black bg-rose-200 text-rose-800 px-1 rounded uppercase mt-1">Terminal</span>
                                             </div>
                                         </div>
+                                    )}
+                                    {absenceTrace.length > 0 ? (
+                                        absenceTrace.map((trace, idx) => (
+                                            <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center group hover:bg-white hover:shadow-md transition-all">
+                                                <div>
+                                                    <p className="text-[10px] font-black text-slate-800 uppercase tracking-tight capitalize">{trace.status}</p>
+                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">{trace.type}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[9px] font-mono font-bold text-slate-500">{trace.date}</p>
+                                                    <span className="text-[7px] font-black bg-rose-100 text-rose-700 px-1 rounded uppercase">Audit Log</span>
+                                                </div>
+                                            </div>
+                                        ))
                                     ) : (
-                                        <p className="text-sm font-bold text-emerald-600 flex items-center gap-2">
-                                            <CheckCircle size={16} />
-                                            No negative accountability events recorded.
-                                        </p>
+                                        <div className="flex flex-col items-center justify-center h-full text-emerald-600 opacity-60 italic text-xs gap-2">
+                                            <CheckCircle size={20} />
+                                            Zero Negative Events
+                                        </div>
                                     )}
                                 </div>
-                                <div className="absolute top-0 right-0 w-24 h-24 bg-slate-200/20 rounded-full translate-x-1/2 -translate-y-1/2 group-hover:scale-150 transition-transform duration-700" />
                             </div>
 
-                            {/* Command Assessment */}
-                            <div className="mt-6 p-5 sm:p-6 border-l-4 border-slate-800 bg-[#f8fafc] rounded-r-2xl shadow-sm relative italic">
-                                <h4 className="flex items-center gap-2 text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
-                                    <TrendingUp size={14} className="text-blue-500" />
-                                    Commandant's Assessment
+                            <div className="bg-rose-50 border border-rose-100 rounded-3xl p-5 h-48 overflow-hidden flex flex-col">
+                                <h4 className="flex items-center gap-2 text-[10px] font-black text-rose-400 uppercase tracking-widest mb-3">
+                                    <AlertCircle size={14} className="text-rose-500" />
+                                    System Flags
                                 </h4>
-                                <p className="text-slate-600 leading-relaxed text-sm font-medium">
-                                    "{getCommandantAssessment(currentScore, stats)}"
-                                </p>
+                                <div className="flex-1 overflow-y-auto pr-2">
+                                    {alertHistory.length > 0 ? (
+                                        alertHistory.map((alert) => (
+                                            <div key={alert.id} className="p-2 mb-2 bg-white rounded-lg border border-rose-200 shadow-sm">
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <span className="text-[8px] font-black px-1.5 py-0.5 bg-rose-600 text-white rounded uppercase">{alert.alert_level}</span>
+                                                    <span className="text-[8px] font-bold text-slate-400">{new Date(alert.created_at).toLocaleDateString()}</span>
+                                                </div>
+                                                <p className="text-[10px] font-bold text-slate-700">{alert.trigger_count}X Rolling Absences</p>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <p className="text-xs text-rose-400 italic text-center mt-8">No Disciplinary Flags</p>
+                                    )}
+                                </div>
                             </div>
                         </div>
-                    )}
+                    </div>
                 </div>
 
-                {/* Secure Actions */}
-                <div className="p-4 sm:p-8 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center gap-4 shrink-0">
+                {/* Footer Actions (Condensed Row) */}
+                <div className="px-8 py-6 bg-slate-50 border-t border-slate-200 flex items-center justify-center gap-4 shrink-0">
                     <button
                         onClick={exportToPDF}
-                        disabled={isLoading || isEditing}
-                        className="flex-1 w-full bg-[#0f172a] hover:bg-slate-800 text-white font-black py-4 sm:py-5 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-2 sm:gap-3 group active:scale-[0.98] disabled:opacity-50"
+                        className="flex-1 max-w-xs bg-slate-900 hover:bg-black text-white px-6 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl group"
                     >
-                        <FileText size={18} className="sm:w-5 sm:h-5 group-hover:translate-y-[-2px] transition-transform" />
-                        <span className="text-xs sm:text-sm uppercase tracking-widest leading-tight text-center">Generate<span className="hidden sm:inline"> Official</span> Dossier</span>
+                        <FileText size={18} className="group-hover:translate-y-[-2px] transition-transform" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Generate Official Dossier</span>
                     </button>
-
+                    
                     <button
                         onClick={() => isEditing ? setShowConfirm(true) : setIsEditing(true)}
-                        disabled={isLoading}
-                        className={`flex-1 w-full font-black py-4 sm:py-5 rounded-2xl transition-all border-2 flex items-center justify-center gap-2 sm:gap-3 group active:scale-[0.98] ${isEditing
-                            ? 'bg-amber-500 border-amber-600 text-white hover:bg-amber-600'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                            }`}
+                        className={`flex-1 max-w-xs px-6 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] border-2 font-black text-[10px] uppercase tracking-widest ${
+                            isEditing ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
                     >
                         {isEditing ? <Save size={18} /> : <Edit3 size={18} />}
-                        <span className="text-xs sm:text-sm uppercase tracking-widest leading-tight text-center">
-                            {isEditing ? 'Commit Changes' : 'Administrative Edit'}
-                        </span>
+                        <span>{isEditing ? 'Commit Overrides' : 'Administrative Edit'}</span>
                     </button>
-
-                    {isEditing && (
+                    {cadet.status !== 'DISMISSED' && (
                         <button
-                            onClick={() => setIsEditing(false)}
-                            className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-rose-600 transition-colors"
+                            onClick={() => setShowDismissal(true)}
+                            className="flex-1 max-w-xs px-6 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] border-2 border-rose-200 font-black text-[10px] uppercase tracking-widest text-rose-600 bg-rose-50 hover:bg-rose-100 hover:border-rose-300"
                         >
-                            Cancel
+                            <ShieldAlert size={18} />
+                            <span>Dismiss Cadet</span>
                         </button>
                     )}
                 </div>
 
-                <SubmissionPreview
-                    isOpen={showConfirm}
-                    onClose={() => setShowConfirm(false)}
-                    onConfirm={handleSave}
-                    title="Confirm Master Registry Edit"
-                    type="cadet"
-                    data={{
-                        officer: 'COMMANDANT',
-                        action: 'MASTER_RECORD_STABILIZATION',
-                        changes: [
-                            { field: 'Name', from: cadet.name, to: editName },
-                            { field: 'Squad', from: cadet.squad, to: editSquad },
-                            { field: 'RC', from: cadet.course_number, to: editCourse }
-                        ].filter(c => c.from !== c.to)
-                    }}
-                />
+                {/* Overlays for Edit Modes */}
+                <AnimatePresence>
+                    {showDismissal && (
+                        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md z-50 p-8 flex flex-col items-center justify-center">
+                            <motion.div 
+                                initial={{ y: 20, opacity: 0, scale: 0.95 }}
+                                animate={{ y: 0, opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                className="bg-white p-8 rounded-[2rem] shadow-2xl border border-rose-200 w-full max-w-md space-y-6 relative overflow-hidden"
+                            >
+                                <div className="absolute top-0 left-0 w-full h-2 bg-rose-600" />
+                                <div className="flex items-center gap-3 text-rose-600">
+                                    <ShieldAlert size={28} />
+                                    <div>
+                                        <h3 className="font-black uppercase tracking-widest text-sm leading-tight text-slate-800">Execute Dismissal</h3>
+                                        <p className="text-[9px] font-bold tracking-widest uppercase">Terminal Action • Cannot Be Undone</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Dismissal Reason</label>
+                                        <textarea className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-rose-500 min-h-[80px]" value={dismissalReason} onChange={e => setDismissalReason(e.target.value)} placeholder="e.g., SEVERE INDISCIPLINE" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Authority Reference</label>
+                                        <input className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-rose-500" value={dismissalAuthority} onChange={e => setDismissalAuthority(e.target.value)} placeholder="e.g., BOARD OF INQUIRY #482" />
+                                    </div>
+                                    <div className="space-y-1 mt-4 p-4 bg-rose-50 rounded-xl border border-rose-100">
+                                        <label className="text-[9px] font-black text-rose-600 uppercase">Type "DISMISS {cadet.course_number || activeRC}" to confirm</label>
+                                        <input className="w-full mt-2 bg-white border border-rose-200 rounded-lg px-4 py-2 text-sm font-black uppercase outline-none focus:ring-2 focus:ring-rose-500 text-rose-600 placeholder:text-rose-200" value={dismissalConfirmText} onChange={e => setDismissalConfirmText(e.target.value)} placeholder={`DISMISS ${cadet.course_number || activeRC}`} />
+                                    </div>
+                                </div>
+                                <div className="flex gap-4">
+                                    <button 
+                                        disabled={isLoading || dismissalConfirmText.trim().toUpperCase() !== `DISMISS ${cadet.course_number || activeRC}`.toUpperCase() || !dismissalReason.trim() || !dismissalAuthority.trim()}
+                                        onClick={handleDismissal} 
+                                        className="flex-[2] bg-rose-600 disabled:opacity-50 text-white py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all shadow-lg shadow-rose-600/20"
+                                    >
+                                        Finalize Dismissal
+                                    </button>
+                                    <button onClick={() => setShowDismissal(false)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                    {isEditing && (
+                        <div className="absolute inset-0 bg-slate-900/5 backdrop-blur-sm z-50 p-8 flex flex-col items-center justify-center">
+                            <motion.div 
+                                initial={{ y: 20, opacity: 0 }}
+                                animate={{ y: 0, opacity: 1 }}
+                                className="bg-white p-8 rounded-[2rem] shadow-2xl border border-slate-200 w-full max-w-md space-y-6"
+                            >
+                                <div className="flex items-center gap-3 text-amber-600">
+                                    <ShieldAlert />
+                                    <h3 className="font-black uppercase tracking-widest">Master Record Overwrite</h3>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Full Legal Name</label>
+                                        <input className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-blue-500" value={editName} onChange={e => setEditName(e.target.value)} />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Regular Course</label>
+                                            <input type="number" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500" value={editCourse} onChange={e => setEditCourse(parseInt(e.target.value))} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Squad Unit</label>
+                                            <input className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-blue-500" value={editSquad} onChange={e => setEditSquad(e.target.value)} />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex gap-4">
+                                    <button onClick={handleSave} className="flex-1 bg-blue-900 text-white py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-800 transition-all">Save Changes</button>
+                                    <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200">Discard Changes</button>
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );

@@ -4,7 +4,7 @@ import { ShieldAlert, X, Lock, Unlock } from 'lucide-react';
 interface SecurityOverrideModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onAuthorize: () => void;
+    onAuthorize: (password: string) => Promise<void>;
     targetName: string;
 }
 
@@ -14,7 +14,22 @@ export const SecurityOverrideModal: React.FC<SecurityOverrideModalProps> = ({
     onAuthorize,
     targetName 
 }) => {
+    const [password, setPassword] = React.useState('');
+    const [isThinking, setIsThinking] = React.useState(false);
+    const traceId = React.useMemo(() => Math.random().toString(36).substring(2, 10).toUpperCase(), []);
+
     if (!isOpen) return null;
+
+    const handleSubmit = async () => {
+        if (!password) return;
+        setIsThinking(true);
+        try {
+            await onAuthorize(password);
+            setPassword('');
+        } finally {
+            setIsThinking(false);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300">
@@ -31,10 +46,24 @@ export const SecurityOverrideModal: React.FC<SecurityOverrideModalProps> = ({
                 </div>
 
                 <div className="p-8 space-y-6">
-                    <p className="text-slate-400 text-xs leading-relaxed font-medium">
-                        You are attempting to alter core authentication data for <span className="text-white font-black underline decoration-red-500/50">{targetName}</span>. 
-                        Modifying these credentials will immediately overwrite the officer's current access protocols.
-                    </p>
+                    <div className="space-y-4">
+                        <p className="text-slate-400 text-xs leading-relaxed font-medium">
+                            You are about to alter access protocols for <span className="text-white font-black underline decoration-red-500/50">{targetName}</span>. 
+                            To verify authorization, enter your current administration password.
+                        </p>
+
+                        <div className="relative">
+                            <Lock size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                            <input
+                                type="password"
+                                placeholder="ENTER COMMANDANT PASSWORD"
+                                className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-12 py-4 text-xs text-white focus:border-red-500/50 outline-none transition-all font-mono tracking-[0.4em]"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                autoFocus
+                            />
+                        </div>
+                    </div>
 
                     <div className="p-4 bg-red-500/5 border border-red-500/10 rounded-xl space-y-2">
                         <div className="flex items-center gap-2 text-red-400">
@@ -42,22 +71,23 @@ export const SecurityOverrideModal: React.FC<SecurityOverrideModalProps> = ({
                             <span className="text-[9px] font-black uppercase tracking-widest">Warning Level: Critical</span>
                         </div>
                         <p className="text-[10px] text-red-400/80 font-bold leading-tight">
-                            SYSTEM LOGS WILL RECORD THIS OVERRIDE IN THE FORENSIC ARCHIVE UNDER YOUR DIGITAL SIGNATURE.
+                            SYSTEM LOGS WILL RECORD THIS OVERRIDE IN THE FORENSIC ARCHIVE. UNVERIFIED ATTEMPTS ARE REPORTED.
                         </p>
                     </div>
 
                     <div className="flex flex-col gap-3">
                         <button
-                            onClick={onAuthorize}
-                            className="w-full bg-red-600 hover:bg-red-500 text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-red-900/20 flex items-center justify-center gap-3 group"
+                            onClick={handleSubmit}
+                            disabled={!password || isThinking}
+                            className="w-full bg-red-600 hover:bg-red-500 text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-red-900/20 flex items-center justify-center gap-3 group disabled:opacity-50 disabled:grayscale"
                         >
                             <Unlock size={18} className="group-hover:scale-110 transition-transform" />
-                            <span className="text-xs uppercase tracking-[0.2em]">Authorize Modification</span>
+                            <span className="text-xs uppercase tracking-[0.2em]">{isThinking ? 'VERIFYING...' : 'Authorize Modification'}</span>
                         </button>
                         
                         <button
                             onClick={onClose}
-                            className="w-full bg-transparent hover:bg-white/5 text-slate-500 hover:text-white font-black py-4 rounded-xl transition-all border border-white/5 flex items-center justify-center gap-2"
+                            className="w-full bg-transparent hover:bg-white/5 text-slate-500 hover:text-white font-black py-4 rounded-xl transition-all border border-white/10 flex items-center justify-center gap-2"
                         >
                             <X size={16} />
                             <span className="text-xs uppercase tracking-[0.2em]">Abort Command</span>
@@ -68,7 +98,7 @@ export const SecurityOverrideModal: React.FC<SecurityOverrideModalProps> = ({
                 {/* Footer Traceability */}
                 <div className="p-4 bg-black border-t border-white/5 text-center">
                     <p className="text-[8px] font-black text-slate-700 uppercase tracking-[0.3em]">
-                        Authenticated Session: Required • Audit ID: {Math.random().toString(36).substring(7).toUpperCase()}
+                        Authenticated Session: PROVISIONAL • TRACE ID: {traceId}
                     </p>
                 </div>
             </div>
