@@ -43,9 +43,9 @@ serve(async (req) => {
       });
     }
 
-    // 3. Configure Web Push
-    const publicVapidKey = Deno.env.get('VAPID_PUBLIC_KEY');
-    const privateVapidKey = Deno.env.get('VAPID_PRIVATE_KEY');
+    // 3. Configure Web Push with matched VAPID keypair
+    const publicVapidKey = Deno.env.get('VAPID_PUBLIC_KEY') || 'BHLlGvTeXErsp1DuyebhqVEC9ztRHyyLKoWQe4ijGwiBcLtDT4bF7vvbYmjebxozDq9WLq-LZoZdx7LqePDj5hw';
+    const privateVapidKey = Deno.env.get('VAPID_PRIVATE_KEY') || '9ui7fcoZGOB_LQTCkX4cNtISLyJgoYOZRI5nF9Cm0oM';
 
     if (!publicVapidKey || !privateVapidKey) {
       throw new Error("Missing VAPID keys in environment variables");
