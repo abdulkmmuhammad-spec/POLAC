@@ -25,11 +25,12 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // 2. Fetch User Subscriptions
-    const { data: subscriptions, error: dbError } = await supabase
-      .from('push_subscriptions')
-      .select('*')
-      .eq('user_id', user_id);
+    // 2. Fetch User Subscriptions (Single user or broadcast 'all')
+    let query = supabase.from('push_subscriptions').select('*');
+    if (user_id !== 'all') {
+      query = query.eq('user_id', user_id);
+    }
+    const { data: subscriptions, error: dbError } = await query;
 
     if (dbError) {
       throw dbError;
