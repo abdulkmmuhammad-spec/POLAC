@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Eye, EyeOff, UserCog, Mail, Key, Save, AlertTriangle, ShieldCheck, Plus, Search, ChevronDown, UserPlus } from 'lucide-react';
+import { Shield, Eye, EyeOff, UserCog, Mail, Key, Save, AlertTriangle, ShieldCheck, Plus, Search, ChevronDown, UserPlus, X } from 'lucide-react';
 import { dbService, updateUserCredentials } from '../../../services/dbService';
 import { User, UserRole } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
@@ -39,6 +39,17 @@ export const CredentialSettings: React.FC = () => {
     useEffect(() => {
         fetchUsers();
     }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                if (isEditing) setIsEditing(false);
+                if (isAddModalOpen) setIsAddModalOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isEditing, isAddModalOpen]);
 
     const toggleReveal = (userId: string | number) => {
         setRevealPasswords(prev => ({
@@ -360,88 +371,108 @@ export const CredentialSettings: React.FC = () => {
                 <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl group-hover:bg-blue-600/10 transition-colors duration-700" />
             </div>
 
-            {/* Credential Override Form (Conditional) */}
+            {/* Credential Override Form Modal Overlay */}
             {isEditing && targetUser && (
-                <div className="bg-[#0a0a0a] p-4 sm:p-8 rounded-2xl border border-red-500/30 shadow-2xl animate-in zoom-in-95 duration-300">
-                    <div className="flex flex-wrap items-center gap-3 mb-8">
-                        <UserCog size={20} className="text-red-500" />
-                        <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Live Protocol Injection: {targetUser.fullName}</h3>
-                    </div>
-                    
-                    {String(targetUser.id) === String(currentUser?.id) && (
-                        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
-                            <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
-                            <p className="text-xs text-red-400 font-bold leading-relaxed uppercase tracking-wide">
-                                WARNING: You are modifying your own administrative credentials. Ensure the new password matches the confirmation field, or you will be permanently locked out.
-                            </p>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Secure Email</label>
-                            <div className="relative">
-                                <Mail size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                                <input 
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                    value={editPayload.email}
-                                    onChange={e => setEditPayload({...editPayload, email: e.target.value})}
-                                />
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="w-full max-w-2xl bg-[#0a0a0a] rounded-2xl border border-red-500/30 shadow-[0_0_50px_-12px_rgba(239,68,68,0.3)] overflow-hidden animate-in zoom-in-95 duration-200">
+                        {/* Tactical Modal Header */}
+                        <div className="bg-red-950/20 p-6 border-b border-red-500/10 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500">
+                                    <UserCog size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Live Protocol Injection</h3>
+                                    <p className="text-[10px] text-red-400 font-mono font-bold uppercase tracking-widest mt-0.5">Target: {targetUser.fullName}</p>
+                                </div>
                             </div>
+                            <button
+                                onClick={() => setIsEditing(false)}
+                                className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
                         </div>
 
-                        <div className="space-y-2">
-                            <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Auth Token (Password)</label>
-                            <div className="relative">
-                                <Key size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                                <input 
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white font-mono focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                    value={editPayload.password}
-                                    onChange={e => setEditPayload({...editPayload, password: e.target.value})}
-                                />
-                            </div>
-                        </div>
+                        {/* Modal Body */}
+                        <div className="p-6 sm:p-8 space-y-6 max-h-[75vh] overflow-y-auto">
+                            {String(targetUser.id) === String(currentUser?.id) && (
+                                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
+                                    <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
+                                    <p className="text-xs text-red-400 font-bold leading-relaxed uppercase tracking-wide">
+                                        WARNING: You are modifying your own administrative credentials. Ensure the new password matches the confirmation field, or you will be permanently locked out.
+                                    </p>
+                                </div>
+                            )}
 
-                        {String(targetUser.id) === String(currentUser?.id) && (
-                            <div className="space-y-2 md:col-span-2">
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Confirm Auth Token</label>
-                                <div className="relative">
-                                    <Key size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Secure Email</label>
+                                    <div className="relative">
+                                        <Mail size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                                        <input 
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
+                                            value={editPayload.email}
+                                            onChange={e => setEditPayload({...editPayload, email: e.target.value})}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Auth Token (Password)</label>
+                                    <div className="relative">
+                                        <Key size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                                        <input 
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white font-mono focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
+                                            value={editPayload.password}
+                                            onChange={e => setEditPayload({...editPayload, password: e.target.value})}
+                                        />
+                                    </div>
+                                </div>
+
+                                {String(targetUser.id) === String(currentUser?.id) && (
+                                    <div className="space-y-2 md:col-span-2">
+                                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Confirm Auth Token</label>
+                                        <div className="relative">
+                                            <Key size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                                            <input 
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white font-mono focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
+                                                value={editPayload.confirmPassword}
+                                                onChange={e => setEditPayload({...editPayload, confirmPassword: e.target.value})}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="md:col-span-2 space-y-2">
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Department Authority (Course Number)</label>
                                     <input 
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white font-mono focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                        value={editPayload.confirmPassword}
-                                        onChange={e => setEditPayload({...editPayload, confirmPassword: e.target.value})}
+                                        type="number"
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white uppercase font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
+                                        value={editPayload.courseNumber}
+                                        onChange={e => setEditPayload({...editPayload, courseNumber: e.target.value})}
+                                        placeholder="e.g. 11"
                                     />
                                 </div>
                             </div>
-                        )}
-
-                        <div className="md:col-span-2 space-y-2">
-                            <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Department Authority (Course Number)</label>
-                            <input 
-                                type="number"
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white uppercase font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                value={editPayload.courseNumber}
-                                onChange={e => setEditPayload({...editPayload, courseNumber: e.target.value})}
-                                placeholder="e.g. 11"
-                            />
                         </div>
-                    </div>
 
-                    <div className="flex gap-4 mt-8">
-                        <button 
-                            onClick={handleSaveOverride}
-                            className="flex-1 bg-white text-black font-black py-4 rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-3"
-                        >
-                            <Save size={18} />
-                            Deploy Protocols
-                        </button>
-                        <button 
-                            onClick={() => setIsEditing(false)}
-                            className="px-8 bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 font-black py-4 rounded-xl text-xs uppercase tracking-widest transition-all"
-                        >
-                            Cancel
-                        </button>
+                        {/* Modal Action Footer */}
+                        <div className="p-6 bg-black/60 border-t border-white/5 flex gap-4">
+                            <button 
+                                onClick={handleSaveOverride}
+                                className="flex-1 bg-white text-black font-black py-4 rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-3"
+                            >
+                                <Save size={18} />
+                                Deploy Protocols
+                            </button>
+                            <button 
+                                onClick={() => setIsEditing(false)}
+                                className="px-8 bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 hover:text-white font-black py-4 rounded-xl text-xs uppercase tracking-widest transition-all"
+                            >
+                                Cancel
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -25,3 +25,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build & CLI artifacts
+dev-dist
+.temp
+

@@ -80,7 +80,10 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                     <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
                     <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight">{title}</h2>
                 </div>
-                <span className="hidden sm:inline-block px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded border border-blue-400/20 shrink-0 uppercase tracking-widest ml-2">Secure Live Feed</span>
+                <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded-full border border-emerald-500/20 shrink-0 uppercase tracking-widest ml-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    LIVE AUTO-SYNC
+                </span>
             </div>
 
             <div className="flex items-center gap-1 md:gap-4 shrink-0">

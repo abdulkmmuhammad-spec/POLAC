@@ -8,7 +8,7 @@ import { audioService } from '../services/audioService';
 import { inferSeverity } from '../utils/notificationUtils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, X } from 'lucide-react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 
 interface CourseSummaryEntry {
     courseNumber: number;
@@ -89,6 +89,7 @@ const ParadeContext = createContext<ParadeContextType | undefined>(undefined);
 
 export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { currentUser } = useAuth();
+    const queryClient = useQueryClient();
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [activeRC, setActiveRC] = useState<number>(12); // sensible default
@@ -130,7 +131,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }),
         initialPageParam: undefined as string | undefined,
         getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-        staleTime: 1000 * 60 * 5, // 5 minutes
+        staleTime: 1000 * 30, // 30 seconds staleTime for high reactivity
         gcTime: 1000 * 60 * 10,   // 10 minutes (formerly cacheTime)
         enabled: !!currentUser
     });
@@ -173,7 +174,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     };
 
-    const refreshData = async (officerNameFilter?: string) => {
+    const refreshData = useCallback(async (officerNameFilter?: string) => {
         setIsRefreshing(true);
         try {
             try {
@@ -193,27 +194,15 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 toast.error('Network error while refreshing core metrics.');
             }
 
+            await queryClient.invalidateQueries({ queryKey: ['paradeRecords'] });
             await refetchRecords();
-
-            // AUTO-DETECT LATEST PARADE TYPE FOR TODAY
-            const now = new Date();
-            const watOffsetMs = 60 * 60 * 1000;
-            const watDate = new Date(now.getTime() + watOffsetMs);
-            const today = watDate.toISOString().split('T')[0];
-            const todayRecords = records.filter(r => r.date === today);
-            if (todayRecords.length > 0) {
-                const latest = [...todayRecords].sort((a, b) =>
-                    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-                )[0];
-                setSelectedParadeType(latest.paradeType);
-            }
         } catch (error) {
             console.error('Error refreshing data:', error);
             toast.error('Failed to sync master parade data. Please check your connection.');
         } finally {
             setIsRefreshing(false);
         }
-    };
+    }, [queryClient, refetchRecords]);
 
     const loadMoreRecords = async () => {
         if (!hasMoreRecords || isDataLoading) return;
@@ -262,6 +251,30 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         refreshData();
     }, []);
 
+    // ── Auto-Select Latest Submitted Parade Type ──
+    // Ensures the Commandant Tactical Summary always defaults to the last submitted parade state (e.g. TATTOO, MUSTER, SPECIAL)
+    useEffect(() => {
+        if (records.length > 0) {
+            const latestRecord = records[0];
+            if (latestRecord && latestRecord.paradeType) {
+                setSelectedParadeType(latestRecord.paradeType);
+            }
+        }
+    }, [records]);
+
+    // ── Resilient Background Auto-Sync Interval for Commandant Dashboard ──
+    useEffect(() => {
+        if (!currentUser || currentUser.role !== UserRole.COMMANDANT) return;
+
+        const intervalId = setInterval(() => {
+            if (!document.hidden) {
+                refreshData();
+            }
+        }, 20000);
+
+        return () => clearInterval(intervalId);
+    }, [currentUser, refreshData]);
+
     // ── Realtime Notifications (Supabase WebSockets) ──
     useEffect(() => {
         if (!currentUser) return;
@@ -299,6 +312,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
                     if (currentUser.role === UserRole.COMMANDANT || newNotif.officerName === currentUser.fullName) {
                         setNotifications((prev) => [newNotif, ...prev]);
+
+                        // Automatically trigger data refresh when a new parade state entry is submitted
+                        if (newNotif.type === 'parade_submission' || newNotif.type === 'parade_update') {
+                            refreshData();
+                        }
 
                         const severity = inferSeverity(newNotif);
                         
@@ -376,16 +394,14 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'parade_records' },
                 () => {
-                    refetchRecords();
-                    // Optionally, could play an intel sound specifically for state submission
-                    // audioService.play('intel');
+                    refreshData();
                 }
             )
             .on(
                 'postgres_changes',
                 { event: 'UPDATE', schema: 'public', table: 'parade_records' },
                 () => {
-                    refetchRecords();
+                    refreshData();
                 }
             )
             .subscribe();
@@ -393,7 +409,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [currentUser]);
+    }, [currentUser, refreshData]);
 
     /** Helper exposed via context to compute year level for a given course number */
     const getLevelForCourse = useCallback(

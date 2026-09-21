@@ -16,6 +16,7 @@ import { TacticalHUD } from './TacticalHUD';
 import { CredentialSettings } from './CredentialSettings';
 import { GraduationPanel } from './GraduationPanel';
 import { HandoverWizard } from './HandoverWizard';
+import { PushNotificationManager } from '../../PushNotificationManager';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
@@ -280,6 +281,9 @@ const SettingsContainer: React.FC = () => {
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                 {activeTab === 'general' ? (
                     <div className="max-w-2xl">
+                        <div className="mb-6">
+                            <PushNotificationManager />
+                        </div>
                         <ActiveRCSettings />
                         <SubmissionTimeSettings />
                     </div>
