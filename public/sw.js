@@ -21,8 +21,8 @@ self.addEventListener('push', (event) => {
     const title = payload.title || 'POLAC Parade Alert';
     const options = {
       body: payload.body || 'You have a new notification.',
-      icon: payload.icon || '/vite.svg', // Update with actual POLAC icon (e.g., /polac-logo.png)
-      badge: payload.badge || '/vite.svg',
+      icon: payload.icon || '/logo.png', // Official POLAC logo
+      badge: payload.badge || '/logo.png',
       data: {
         url: payload.url || '/' // Where to navigate on click
       },
@@ -37,7 +37,7 @@ self.addEventListener('push', (event) => {
     event.waitUntil(
       self.registration.showNotification('POLAC System Alert', {
         body: event.data.text(),
-        icon: '/vite.svg'
+        icon: '/logo.png'
       })
     );
   }

@@ -34,14 +34,14 @@ export default defineConfig(({ mode }) => {
             display: 'standalone',
             icons: [
               {
-                src: '/vite.svg', // Ensure to replace with actual 192x192 PNG later
+                src: '/logo.png',
                 sizes: '192x192',
-                type: 'image/svg+xml'
+                type: 'image/png'
               },
               {
-                src: '/vite.svg', // Ensure to replace with actual 512x512 PNG later
+                src: '/logo.png',
                 sizes: '512x512',
-                type: 'image/svg+xml',
+                type: 'image/png',
                 purpose: 'any maskable'
               }
             ]

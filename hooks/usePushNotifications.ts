@@ -66,8 +66,9 @@ export const usePushNotifications = () => {
       // 2. Register / Get Service Worker
       const registration = await navigator.serviceWorker.ready;
 
-      // 3. Subscribe to PushManager using the Public VAPID key from .env
-      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      // 3. Subscribe to PushManager using the Public VAPID key from .env (with fallback)
+      const DEFAULT_VAPID_PUBLIC_KEY = 'BJmViaZy-9tgnT_clgsZj6AqUEyxIlsW-kLDOB-U6ZyroaFISJRB6QDdnaoj6MtPdKcc272l-qGgsrmnlf0Yrgw';
+      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY;
       if (!vapidKey) {
         throw new Error('VAPID public key is missing from environment variables.');
       }
