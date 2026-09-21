@@ -654,18 +654,27 @@ export const dbService = {
       console.log('[Notification] Insert success:', data);
 
       // ── Dispatch Web Push Notification ────────────────────────────────────
-      // Asynchronously trigger Edge Function to deliver Web Push alerts to all devices
-      supabase.functions.invoke('send-web-push', {
-        body: {
-          user_id: 'all',
-          payload: {
-            title: notif.title,
-            body: notif.content,
-            icon: '/logo.png',
-            url: '/'
-          }
+      // Query all distinct user_ids registered in push_subscriptions
+      const { data: pushUsers } = await supabase
+        .from('push_subscriptions')
+        .select('user_id');
+
+      if (pushUsers && pushUsers.length > 0) {
+        const uniqueUserIds = Array.from(new Set(pushUsers.map(p => p.user_id)));
+        for (const uid of uniqueUserIds) {
+          supabase.functions.invoke('send-web-push', {
+            body: {
+              user_id: uid,
+              payload: {
+                title: notif.title,
+                body: notif.content,
+                icon: '/logo.png',
+                url: '/'
+              }
+            }
+          }).catch(pushErr => console.warn('[Push Notification] Edge function dispatch warning for user:', uid, pushErr));
         }
-      }).catch(pushErr => console.warn('[Push Notification] Edge function dispatch warning:', pushErr));
+      }
     } catch (err) {
       console.error('[Notification] CRITICAL:', err?.message || err);
       // Don't re-throw — notification failure shouldn't block the parent action

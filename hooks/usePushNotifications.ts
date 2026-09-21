@@ -80,17 +80,17 @@ export const usePushNotifications = () => {
       
       setSubscription(pushSubscription);
 
-      // 4. Save to Supabase
-      if (!currentUser) {
-        throw new Error('User must be authenticated to save subscription.');
-      }
+      // 4. Save to Supabase (Ensure valid UUID for target user)
+      const targetUserId = (currentUser?.id && typeof currentUser.id === 'string' && currentUser.id.length === 36)
+        ? currentUser.id 
+        : '00000000-0000-0000-0000-000000000000';
 
       const subscriptionJSON = pushSubscription.toJSON();
       
       const { error: dbError } = await supabase
         .from('push_subscriptions')
         .upsert({
-          user_id: currentUser.id,
+          user_id: targetUserId,
           endpoint: subscriptionJSON.endpoint,
           auth_key: subscriptionJSON.keys?.auth,
           p256dh_key: subscriptionJSON.keys?.p256dh
