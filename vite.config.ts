@@ -26,12 +26,16 @@ export default defineConfig(({ mode }) => {
             type: 'module',
           },
           manifest: {
+            id: '/',
+            start_url: '/',
+            scope: '/',
             name: 'POLAC Parade Management',
             short_name: 'POLAC Parade',
             description: 'Police Academy Parade Management System',
-            theme_color: '#1e3a8a', // Adjust based on your actual brand colors
+            theme_color: '#1e3a8a',
             background_color: '#ffffff',
             display: 'standalone',
+            orientation: 'portrait-primary',
             icons: [
               {
                 src: '/logo.png',
