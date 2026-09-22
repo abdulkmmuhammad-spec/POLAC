@@ -34,11 +34,33 @@ export const usePushNotifications = () => {
       setIsSupported(true);
       setPermission(Notification.permission);
       
-      // Load existing subscription if available
+      // Load existing subscription if available and verify VAPID key alignment
       navigator.serviceWorker.ready.then((reg) => {
         reg.pushManager.getSubscription().then((sub) => {
           if (sub) {
-            setSubscription(sub);
+            const DEFAULT_VAPID_PUBLIC_KEY = 'BHLlGvTeXErsp1DuyebhqVEC9ztRHyyLKoWQe4ijGwiBcLtDT4bF7vvbYmjebxozDq9WLq-LZoZdx7LqePDj5hw';
+            const currentVapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY;
+            
+            const currentKeyArray = urlBase64ToUint8Array(currentVapidKey);
+            const subKeyArray = sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+            
+            let matches = false;
+            if (subKeyArray && subKeyArray.length === currentKeyArray.length) {
+              matches = true;
+              for (let i = 0; i < currentKeyArray.length; i++) {
+                if (subKeyArray[i] !== currentKeyArray[i]) {
+                  matches = false;
+                  break;
+                }
+              }
+            }
+
+            if (!matches) {
+              console.warn('[Push] Stale subscription detected with old VAPID key. Purging stale subscription...');
+              sub.unsubscribe().then(() => setSubscription(null));
+            } else {
+              setSubscription(sub);
+            }
           }
         });
       });
