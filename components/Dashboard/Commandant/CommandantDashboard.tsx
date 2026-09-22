@@ -228,54 +228,53 @@ const SettingsContainer: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'general' | 'audit' | 'credentials' | 'alerts' | 'lifecycle'>('general');
     const [incomingRC, setIncomingRC] = useState<number | null>(null);
 
+    const tabs = [
+        { id: 'general', label: 'Administrative Parameters' },
+        { id: 'audit', label: 'Forensic Archive' },
+        { id: 'credentials', label: 'Tactical Access Control' },
+        { id: 'alerts', label: 'Alert History' },
+        { id: 'lifecycle', label: 'Lifecycle Engine' }
+    ] as const;
+
     return (
         <div className="space-y-8">
-            <div className="flex flex-nowrap md:flex-wrap items-center overflow-x-auto md:overflow-visible scrollbar-none snap-x p-1 w-full md:w-fit gap-1.5 bg-blue-50 border border-blue-100/60 rounded-xl shadow-sm">
-                <button
-                    onClick={() => setActiveTab('general')}
-                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'general'
-                            ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
-                        }`}
+            {/* Mobile Native Dropdown Selector (< 640px) */}
+            <div className="sm:hidden space-y-1.5">
+                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 uppercase ml-1">
+                    Select Configuration Category
+                </label>
+                <select
+                    value={activeTab}
+                    onChange={(e) => setActiveTab(e.target.value as any)}
+                    className="w-full bg-white border-2 border-blue-900 text-blue-950 font-black text-xs uppercase rounded-xl p-3.5 shadow-sm outline-none focus:ring-2 focus:ring-blue-900 min-h-[44px]"
                 >
-                    Administrative Parameters
-                </button>
-                <button
-                    onClick={() => setActiveTab('audit')}
-                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'audit'
-                            ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
-                        }`}
-                >
-                    Forensic Archive
-                </button>
-                <button
-                    onClick={() => setActiveTab('credentials')}
-                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'credentials'
-                            ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
-                        }`}
-                >
-                    Tactical Access Control
-                </button>
-                <button
-                    onClick={() => setActiveTab('alerts')}
-                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'alerts'
-                            ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
-                        }`}
-                >
-                    Alert History
-                </button>
-                <button
-                    onClick={() => setActiveTab('lifecycle')}
-                    className={`w-auto shrink-0 snap-start px-4 py-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-200 ${activeTab === 'lifecycle'
-                            ? 'bg-blue-900 text-white shadow-md'
-                            : 'text-blue-900/60 hover:text-blue-900 hover:bg-blue-100/30'
-                        }`}
-                >
-                    Lifecycle Engine
-                </button>
+                    {tabs.map((tab) => (
+                        <option key={tab.id} value={tab.id}>
+                            {tab.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            {/* Desktop & Tablet Horizontal Tab Bar with Gradient Scroll Affordance (>= 640px) */}
+            <div className="hidden sm:block relative w-full">
+                {/* Visual Gradient Fade Indicator on Right Edge for Scroll Affordance */}
+                <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-50 via-slate-50/80 to-transparent md:hidden z-10 rounded-r-xl" />
+
+                <div className="flex items-center overflow-x-auto scrollbar-thin scrollbar-thumb-blue-200 scrollbar-track-transparent snap-x p-1.5 w-full md:w-fit gap-2 bg-blue-50/80 border border-blue-100/80 rounded-2xl shadow-sm">
+                    {tabs.map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`w-auto shrink-0 snap-start px-4 min-h-[44px] py-2.5 rounded-xl text-[10px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 flex items-center justify-center ${activeTab === tab.id
+                                    ? 'bg-blue-900 text-white shadow-md shadow-blue-900/20'
+                                    : 'text-blue-900/70 hover:text-blue-900 hover:bg-blue-100/50'
+                                }`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">

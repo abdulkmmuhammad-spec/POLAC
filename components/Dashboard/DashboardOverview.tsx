@@ -228,34 +228,34 @@ export const DashboardOverview: React.FC = () => {
                                             <span className="text-sm font-black text-slate-900 font-mono tracking-tighter">{item.total}</span>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">PRES</span>
-                                            <span className="text-xs font-black text-emerald-600 font-mono">{item.present}</span>
+                                    <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Present</span>
+                                            <span className="text-xs font-black text-emerald-600 font-mono shrink-0">{item.present}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">ABST</span>
-                                            <span className="text-xs font-black text-rose-600 font-mono">{item.absent}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Absent</span>
+                                            <span className="text-xs font-black text-rose-600 font-mono shrink-0">{item.absent}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SICK</span>
-                                            <span className="text-xs font-black text-amber-600 font-mono">{item.sick}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Sick Bay</span>
+                                            <span className="text-xs font-black text-amber-600 font-mono shrink-0">{item.sick}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">DETN</span>
-                                            <span className="text-xs font-black text-indigo-600 font-mono">{item.detention}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Detention</span>
+                                            <span className="text-xs font-black text-indigo-600 font-mono shrink-0">{item.detention}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">PASS</span>
-                                            <span className="text-xs font-black text-cyan-600 font-mono">{item.pass}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">On Permission</span>
+                                            <span className="text-xs font-black text-cyan-600 font-mono shrink-0">{item.pass}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SUSP</span>
-                                            <span className="text-xs font-black text-slate-500 font-mono">{item.suspension}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Suspension</span>
+                                            <span className="text-xs font-black text-slate-600 font-mono shrink-0">{item.suspension}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-sm border border-slate-200 flex items-center justify-between col-span-2">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">YET TO REPORT</span>
-                                            <span className="text-xs font-black text-orange-600 font-mono">{item.yet_to_report}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between col-span-2 min-w-0">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Yet to Report</span>
+                                            <span className="text-xs font-black text-orange-600 font-mono shrink-0">{item.yet_to_report}</span>
                                         </div>
                                     </div>
                                 </div>

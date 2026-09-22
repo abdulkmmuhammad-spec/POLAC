@@ -580,34 +580,40 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                     </div>
                 </div>
 
-                {/* Footer Actions (Condensed Row) */}
-                <div className="px-8 py-6 bg-slate-50 border-t border-slate-200 flex items-center justify-center gap-4 shrink-0">
-                    <button
-                        onClick={exportToPDF}
-                        className="flex-1 max-w-xs bg-slate-900 hover:bg-black text-white px-6 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl group"
-                    >
-                        <FileText size={18} className="group-hover:translate-y-[-2px] transition-transform" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Generate Official Dossier</span>
-                    </button>
-                    
-                    <button
-                        onClick={() => isEditing ? setShowConfirm(true) : setIsEditing(true)}
-                        className={`flex-1 max-w-xs px-6 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] border-2 font-black text-[10px] uppercase tracking-widest ${
-                            isEditing ? 'bg-amber-500 border-amber-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                    >
-                        {isEditing ? <Save size={18} /> : <Edit3 size={18} />}
-                        <span>{isEditing ? 'Commit Overrides' : 'Administrative Edit'}</span>
-                    </button>
-                    {cadet.status !== 'DISMISSED' && (
+                {/* Footer Actions (Responsive Sticky Mobile Action Bar) */}
+                <div className="sticky bottom-0 left-0 right-0 z-40 bg-slate-900/95 sm:bg-slate-50 border-t border-slate-800 sm:border-slate-200 px-4 sm:px-8 py-3.5 sm:py-4 backdrop-blur-md pb-safe shrink-0">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 sm:gap-4 max-w-4xl mx-auto">
+                        {/* Primary Action: Dominant Full-Width Button on Mobile */}
                         <button
-                            onClick={() => setShowDismissal(true)}
-                            className="flex-1 max-w-xs px-6 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] border-2 border-rose-200 font-black text-[10px] uppercase tracking-widest text-rose-600 bg-rose-50 hover:bg-rose-100 hover:border-rose-300"
+                            onClick={exportToPDF}
+                            className="w-full sm:flex-1 sm:max-w-xs bg-blue-600 sm:bg-slate-900 hover:bg-blue-700 sm:hover:bg-black text-white min-h-[48px] px-5 py-3 rounded-xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] shadow-lg group font-black text-xs uppercase tracking-wider"
                         >
-                            <ShieldAlert size={18} />
-                            <span>Dismiss Cadet</span>
+                            <FileText size={18} className="group-hover:translate-y-[-2px] transition-transform shrink-0" />
+                            <span>Generate Official Dossier</span>
                         </button>
-                    )}
+                        
+                        {/* Secondary & Destructive Action Row */}
+                        <div className="flex items-center gap-2.5 w-full sm:w-auto sm:flex-1 sm:max-w-md">
+                            <button
+                                onClick={() => isEditing ? setShowConfirm(true) : setIsEditing(true)}
+                                className={`flex-1 min-h-[48px] px-4 py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] border-2 font-black text-xs uppercase tracking-wider ${
+                                    isEditing ? 'bg-amber-500 border-amber-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                }`}
+                            >
+                                {isEditing ? <Save size={18} className="shrink-0" /> : <Edit3 size={18} className="shrink-0" />}
+                                <span className="truncate">{isEditing ? 'Commit' : 'Admin Edit'}</span>
+                            </button>
+                            {cadet.status !== 'DISMISSED' && (
+                                <button
+                                    onClick={() => setShowDismissal(true)}
+                                    className="flex-1 min-h-[48px] px-4 py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] border-2 border-rose-200 font-black text-xs uppercase tracking-wider text-rose-600 bg-rose-50 hover:bg-rose-100 hover:border-rose-300 shadow-sm"
+                                >
+                                    <ShieldAlert size={18} className="shrink-0" />
+                                    <span className="truncate">Dismiss</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
                 {/* Overlays for Edit Modes */}
