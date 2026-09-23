@@ -45,8 +45,8 @@ const { logout } = useAuth();
                 {/* Tactical Header */}
                 <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/10">
                     <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-blue-500/10 rounded flex items-center justify-center border border-blue-400/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
-                            <Shield size={18} className="text-blue-400" />
+                        <div className="w-9 h-9 bg-blue-500/10 rounded-lg flex items-center justify-center border border-blue-400/20 shadow-[0_0_15px_rgba(59,130,246,0.1)] overflow-hidden shrink-0">
+                            <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                         </div>
                         <h2 className="font-black text-white tracking-tighter text-lg uppercase">
                             POLAC <span className="text-blue-400">CMD</span>

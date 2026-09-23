@@ -382,8 +382,8 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                 <div className="bg-[#0f172a] text-white px-8 py-6 relative overflow-hidden shrink-0">
                     <div className="flex justify-between items-center relative z-10">
                         <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
-                                <img src={logo} alt="NPA" className="w-6 h-6 object-contain" />
+                            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg overflow-hidden shrink-0">
+                                <img src={logo} alt="NPA" className="w-[75%] h-[75%] object-contain block" />
                             </div>
                             <div>
                                 <h2 className="text-lg font-black tracking-tight uppercase">Performance Dossier</h2>

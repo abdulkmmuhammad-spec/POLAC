@@ -76,9 +76,14 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                         <Menu size={24} />
                     </button>
                 )}
-                <div className="flex flex-col">
-                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
-                    <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight">{title}</h2>
+                <div className="flex items-center gap-3">
+                    <div className="hidden sm:flex w-9 h-9 bg-white/10 rounded-lg border border-white/10 flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                        <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
+                    </div>
+                    <div className="flex flex-col">
+                        <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
+                        <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight">{title}</h2>
+                    </div>
                 </div>
                 <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded-full border border-emerald-500/20 shrink-0 uppercase tracking-widest ml-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>

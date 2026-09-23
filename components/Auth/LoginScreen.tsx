@@ -43,11 +43,11 @@ export const LoginScreen: React.FC = () => {
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 backdrop-blur-2xl p-8 shadow-2xl relative z-20">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <div className="w-20 h-20 bg-white/10 rounded-full p-2 border border-white/20 shadow-[0_0_20px_rgba(255,255,255,0.1)]">
+            <div className="w-20 h-20 bg-white/10 rounded-full border border-white/20 shadow-[0_0_20px_rgba(255,255,255,0.1)] flex items-center justify-center overflow-hidden">
               <img 
                 src="/logo.png" 
                 alt="NPA Logo" 
-                className="w-full h-full object-contain"
+                className="w-[80%] h-[80%] object-contain block"
                 onError={(e) => {
                   // Fallback if logo is missing
                   e.currentTarget.style.display = 'none';
