@@ -77,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                     </button>
                 )}
                 <div className="flex items-center gap-3">
-                    <div className="hidden sm:flex w-9 h-9 bg-white/10 rounded-lg border border-white/10 flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                    <div className="flex w-8 h-8 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
                         <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
                     <div className="flex flex-col">
