@@ -81,10 +81,15 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
         // Smart Routing: If attendance is perfect (no absentees, sick, etc.), route to tactical summary
         let nonPresentTotal = 0;
         if (counts) {
-            nonPresentTotal = (counts.absent || 0) + (counts.sick || 0) + (counts.detention || 0) + (counts.pass || 0) + (counts.suspension || 0) + (counts.yetToReport || 0);
+            nonPresentTotal = Number(counts.absent || 0) + 
+                              Number(counts.sick || 0) + 
+                              Number(counts.detention || 0) + 
+                              Number(counts.pass || 0) + 
+                              Number(counts.suspension || 0) + 
+                              Number(counts.yetToReport || 0);
         }
         
-        const isPerfectAttendance = counts && nonPresentTotal === 0;
+        const isPerfectAttendance = !!counts && nonPresentTotal === 0;
 
         return {
             category: 'parade',
@@ -110,7 +115,7 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
     }
 
     // 2.5 Document Previews
-    if (title.includes('Ledger Printed') || title.includes('Audit Ledger')) {
+    if (title.includes('ledger printed') || title.includes('audit ledger')) {
         return {
             category: 'general',
             route: '/commandant/audit', // Route to the audit page where it can be seen
@@ -119,7 +124,7 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
         };
     }
     
-    if (title.includes('Dossier Generated') || title.includes('Performance Dossier')) {
+    if (title.includes('dossier generated') || title.includes('performance dossier')) {
         return {
             category: 'cadet',
             route: '/commandant/cadet_registry',
