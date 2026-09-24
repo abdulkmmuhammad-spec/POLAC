@@ -204,7 +204,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         } finally {
             setIsRefreshing(false);
         }
-    }, [queryClient, refetchRecords]);
+    }, [queryClient, refetchRecords, fetchTodayRecords]);
 
     /**
      * Fetches ALL of today's parade records (all types) without pagination limits.
@@ -223,14 +223,28 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                date, parade_type, present_count, absent_count, sick_count, detention_count,
                pass_count, suspension_count, yet_to_report_count, grand_total, created_at`;
 
-            let query = supabase
-                .from('parade_records')
-                .select(selectFields)
-                .eq('date', today)
-                .order('created_at', { ascending: false })
-                .limit(200); // generous cap for today — no academy has 200 parades in a day
+            let queryBuilder;
 
-            const { data, error } = await query;
+            // Commandant: go through the RPC to respect RLS policies.
+            // Direct table access may be blocked for the commandant role.
+            if (currentUser.role === UserRole.COMMANDANT) {
+                queryBuilder = supabase
+                    .rpc('get_commandant_parade_overview', { p_viewer_id: String(currentUser.id) })
+                    .select(selectFields)
+                    .eq('date', today)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+            } else {
+                queryBuilder = supabase
+                    .from('parade_records')
+                    .select(selectFields)
+                    .eq('date', today)
+                    .eq('course_number', currentUser.courseNumber)
+                    .order('created_at', { ascending: false })
+                    .limit(50);
+            }
+
+            const { data, error } = await queryBuilder;
             if (error) throw error;
 
             const formatted: ParadeRecordMetadata[] = (data || []).map((r: any) => ({
@@ -252,7 +266,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 courseName: r.course_name,
                 createdAt: r.created_at
             }));
-            setTodayRecords(formatted);
+
+            // The RPC returns all records for the commandant (not just today).
+            // Apply a final client-side date filter to be safe.
+            const todayFiltered = formatted.filter(r => r.date === today);
+            setTodayRecords(todayFiltered);
         } catch (err) {
             console.error('Error fetching today\'s records:', err);
         }
@@ -301,10 +319,20 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
 
 
+    // Bug fix: do NOT call fetchTodayRecords in the empty-dep effect.
+    // currentUser is not yet available at mount (auth is async),
+    // so the guard 'if (!currentUser) return' would bail immediately.
     useEffect(() => {
         refreshData();
-        fetchTodayRecords();
     }, []);
+
+    // Trigger fetchTodayRecords as soon as currentUser is available (after auth resolves).
+    // This is the correct place to fire the today-scoped query.
+    useEffect(() => {
+        if (currentUser) {
+            fetchTodayRecords();
+        }
+    }, [currentUser, fetchTodayRecords]);
 
     // ── Auto-Select Latest Submitted Parade Type ──
     // Ensures the Commandant Tactical Summary always defaults to the last submitted parade state (e.g. TATTOO, MUSTER, SPECIAL)
