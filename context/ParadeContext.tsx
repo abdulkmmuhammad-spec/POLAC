@@ -184,9 +184,8 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (!currentUser) return;
         try {
             const now = new Date();
-            const watOffsetMs = 60 * 60 * 1000;
-            const watDate = new Date(now.getTime() + watOffsetMs);
-            const today = watDate.toISOString().split('T')[0];
+            // A 24-hour rolling window prevents device-specific clock desync from isolating data
+            const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
             const selectFields = `id, officer_id, officer_name, course_name, year_group, course_number,
                date, parade_type, present_count, absent_count, sick_count, detention_count,
@@ -200,18 +199,21 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 queryBuilder = supabase
                     .rpc('get_commandant_parade_overview', { p_viewer_id: String(currentUser.id) })
                     .select(selectFields)
-                    .eq('date', today)
+                    .gte('created_at', windowStart)
                     .order('created_at', { ascending: false })
                     .limit(200);
             } else {
                 queryBuilder = supabase
                     .from('parade_records')
                     .select(selectFields)
-                    .eq('date', today)
+                    .gte('created_at', windowStart)
                     .eq('course_number', currentUser.courseNumber)
                     .order('created_at', { ascending: false })
                     .limit(50);
             }
+
+            // Append dummy query param to break aggressive Safari mobile caching
+            queryBuilder = queryBuilder.neq('id', '00000000-0000-0000-0000-000000000000');
 
             const { data, error } = await queryBuilder;
             if (error) throw error;
@@ -236,10 +238,9 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 createdAt: r.created_at
             }));
 
-            // The RPC returns all records for the commandant (not just today).
-            // Apply a final client-side date filter to be safe.
-            const todayFiltered = formatted.filter(r => r.date === today);
-            setTodayRecords(todayFiltered);
+            // Rely entirely on the 24-hour timestamp window to define "today's recent submissions"
+            // bypassing the client's local date interpretation entirely.
+            setTodayRecords(formatted);
         } catch (err) {
             console.error('Error fetching today\'s records:', err);
         }

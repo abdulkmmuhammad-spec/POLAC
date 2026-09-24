@@ -299,7 +299,7 @@ export const DashboardOverview: React.FC = () => {
                     title="SYSTEM ANALYTIC TRENDS"
                     data={chartData}
                 />
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                <div className="hidden lg:block bg-white p-6 rounded-lg shadow-sm border border-slate-200">
                     <div className="flex items-center justify-between mb-8">
                         <div>
                             <p className="text-[9px] font-black text-blue-900 uppercase tracking-[0.2em] mb-1">Queue Traffic</p>
