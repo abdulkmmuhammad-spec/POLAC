@@ -77,13 +77,22 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
             else if (content.includes('special') || title.includes('special')) paradeType = 'special';
         }
 
+        const counts = n.metadata?.counts;
+        // Smart Routing: If attendance is perfect (no absentees, sick, etc.), route to tactical summary
+        let nonPresentTotal = 0;
+        if (counts) {
+            nonPresentTotal = (counts.absent || 0) + (counts.sick || 0) + (counts.detention || 0) + (counts.pass || 0) + (counts.suspension || 0) + (counts.yetToReport || 0);
+        }
+        
+        const isPerfectAttendance = counts && nonPresentTotal === 0;
+
         return {
             category: 'parade',
-            route: '/commandant/audit',
+            route: isPerfectAttendance ? '/commandant' : '/commandant/audit',
             courseNumber,
             paradeType,
-            actionLabel: 'Inspect in Attendance Audit',
-            counts: n.metadata?.counts
+            actionLabel: isPerfectAttendance ? 'View in Tactical Summary' : 'Inspect in Attendance Audit',
+            counts: counts
         };
     }
 
@@ -97,6 +106,26 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
             courseNumber,
             cadetName,
             actionLabel: 'View in Cadet Registry'
+        };
+    }
+
+    // 2.5 Document Previews
+    if (title.includes('Ledger Printed') || title.includes('Audit Ledger')) {
+        return {
+            category: 'general',
+            route: '/commandant/audit', // Route to the audit page where it can be seen
+            courseNumber,
+            actionLabel: 'Preview Audit Ledger'
+        };
+    }
+    
+    if (title.includes('Dossier Generated') || title.includes('Performance Dossier')) {
+        return {
+            category: 'cadet',
+            route: '/commandant/cadet_registry',
+            courseNumber,
+            cadetName: n.metadata?.cadetName,
+            actionLabel: 'Preview Performance Dossier'
         };
     }
 

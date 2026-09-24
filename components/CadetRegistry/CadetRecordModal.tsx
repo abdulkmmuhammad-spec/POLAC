@@ -28,6 +28,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
     const [isUploading, setIsUploading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
+    const [mobileTab, setMobileTab] = useState<'identity' | 'metrics' | 'history'>('identity');
     
     // Dismissal States
     const [showDismissal, setShowDismissal] = useState(false);
@@ -403,12 +404,21 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                     </div>
                 )}
 
+                {/* Mobile Tabs */}
+                <div className="lg:hidden px-8 pt-4 shrink-0">
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                        <button onClick={() => setMobileTab('identity')} className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${mobileTab === 'identity' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-800'}`}>Identity</button>
+                        <button onClick={() => setMobileTab('metrics')} className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${mobileTab === 'metrics' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-800'}`}>Metrics</button>
+                        <button onClick={() => setMobileTab('history')} className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${mobileTab === 'history' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-800'}`}>History</button>
+                    </div>
+                </div>
+
                 {/* Main 3-Column Content (High Density) */}
-                <div className="flex-1 overflow-y-auto p-8 pt-6">
+                <div className="flex-1 overflow-y-auto p-8 pt-4 lg:pt-6">
                     <div className="grid grid-cols-12 gap-8">
                         
                         {/* COL 1: IDENTITY & STANDING (3/12) */}
-                        <div className="col-span-12 lg:col-span-3 space-y-6">
+                        <div className={`col-span-12 lg:col-span-3 space-y-6 ${mobileTab === 'identity' ? 'block' : 'hidden lg:block'}`}>
                             <div className="relative group mx-auto lg:mx-0 w-48 h-48 lg:w-full lg:h-64 rounded-3xl bg-slate-100 border-2 border-slate-200 overflow-hidden shadow-inner">
                                 {avatarUrl ? (
                                     <img src={avatarUrl} alt={cadet.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
@@ -450,7 +460,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                         </div>
 
                         {/* COL 2: METRICS & ASSESSMENT (5/12) */}
-                        <div className="col-span-12 lg:col-span-5 space-y-6">
+                        <div className={`col-span-12 lg:col-span-5 space-y-6 ${mobileTab === 'metrics' ? 'block' : 'hidden lg:block'}`}>
                             <section className="bg-slate-50 border border-slate-200 rounded-3xl p-6">
                                 <div className="flex justify-between items-end mb-4">
                                     <h4 className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -513,7 +523,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                         </div>
 
                         {/* COL 3: FORENSIC HISTORY (4/12) */}
-                        <div className="col-span-12 lg:col-span-4 space-y-4 h-full flex flex-col">
+                        <div className={`col-span-12 lg:col-span-4 space-y-4 h-full flex flex-col ${mobileTab === 'history' ? 'flex' : 'hidden lg:flex'}`}>
                             <div className="flex-1 bg-white border border-slate-200 rounded-3xl p-5 flex flex-col min-h-[300px]">
                                 <h4 className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
                                     <History size={14} className="text-blue-500" />
