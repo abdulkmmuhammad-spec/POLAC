@@ -175,37 +175,6 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     };
 
-    const refreshData = useCallback(async (officerNameFilter?: string) => {
-        setIsRefreshing(true);
-        try {
-            try {
-                const [notifsRes, rcRes, settingsRes, count] = await Promise.all([
-                    dbService.getNotifications(officerNameFilter),
-                    dbService.getActiveRC(),
-                    dbService.getSubmissionSettings(),
-                    dbService.getTotalRecordsCount()
-                ]);
-
-                setNotifications(notifsRes.data);
-                setActiveRC(rcRes.data);
-                setSubmissionSettings(settingsRes.data);
-                setTotalRecordsCount(count);
-            } catch (err) {
-                console.error('refreshData Promise.all error:', err);
-                toast.error('Network error while refreshing core metrics.');
-            }
-
-            await queryClient.invalidateQueries({ queryKey: ['paradeRecords'] });
-            await refetchRecords();
-            await fetchTodayRecords();
-        } catch (error) {
-            console.error('Error refreshing data:', error);
-            toast.error('Failed to sync master parade data. Please check your connection.');
-        } finally {
-            setIsRefreshing(false);
-        }
-    }, [queryClient, refetchRecords, fetchTodayRecords]);
-
     /**
      * Fetches ALL of today's parade records (all types) without pagination limits.
      * This is the authoritative data source for the Tactical Summary and stats.
@@ -275,6 +244,37 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             console.error('Error fetching today\'s records:', err);
         }
     }, [currentUser]);
+
+    const refreshData = useCallback(async (officerNameFilter?: string) => {
+        setIsRefreshing(true);
+        try {
+            try {
+                const [notifsRes, rcRes, settingsRes, count] = await Promise.all([
+                    dbService.getNotifications(officerNameFilter),
+                    dbService.getActiveRC(),
+                    dbService.getSubmissionSettings(),
+                    dbService.getTotalRecordsCount()
+                ]);
+
+                setNotifications(notifsRes.data);
+                setActiveRC(rcRes.data);
+                setSubmissionSettings(settingsRes.data);
+                setTotalRecordsCount(count);
+            } catch (err) {
+                console.error('refreshData Promise.all error:', err);
+                toast.error('Network error while refreshing core metrics.');
+            }
+
+            await queryClient.invalidateQueries({ queryKey: ['paradeRecords'] });
+            await refetchRecords();
+            await fetchTodayRecords();
+        } catch (error) {
+            console.error('Error refreshing data:', error);
+            toast.error('Failed to sync master parade data. Please check your connection.');
+        } finally {
+            setIsRefreshing(false);
+        }
+    }, [queryClient, refetchRecords, fetchTodayRecords]);
 
     const loadMoreRecords = async () => {
         if (!hasMoreRecords || isDataLoading) return;
