@@ -100,6 +100,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     });
     const [selectedParadeType, setSelectedParadeType] = useState<ParadeType>(ParadeType.MUSTER);
     const [totalRecordsCount, setTotalRecordsCount] = useState<number>(0);
+    const [todayRecords, setTodayRecords] = useState<ParadeRecordMetadata[]>([]);
 
     // Persistent Filter State for Commandant Section
     const [auditStatusFilter, setAuditStatusFilter] = useState<string>('all');
@@ -196,6 +197,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
             await queryClient.invalidateQueries({ queryKey: ['paradeRecords'] });
             await refetchRecords();
+            await fetchTodayRecords();
         } catch (error) {
             console.error('Error refreshing data:', error);
             toast.error('Failed to sync master parade data. Please check your connection.');
@@ -203,6 +205,58 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             setIsRefreshing(false);
         }
     }, [queryClient, refetchRecords]);
+
+    /**
+     * Fetches ALL of today's parade records (all types) without pagination limits.
+     * This is the authoritative data source for the Tactical Summary and stats.
+     * It must not be confused with the paginated `records` array which is for the audit ledger.
+     */
+    const fetchTodayRecords = useCallback(async () => {
+        if (!currentUser) return;
+        try {
+            const now = new Date();
+            const watOffsetMs = 60 * 60 * 1000;
+            const watDate = new Date(now.getTime() + watOffsetMs);
+            const today = watDate.toISOString().split('T')[0];
+
+            const selectFields = `id, officer_id, officer_name, course_name, year_group, course_number,
+               date, parade_type, present_count, absent_count, sick_count, detention_count,
+               pass_count, suspension_count, yet_to_report_count, grand_total, created_at`;
+
+            let query = supabase
+                .from('parade_records')
+                .select(selectFields)
+                .eq('date', today)
+                .order('created_at', { ascending: false })
+                .limit(200); // generous cap for today — no academy has 200 parades in a day
+
+            const { data, error } = await query;
+            if (error) throw error;
+
+            const formatted: ParadeRecordMetadata[] = (data || []).map((r: any) => ({
+                id: r.id,
+                date: r.date,
+                paradeType: r.parade_type,
+                yearGroup: r.year_group,
+                courseNumber: r.course_number,
+                presentCount: r.present_count,
+                absentCount: r.absent_count,
+                sickCount: r.sick_count,
+                detentionCount: r.detention_count,
+                passCount: r.pass_count,
+                suspensionCount: r.suspension_count,
+                yetToReportCount: r.yet_to_report_count,
+                grandTotal: r.grand_total,
+                officerName: r.officer_name,
+                officerId: r.officer_id,
+                courseName: r.course_name,
+                createdAt: r.created_at
+            }));
+            setTodayRecords(formatted);
+        } catch (err) {
+            console.error('Error fetching today\'s records:', err);
+        }
+    }, [currentUser]);
 
     const loadMoreRecords = async () => {
         if (!hasMoreRecords || isDataLoading) return;
@@ -249,6 +303,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     useEffect(() => {
         refreshData();
+        fetchTodayRecords();
     }, []);
 
     // ── Auto-Select Latest Submitted Parade Type ──
@@ -395,6 +450,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 { event: 'INSERT', schema: 'public', table: 'parade_records' },
                 () => {
                     refreshData();
+                    fetchTodayRecords();
                 }
             )
             .on(
@@ -402,6 +458,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 { event: 'UPDATE', schema: 'public', table: 'parade_records' },
                 () => {
                     refreshData();
+                    fetchTodayRecords();
                 }
             )
             .subscribe();
@@ -418,18 +475,14 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     );
 
     const stats = useMemo<DashboardStats>(() => {
-        const now = new Date();
-        const watOffsetMs = 60 * 60 * 1000;
-        const watDate = new Date(now.getTime() + watOffsetMs);
-        const today = watDate.toISOString().split('T')[0];
-        // Statistics should also respect the filter for "Present Today" and "Hospitalized"
-        const todayRecords = records.filter(r => r.date === today && r.paradeType === selectedParadeType);
+        // Use todayRecords — the complete, non-paginated snapshot of today's activity.
+        const todayByType = todayRecords.filter(r => r.paradeType === selectedParadeType);
 
         const activeStrength = currentUser?.role === UserRole.COURSE_OFFICER
             ? (currentUser.totalCadets || 0)
-            : todayRecords.reduce((sum, r) => sum + r.grandTotal, 0);
+            : todayByType.reduce((sum, r) => sum + r.grandTotal, 0);
 
-        const presentCount = todayRecords.reduce((sum, r) => sum + r.presentCount, 0);
+        const presentCount = todayByType.reduce((sum, r) => sum + r.presentCount, 0);
 
         const percentage = activeStrength > 0
             ? Math.round((presentCount / activeStrength) * 100)
@@ -444,33 +497,30 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 const start = new Date(now.setDate(now.getDate() - 7));
                 return d >= start;
             }).reduce((sum, r) => sum + r.absentCount, 0),
-            sickCadets: todayRecords.reduce((sum, r) => sum + r.sickCount, 0)
+            sickCadets: todayByType.reduce((sum, r) => sum + r.sickCount, 0)
         };
-    }, [records, currentUser, selectedParadeType]);
+    }, [todayRecords, records, currentUser, selectedParadeType]);
 
     /**
      * Course-based summary (new). Groups today's records by courseNumber and
      * calculates the current year level dynamically using activeRC.
      */
     const courseSummary = useMemo<CourseSummaryEntry[]>(() => {
-        const now = new Date();
-        const watOffsetMs = 60 * 60 * 1000;
-        const watDate = new Date(now.getTime() + watOffsetMs);
-        const today = watDate.toISOString().split('T')[0];
+        // Use todayRecords — the complete, non-paginated snapshot of today's activity.
         // FILTER BY SELECTED PARADE TYPE
-        const todayRecords = records.filter(r => r.date === today && r.paradeType === selectedParadeType);
+        const filtered = todayRecords.filter(r => r.paradeType === selectedParadeType);
 
         // Collect all unique course numbers from records
         const courseNumbers = Array.from(
             new Set(
-                todayRecords
+                filtered
                     .map(r => r.courseNumber ?? null)
                     .filter((cn): cn is number => cn !== null)
             )
         ).sort((a: any, b: any) => (b as number) - (a as number)); // highest RC first (newest cadets)
 
         return courseNumbers.map(cn => {
-            const courseRecords = todayRecords.filter(r => r.courseNumber === cn);
+            const courseRecords = filtered.filter(r => r.courseNumber === cn);
             return {
                 courseNumber: cn,
                 currentLevel: calculateCurrentLevel(cn as number, activeRC),
@@ -484,7 +534,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 yet_to_report: courseRecords.reduce((s, r) => s + (r.yetToReportCount || 0), 0),
             };
         });
-    }, [records, activeRC, selectedParadeType]);
+    }, [todayRecords, activeRC, selectedParadeType]);
 
 
 
