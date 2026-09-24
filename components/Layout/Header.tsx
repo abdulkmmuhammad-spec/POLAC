@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCcw, LogOut, Bell, Menu, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
-import { UserRole } from '../../types';
+import { UserRole, Notification } from '../../types';
 import { dbService } from '../../services/dbService';
 import { ConfirmationModal } from './ConfirmationModal';
 import { NotificationDrawer } from './NotificationDrawer';
+import { NotificationPreviewModal } from './NotificationPreviewModal';
 import { audioService } from '../../services/audioService';
 
 interface HeaderProps {
@@ -17,11 +19,14 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onProfileClick, onMenuClick }) => {
+    const navigate = useNavigate();
     const { currentUser, logout } = useAuth();
     const { isDataLoading, refreshData, notifications, markNotificationRead, markAllAsRead } = useParade();
     const [showDrawer, setShowDrawer] = useState(false);
     const [showConfirmClear, setShowConfirmClear] = useState(false);
     const [isAudioArmed, setIsAudioArmed] = useState(false);
+    const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+    const [showPreviewModal, setShowPreviewModal] = useState(false);
 
     // Determine if user is commandant (sees all) or course officer (sees only own)
     const isCommandant = currentUser?.role === UserRole.COMMANDANT;
@@ -173,9 +178,26 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 notifications={displayNotifications}
                 onMarkRead={markNotificationRead}
                 onMarkAllRead={markAllAsRead}
+                onSelectNotification={(n) => {
+                    setSelectedNotification(n);
+                    markNotificationRead(n.id);
+                    setShowDrawer(false);
+                    setShowPreviewModal(true);
+                }}
                 onClearAll={() => {
                     setShowDrawer(false);
                     setShowConfirmClear(true);
+                }}
+            />
+
+            {/* ── Actionable Intelligence Preview Modal ── */}
+            <NotificationPreviewModal
+                notification={selectedNotification}
+                isOpen={showPreviewModal}
+                onClose={() => setShowPreviewModal(false)}
+                onAcknowledge={(id) => markNotificationRead(id)}
+                onNavigate={(route, state) => {
+                    navigate(route, { state });
                 }}
             />
 

@@ -7,7 +7,7 @@ import { inferSeverity } from '../../../utils/notificationUtils';
 interface TacticalHUDProps {
     notifications: Notification[];
     onResolve: (id: string) => void;
-    onView: (id: string) => void;
+    onView: (notification: Notification) => void;
 }
 
 export const TacticalHUD: React.FC<TacticalHUDProps> = ({ notifications, onResolve, onView }) => {
@@ -55,7 +55,7 @@ export const TacticalHUD: React.FC<TacticalHUDProps> = ({ notifications, onResol
 
                         <div className="flex items-center gap-2 shrink-0 md:pl-4 md:border-l border-slate-100">
                             <button
-                                onClick={() => onView(alert.id)}
+                                onClick={() => onView(alert)}
                                 className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all group/btn"
                             >
                                 Investigate <ChevronRight size={14} className="group-hover/btn:translate-x-0.5 transition-transform" />

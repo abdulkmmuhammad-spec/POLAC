@@ -17,6 +17,8 @@ import { CredentialSettings } from './CredentialSettings';
 import { GraduationPanel } from './GraduationPanel';
 import { HandoverWizard } from './HandoverWizard';
 import { PushNotificationManager } from '../../PushNotificationManager';
+import { Notification } from '../../../types';
+import { NotificationPreviewModal } from '../../Layout/NotificationPreviewModal';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
@@ -311,6 +313,7 @@ export const CommandantDashboard: React.FC = () => {
     const location = useLocation();
     const { notifications, markNotificationRead } = useParade();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [selectedAlert, setSelectedAlert] = useState<Notification | null>(null);
 
     const getTitle = () => {
         const path = location.pathname;
@@ -340,7 +343,22 @@ export const CommandantDashboard: React.FC = () => {
                         <TacticalHUD 
                             notifications={notifications}
                             onResolve={markNotificationRead} // In this context, resolving is acknowledging
-                            onView={() => navigate('/commandant/analytics')}
+                            onView={(alert) => {
+                                setSelectedAlert(alert);
+                                markNotificationRead(alert.id);
+                            }}
+                        />
+
+                        {/* Tactical HUD Alert Preview Modal */}
+                        <NotificationPreviewModal
+                            notification={selectedAlert}
+                            isOpen={!!selectedAlert}
+                            onClose={() => setSelectedAlert(null)}
+                            onAcknowledge={(id) => markNotificationRead(id)}
+                            onNavigate={(route, state) => {
+                                setSelectedAlert(null);
+                                navigate(route, { state });
+                            }}
                         />
                         
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">

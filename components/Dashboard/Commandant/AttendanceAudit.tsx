@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Download, FileText, Calendar, RotateCcw, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useParade } from '../../../context/ParadeContext';
 import { CadetStatus } from '../../../types';
 import { reportService } from '../../../services/reportService';
@@ -8,6 +9,7 @@ import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import * as XLSX from 'xlsx';
 
 export const AttendanceAudit: React.FC = () => {
+    const location = useLocation();
     const {
         records,
         refreshData,
@@ -62,6 +64,20 @@ export const AttendanceAudit: React.FC = () => {
         };
         fetchActiveCourses();
     }, []);
+
+    // Consume incoming navigation state from Notification Intelligence Deep-Links
+    useEffect(() => {
+        const state = location.state as { courseNumber?: number; searchTerm?: string; paradeType?: string } | null;
+        if (state) {
+            if (state.courseNumber) {
+                setAuditCourseFilter(state.courseNumber.toString());
+                setExpandedRCs(prev => ({ ...prev, [state.courseNumber!]: true }));
+            }
+            if (state.searchTerm) {
+                setAuditSearchTerm(state.searchTerm);
+            }
+        }
+    }, [location.state, setAuditCourseFilter, setAuditSearchTerm]);
 
     // Default to Current Week (Monday to Sunday)
     const currentWeekRange = useMemo(() => {

@@ -501,12 +501,26 @@ export const dbService = {
       await dbService.addNotification({
         type: 'parade_submission',
         title: 'Parade State Submitted',
-        content: `${record.officerName} submitted ${record.paradeType} parade state`,
+        content: `${record.officerName} submitted ${record.paradeType.toUpperCase()} parade state (Present: ${record.presentCount}, Absent: ${record.absentCount}, Sick: ${record.sickCount})`,
         timestamp: new Date().toISOString(),
         read: false,
         officerName: record.officerName,
         yearGroup: record.yearGroup,
-        courseNumber: record.courseNumber
+        courseNumber: record.courseNumber,
+        metadata: {
+          courseNumber: record.courseNumber,
+          paradeType: record.paradeType,
+          counts: {
+            present: record.presentCount,
+            absent: record.absentCount,
+            sick: record.sickCount,
+            detention: record.detentionCount,
+            pass: record.passCount,
+            suspension: record.suspensionCount,
+            yetToReport: record.yetToReportCount,
+            grandTotal: record.grandTotal
+          }
+        }
       });
       
       return data;

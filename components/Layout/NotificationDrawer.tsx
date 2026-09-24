@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Bell, CheckCircle, AlertTriangle, Settings,
-    History, Trash2, CheckCheck, Sparkles, Check
+    History, Trash2, CheckCheck, Sparkles, Check, ChevronRight
 } from 'lucide-react';
 import { Notification } from '../../types';
 import { inferSeverity, getSeverityStyles } from '../../utils/notificationUtils';
@@ -14,6 +14,7 @@ interface NotificationDrawerProps {
     onMarkRead: (id: string) => void;
     onMarkAllRead: () => void;
     onClearAll: () => void;
+    onSelectNotification?: (notification: Notification) => void;
 }
 
 const getIconForSeverity = (severity: 'critical' | 'info' | 'system') => {
@@ -52,6 +53,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
     onMarkRead,
     onMarkAllRead,
     onClearAll,
+    onSelectNotification
 }) => {
     const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -159,7 +161,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                         </p>
                                     </motion.div>
                                 ) : (
-                                    <div className="space-y-1 px-3">
+                                    <div className="space-y-1.5 px-3">
                                         {notifications.map((n, idx) => {
                                             const severity = inferSeverity(n);
                                             const styles = getSeverityStyles(severity);
@@ -180,10 +182,11 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                                         stiffness: 150,
                                                         delay: idx < 10 ? idx * 0.05 : 0 
                                                     }}
-                                                    className={`relative group rounded-2xl border transition-all duration-300 overflow-hidden ${
+                                                    onClick={() => onSelectNotification?.(n)}
+                                                    className={`relative group rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] hover:shadow-md ${
                                                         !n.read 
-                                                        ? 'bg-blue-50/40 border-blue-200/50 shadow-sm' 
-                                                        : 'bg-transparent border-transparent hover:bg-white/40 hover:border-slate-200/50'
+                                                        ? 'bg-blue-50/60 border-blue-200 shadow-sm hover:bg-blue-50/90' 
+                                                        : 'bg-white/40 border-slate-200/50 hover:bg-white hover:border-blue-200'
                                                     } ${severity === 'critical' && !n.read ? 'ring-1 ring-rose-400/30' : ''}`}
                                                 >
                                                     <div className="p-4 flex gap-4">
@@ -196,23 +199,28 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                                         
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-start justify-between gap-2">
-                                                                <p className={`text-sm font-black leading-tight mb-1 truncate ${n.read ? 'text-slate-500' : 'text-slate-900'}`}>
+                                                                <p className={`text-sm font-black leading-tight mb-1 truncate ${n.read ? 'text-slate-600' : 'text-slate-900'}`}>
                                                                     {n.title}
                                                                 </p>
-                                                                {!n.read && (
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            onMarkRead(n.id);
-                                                                        }}
-                                                                        className="p-1.5 rounded-lg bg-white shadow-sm border border-slate-200 text-blue-500 hover:bg-blue-500 hover:text-white transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100"
-                                                                        title="Mark as read"
-                                                                    >
-                                                                        <Check size={14} strokeWidth={3} />
-                                                                    </button>
-                                                                )}
+                                                                <div className="flex items-center gap-1">
+                                                                    {!n.read && (
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                onMarkRead(n.id);
+                                                                            }}
+                                                                            className="p-1.5 rounded-lg bg-white shadow-sm border border-slate-200 text-blue-500 hover:bg-blue-500 hover:text-white transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100"
+                                                                            title="Mark as read"
+                                                                        >
+                                                                            <Check size={14} strokeWidth={3} />
+                                                                        </button>
+                                                                    )}
+                                                                    <div className="text-slate-400 group-hover:text-blue-600 transition-colors pl-0.5">
+                                                                        <ChevronRight size={16} />
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                            <p className={`text-xs leading-relaxed ${n.read ? 'text-slate-400' : 'text-slate-600'}`}>
+                                                            <p className={`text-xs leading-relaxed line-clamp-2 ${n.read ? 'text-slate-400' : 'text-slate-600'}`}>
                                                                 {n.content}
                                                             </p>
                                                             <div className="flex items-center gap-4 mt-3">
@@ -225,6 +233,9 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                                                         {formatTime(n.timestamp)}
                                                                     </span>
                                                                 </div>
+                                                                <span className="text-[9px] font-bold text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider ml-auto">
+                                                                    Inspect
+                                                                </span>
                                                             </div>
                                                         </div>
                                                     </div>

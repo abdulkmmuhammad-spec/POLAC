@@ -78,6 +78,29 @@ export interface FullParadeRecord extends ParadeRecordMetadata {
 
 export type ParadeRecord = FullParadeRecord; // Temporary alias for backward compatibility for other components that might still reference it
 
+export interface NotificationMetadata {
+  recordId?: string | number;
+  courseNumber?: number;
+  courseName?: string;
+  paradeType?: ParadeType | string;
+  date?: string;
+  cadetName?: string;
+  cadetId?: string;
+  squad?: string;
+  route?: string;
+  counts?: {
+    present?: number;
+    absent?: number;
+    sick?: number;
+    detention?: number;
+    pass?: number;
+    suspension?: number;
+    yetToReport?: number;
+    grandTotal?: number;
+  };
+  [key: string]: any;
+}
+
 export interface Notification {
   id: string;
   type: 'profile_update' | 'parade_submission' | 'login' | 'logout' | 'cadet_added' | 'cadet_removed' | 'settings_change' | string;
@@ -89,6 +112,7 @@ export interface Notification {
   /** @deprecated Use courseNumber instead. */
   yearGroup: number;
   courseNumber?: number;
+  metadata?: NotificationMetadata;
   archivedAt?: string; // For Lapse 2: Audit Immutability
 }
 
