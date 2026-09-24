@@ -81,15 +81,10 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
         // Smart Routing: If attendance is perfect (no absentees, sick, etc.), route to tactical summary
         let nonPresentTotal = 0;
         if (counts) {
-            nonPresentTotal = Number(counts.absent || 0) + 
-                              Number(counts.sick || 0) + 
-                              Number(counts.detention || 0) + 
-                              Number(counts.pass || 0) + 
-                              Number(counts.suspension || 0) + 
-                              Number(counts.yetToReport || 0);
+            nonPresentTotal = (counts.absent || 0) + (counts.sick || 0) + (counts.detention || 0) + (counts.pass || 0) + (counts.suspension || 0) + (counts.yetToReport || 0);
         }
         
-        const isPerfectAttendance = !!counts && nonPresentTotal === 0;
+        const isPerfectAttendance = counts && nonPresentTotal === 0;
 
         return {
             category: 'parade',
@@ -101,7 +96,32 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
         };
     }
 
-    // 2. Cadet Registry (Added, Modified, Status Override)
+    // 2. Document Previews (MUST BE BEFORE CADET REGISTRY TO PREVENT INTERCEPTION)
+    if (title.includes('ledger printed') || title.includes('audit ledger') || title.includes('report produced')) {
+        return {
+            category: 'general',
+            route: '/commandant/audit',
+            courseNumber,
+            actionLabel: 'Preview Audit Ledger'
+        };
+    }
+    
+    if (title.includes('dossier generated') || title.includes('performance dossier') || title.includes('official dossier')) {
+        let cadetName = n.metadata?.cadetName;
+        if (!cadetName && content.includes('cadet ')) {
+            const match = content.match(/cadet\s+([^()]+)/i);
+            if (match) cadetName = match[1].trim();
+        }
+        return {
+            category: 'cadet',
+            route: '/commandant/cadet_registry',
+            courseNumber,
+            cadetName: cadetName,
+            actionLabel: 'Preview Performance Dossier'
+        };
+    }
+
+    // 3. Cadet Registry (Added, Modified, Status Override)
     if (type.includes('cadet') || title.includes('cadet') || content.includes('cadet') || title.includes('status override')) {
         // Try extracting cadet name if present in metadata or pattern
         let cadetName = n.metadata?.cadetName;
@@ -111,26 +131,6 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
             courseNumber,
             cadetName,
             actionLabel: 'View in Cadet Registry'
-        };
-    }
-
-    // 2.5 Document Previews
-    if (title.includes('ledger printed') || title.includes('audit ledger')) {
-        return {
-            category: 'general',
-            route: '/commandant/audit', // Route to the audit page where it can be seen
-            courseNumber,
-            actionLabel: 'Preview Audit Ledger'
-        };
-    }
-    
-    if (title.includes('dossier generated') || title.includes('performance dossier')) {
-        return {
-            category: 'cadet',
-            route: '/commandant/cadet_registry',
-            courseNumber,
-            cadetName: n.metadata?.cadetName,
-            actionLabel: 'Preview Performance Dossier'
         };
     }
 
