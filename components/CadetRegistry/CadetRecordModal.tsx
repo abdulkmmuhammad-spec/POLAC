@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, FileText, TrendingUp, AlertCircle, CheckCircle, Shield, User as UserIcon, Medal, BadgeAlert, History, Camera, Loader2, Edit3, Save, ShieldAlert } from 'lucide-react';
+import { X, FileText, TrendingUp, AlertCircle, CheckCircle, Shield, User as UserIcon, Medal, BadgeAlert, History, Camera, Loader2, Edit3, Save, ShieldAlert, Download } from 'lucide-react';
 import { dbService, supabase } from '../../services/dbService';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
