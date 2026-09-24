@@ -50,6 +50,7 @@ export interface NotificationTarget {
     paradeType?: string;
     cadetName?: string;
     actionLabel: string;
+    previewMode?: boolean;
     counts?: {
         present?: number;
         absent?: number;
@@ -112,7 +113,8 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
             category: 'general',
             route: '/commandant/audit',
             courseNumber,
-            actionLabel: 'Preview Audit Ledger'
+            actionLabel: 'Preview Audit Ledger',
+            previewMode: true
         };
     }
     
@@ -127,7 +129,8 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
             route: '/commandant/cadet_registry',
             courseNumber,
             cadetName: cadetName,
-            actionLabel: 'Preview Performance Dossier'
+            actionLabel: 'Preview Performance Dossier',
+            previewMode: true
         };
     }
 

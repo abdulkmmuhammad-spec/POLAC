@@ -46,7 +46,8 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
             courseNumber: target.courseNumber,
             paradeType: target.paradeType,
             searchTerm: target.cadetName,
-            notificationId: notification.id
+            notificationId: notification.id,
+            previewMode: target.previewMode
         });
     };
 

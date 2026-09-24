@@ -65,9 +65,12 @@ export const AttendanceAudit: React.FC = () => {
         fetchActiveCourses();
     }, []);
 
+    const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+    const [initialPreviewMode, setInitialPreviewMode] = useState(false);
+
     // Consume incoming navigation state from Notification Intelligence Deep-Links
     useEffect(() => {
-        const state = location.state as { courseNumber?: number; searchTerm?: string; paradeType?: string } | null;
+        const state = location.state as { courseNumber?: number; searchTerm?: string; paradeType?: string, previewMode?: boolean } | null;
         if (state) {
             if (state.courseNumber) {
                 setAuditCourseFilter(state.courseNumber.toString());
@@ -76,8 +79,29 @@ export const AttendanceAudit: React.FC = () => {
             if (state.searchTerm) {
                 setAuditSearchTerm(state.searchTerm);
             }
+            if (state.previewMode) {
+                setInitialPreviewMode(true);
+            }
+            window.history.replaceState({}, document.title);
         }
     }, [location.state, setAuditCourseFilter, setAuditSearchTerm]);
+
+    // Generate preview once data is loaded
+    useEffect(() => {
+        const generatePreview = async () => {
+            if (initialPreviewMode && !isHistoricalLoading && historicalData.length > 0) {
+                setInitialPreviewMode(false);
+                const url = await reportService.generateAuditReport({
+                    filteredRecords: historicalData,
+                    title: "OFFICIAL AUDIT REPORT",
+                    officerName: "COMMANDANT",
+                    previewOnly: true
+                });
+                setPreviewPdfUrl(url as string);
+            }
+        };
+        generatePreview();
+    }, [initialPreviewMode, isHistoricalLoading, historicalData]);
 
     // Default to Current Week (Monday to Sunday)
     const currentWeekRange = useMemo(() => {
@@ -492,6 +516,31 @@ export const AttendanceAudit: React.FC = () => {
                             'Load Extended Ledger'
                         )}
                     </button>
+                </div>
+            )}
+            {/* Preview Modal */}
+            {previewPdfUrl && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-xl animate-in fade-in duration-300">
+                    <div className="bg-white w-full max-w-6xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+                        <div className="bg-[#0f172a] text-white px-8 py-6 relative overflow-hidden shrink-0 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-lg font-black tracking-tight uppercase">Audit Ledger Preview</h2>
+                                <p className="text-[9px] font-bold text-slate-400 tracking-[0.3em] uppercase opacity-60">Authoritative Administrative View</p>
+                            </div>
+                            <button onClick={() => setPreviewPdfUrl(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
+                                <span className="font-bold text-sm uppercase">Close</span>
+                            </button>
+                        </div>
+                        <div className="flex-1 flex flex-col min-h-0 bg-slate-100">
+                            <iframe src={previewPdfUrl} className="w-full flex-1 min-h-[60vh] border-0" title="PDF Preview" />
+                            <div className="p-4 bg-white border-t flex justify-end gap-3 shrink-0">
+                                <button onClick={() => setPreviewPdfUrl(null)} className="px-6 py-3 rounded-xl text-[11px] font-black uppercase text-slate-600 hover:bg-slate-100 border border-slate-200">Back</button>
+                                <button onClick={() => reportService.generateAuditReport({ filteredRecords, title: "OFFICIAL AUDIT REPORT", officerName: "COMMANDANT" })} className="px-6 py-3 rounded-xl text-[11px] font-black uppercase bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 shadow-sm">
+                                    <Download size={16}/> Download PDF
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

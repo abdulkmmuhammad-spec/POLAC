@@ -15,9 +15,10 @@ interface CadetRecordModalProps {
     cadet: any;
     activeRC: number;
     onClose: () => void;
+    initialPreviewMode?: boolean;
 }
 
-export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activeRC, onClose }) => {
+export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activeRC, onClose, initialPreviewMode }) => {
     const { currentUser } = useAuth();
     const fileInputRef = useRef<HTMLInputElement>(null);
     
@@ -44,6 +45,10 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
     const [editCourse, setEditCourse] = useState(cadet.course_number);
     const [avatarUrl, setAvatarUrl] = useState(cadet.avatar_url);
 
+    // Preview state
+    const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+    const hasTriggeredPreview = useRef(false);
+
     const level = cadet.course_number ? (activeRC - cadet.course_number + 1) : cadet.year_group;
 
     useEffect(() => {
@@ -62,6 +67,14 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
         };
         loadLogo();
     }, []);
+
+    // Generate preview once logo and data are loaded
+    useEffect(() => {
+        if (initialPreviewMode && logoBase64 && !isLoading && !hasTriggeredPreview.current) {
+            hasTriggeredPreview.current = true;
+            exportToPDF(true);
+        }
+    }, [initialPreviewMode, logoBase64, isLoading]);
 
     useEffect(() => {
         setEditName(cadet.name);
@@ -238,8 +251,8 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
         }
     };
 
-    const exportToPDF = () => {
-        const toastId = toast.loading('Synthesizing Official Dossier...');
+    const exportToPDF = (previewOnly = false) => {
+        const toastId = !previewOnly ? toast.loading('Synthesizing Official Dossier...') : undefined;
         try {
             const doc = new jsPDF();
             const status = standing;
@@ -351,27 +364,32 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             doc.text('__________________________', 140, 270);
             doc.text('OFFICE OF THE COMMANDANT', 140, 275);
 
-            // Execute synchronous save to preserve user gesture context
-            doc.save(`${cadetName.replace(/\s+/g, '_')}_AUTHORITATIVE_DOSSIER.pdf`);
-            toast.success('Dossier Synchronized.', { id: toastId });
+            if (previewOnly) {
+                const blobUrl = doc.output('bloburl');
+                setPreviewPdfUrl(blobUrl.toString());
+            } else {
+                doc.save(`${cadetName.replace(/\s+/g, '_')}_AUTHORITATIVE_DOSSIER.pdf`);
+                toast.success('Dossier Synchronized.', { id: toastId });
 
-            // Fire async notification as a background promise without awaiting
-            dbService.addNotification({
-                type: 'system',
-                title: 'Official Dossier Produced',
-                content: `Commandant Dossier generated for Cadet ${cadetName} (Audit ID: ${auditId})`,
-                timestamp: new Date().toISOString(),
-                read: false,
-                officerName: 'COMMANDANT',
-                yearGroup: 5,
-                courseNumber: cadet.course_number || activeRC
-            }).catch(notifyErr => {
-                console.warn('Failed to add notification for dossier generation', notifyErr);
-            });
+                dbService.addNotification({
+                    type: 'system',
+                    title: 'Official Dossier Produced',
+                    content: `Commandant Dossier generated for Cadet ${cadetName} (Audit ID: ${auditId})`,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    officerName: 'COMMANDANT',
+                    yearGroup: 5,
+                    courseNumber: cadet.course_number || activeRC
+                }).catch(notifyErr => {
+                    console.warn('Failed to add notification for dossier generation', notifyErr);
+                });
+            }
             
         } catch (err: any) {
             console.error('PDF Generation Error:', err);
-            toast.error(`Synthesis Failed: ${err.message || 'Check console'}`, { id: toastId });
+            if (!previewOnly) {
+                toast.error(`Synthesis Failed: ${err.message || 'Check console'}`, { id: toastId });
+            }
         }
     };
 
@@ -397,6 +415,16 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                     </div>
                 </div>
 
+                {previewPdfUrl ? (
+                    <div className="flex-1 flex flex-col min-h-0 bg-slate-100">
+                        <iframe src={previewPdfUrl} className="w-full flex-1 min-h-[60vh] border-0" title="PDF Preview" />
+                        <div className="p-4 bg-white border-t flex justify-end gap-3 shrink-0">
+                            <button onClick={() => setPreviewPdfUrl(null)} className="px-6 py-3 rounded-xl text-[11px] font-black uppercase text-slate-600 hover:bg-slate-100 border border-slate-200">Back to Profile</button>
+                            <button onClick={() => exportToPDF(false)} className="px-6 py-3 rounded-xl text-[11px] font-black uppercase bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 shadow-sm"><Download size={16}/> Download Authoritative Copy</button>
+                        </div>
+                    </div>
+                ) : (
+                    <>
                 {cadet.status === 'DISMISSED' && (
                     <div className="bg-rose-900/10 border-b border-rose-900/20 px-8 py-3 flex items-center justify-center gap-3 backdrop-blur-md shrink-0">
                         <BadgeAlert size={16} className="text-rose-600" />
@@ -625,6 +653,8 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                         </div>
                     </div>
                 </div>
+                </>
+                )}
 
                 {/* Overlays for Edit Modes */}
                 <AnimatePresence>

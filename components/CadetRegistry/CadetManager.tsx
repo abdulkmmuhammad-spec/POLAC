@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Plus, Trash2, Users, Search, Download, Upload, FileText } from 'lucide-react';
 import { dbService } from '../../services/dbService';
 import { useParade } from '../../context/ParadeContext';
@@ -10,6 +11,7 @@ import { CadetRecordModal } from './CadetRecordModal';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
 
 export const CadetManager: React.FC = () => {
+    const location = useLocation();
     const { activeRC } = useParade();
     const [cadets, setCadets] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -60,6 +62,30 @@ export const CadetManager: React.FC = () => {
         }, 500);
         return () => clearTimeout(timer);
     }, [searchTerm]);
+
+    // Handle incoming routing state (e.g., from notifications)
+    const [initialPreviewMode, setInitialPreviewMode] = useState(false);
+    
+    useEffect(() => {
+        const state = location.state as any;
+        if (state?.searchTerm) {
+            setSearchTerm(state.searchTerm);
+            if (state.previewMode) {
+                setInitialPreviewMode(true);
+            }
+            // Clear router state to prevent re-triggering
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
+
+    // Auto-select cadet for preview
+    useEffect(() => {
+        if (initialPreviewMode && !isLoading && cadets.length > 0) {
+            // Find best match or first result
+            const match = cadets.find(c => c.name.toLowerCase().includes(searchTerm.toLowerCase())) || cadets[0];
+            setSelectedCadet(match);
+        }
+    }, [cadets, isLoading, initialPreviewMode, searchTerm]);
 
     // Re-fetch when debounced search or filter changes
     useEffect(() => {
@@ -683,7 +709,11 @@ export const CadetManager: React.FC = () => {
                 <CadetRecordModal
                     cadet={selectedCadet}
                     activeRC={activeRC}
-                    onClose={() => setSelectedCadet(null)}
+                    onClose={() => {
+                        setSelectedCadet(null);
+                        setInitialPreviewMode(false);
+                    }}
+                    initialPreviewMode={initialPreviewMode}
                 />
             )}
 

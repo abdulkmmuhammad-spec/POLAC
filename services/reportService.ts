@@ -58,10 +58,11 @@ export const reportService = {
     generateAuditReport: async (data: {
         filteredRecords: any[],
         title: string,
-        officerName: string
+        officerName: string,
+        previewOnly?: boolean
     }) => {
         const doc = new jsPDF() as any;
-        const { filteredRecords, title, officerName } = data;
+        const { filteredRecords, title, officerName, previewOnly } = data;
 
         const generateAuditId = () => {
             try {
@@ -241,6 +242,10 @@ export const reportService = {
         // Footer
         doc.setFontSize(9);
         doc.text(`ATTENDANCE AUDIT LOG • GENERATED: ${new Date().toLocaleString()} • SECURE_COPY`, 105, 282, { align: 'center' });
+
+        if (previewOnly) {
+            return doc.output('bloburl').toString();
+        }
 
         // Execute synchronous save to preserve user gesture context
         doc.save(`AUDIT_LEDGER_${new Date().toISOString().split('T')[0]}.pdf`);
