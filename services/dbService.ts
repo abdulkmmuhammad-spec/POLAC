@@ -536,7 +536,7 @@ export const dbService = {
     try {
       let query = supabase
         .from('notifications')
-        .select('id, type, title, content, timestamp, read, officer_name, year_group, course_number, archived_at, metadata')
+        .select('id, type, title, content, timestamp, read, officer_name, year_group, course_number, archived_at')
         .is('archived_at', null) // Only fetch non-archived items by default
         .order('timestamp', { ascending: false });
 
@@ -559,8 +559,7 @@ export const dbService = {
           officerName: n.officer_name,
           yearGroup: n.year_group,
           courseNumber: n.course_number,
-          archivedAt: n.archived_at,
-          metadata: n.metadata
+          archivedAt: n.archived_at
         })),
         error: null
       };

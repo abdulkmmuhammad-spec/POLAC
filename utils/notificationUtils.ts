@@ -70,21 +70,31 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
 
     // 1. Parade Submissions & State Audit
     if (type.includes('parade') || title.includes('parade') || content.includes('parade')) {
-        let paradeType: string | undefined = n.metadata?.paradeType;
-        if (!paradeType) {
-            if (content.includes('muster') || title.includes('muster')) paradeType = 'muster';
-            else if (content.includes('tattoo') || title.includes('tattoo')) paradeType = 'tattoo';
-            else if (content.includes('special') || title.includes('special')) paradeType = 'special';
-        }
+        let paradeType: string | undefined = undefined;
+        if (content.includes('muster') || title.includes('muster')) paradeType = 'muster';
+        else if (content.includes('tattoo') || title.includes('tattoo')) paradeType = 'tattoo';
+        else if (content.includes('special') || title.includes('special')) paradeType = 'special';
 
-        const counts = n.metadata?.counts;
-        // Smart Routing: If attendance is perfect (no absentees, sick, etc.), route to tactical summary
-        let nonPresentTotal = 0;
-        if (counts) {
-            nonPresentTotal = (counts.absent || 0) + (counts.sick || 0) + (counts.detention || 0) + (counts.pass || 0) + (counts.suspension || 0) + (counts.yetToReport || 0);
-        }
+        // Extract counts from content string since DB metadata is missing
+        // e.g. "Officer xyz submitted TATTOO parade state (Present: 140, Absent: 0, Sick: 0)"
+        let parsedCounts = undefined;
+        const presentMatch = content.match(/present:\s*(\d+)/i);
+        const absentMatch = content.match(/absent:\s*(\d+)/i);
+        const sickMatch = content.match(/sick:\s*(\d+)/i);
         
-        const isPerfectAttendance = counts && nonPresentTotal === 0;
+        let isPerfectAttendance = false;
+
+        if (presentMatch || absentMatch || sickMatch) {
+            const absent = absentMatch ? parseInt(absentMatch[1], 10) : 0;
+            const sick = sickMatch ? parseInt(sickMatch[1], 10) : 0;
+            
+            parsedCounts = {
+                present: presentMatch ? parseInt(presentMatch[1], 10) : 0,
+                absent,
+                sick
+            };
+            isPerfectAttendance = (absent === 0 && sick === 0);
+        }
 
         return {
             category: 'parade',
@@ -92,7 +102,7 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
             courseNumber,
             paradeType,
             actionLabel: isPerfectAttendance ? 'View in Tactical Summary' : 'Inspect in Attendance Audit',
-            counts: counts
+            counts: parsedCounts
         };
     }
 
