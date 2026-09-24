@@ -218,44 +218,44 @@ export const DashboardOverview: React.FC = () => {
                                 <div key={idx} className="p-4 space-y-4">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
-                                            <span className="bg-blue-900 text-white text-[10px] font-black px-2 py-0.5 rounded-sm uppercase tracking-tighter font-mono">
+                                            <span className="bg-blue-900 text-white text-xs font-black px-2 py-0.5 rounded-sm uppercase tracking-tighter font-mono">
                                                 {rcLabel}
                                             </span>
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">YEAR {yearLabel}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">YEAR {yearLabel}</span>
                                         </div>
                                         <div className="text-right">
-                                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Strength</span>
-                                            <span className="text-sm font-black text-slate-900 font-mono tracking-tighter">{item.total}</span>
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Strength</span>
+                                            <span className="text-base font-black text-slate-900 font-mono tracking-tighter">{item.total}</span>
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Present</span>
-                                            <span className="text-xs font-black text-emerald-600 font-mono shrink-0">{item.present}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Present</span>
+                                            <span className="text-sm font-black text-emerald-600 font-mono shrink-0">{item.present}</span>
                                         </div>
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Absent</span>
-                                            <span className="text-xs font-black text-rose-600 font-mono shrink-0">{item.absent}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Absent</span>
+                                            <span className="text-sm font-black text-rose-600 font-mono shrink-0">{item.absent}</span>
                                         </div>
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Sick Bay</span>
-                                            <span className="text-xs font-black text-amber-600 font-mono shrink-0">{item.sick}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Sick Bay</span>
+                                            <span className="text-sm font-black text-amber-600 font-mono shrink-0">{item.sick}</span>
                                         </div>
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Detention</span>
-                                            <span className="text-xs font-black text-indigo-600 font-mono shrink-0">{item.detention}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Detention</span>
+                                            <span className="text-sm font-black text-indigo-600 font-mono shrink-0">{item.detention}</span>
                                         </div>
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">On Permission</span>
-                                            <span className="text-xs font-black text-cyan-600 font-mono shrink-0">{item.pass}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">On Permission</span>
+                                            <span className="text-sm font-black text-cyan-600 font-mono shrink-0">{item.pass}</span>
                                         </div>
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Suspension</span>
-                                            <span className="text-xs font-black text-slate-600 font-mono shrink-0">{item.suspension}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Suspension</span>
+                                            <span className="text-sm font-black text-slate-600 font-mono shrink-0">{item.suspension}</span>
                                         </div>
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between col-span-2 min-w-0">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight truncate pr-1">Yet to Report</span>
-                                            <span className="text-xs font-black text-orange-600 font-mono shrink-0">{item.yet_to_report}</span>
+                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Yet to Report</span>
+                                            <span className="text-sm font-black text-orange-600 font-mono shrink-0">{item.yet_to_report}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -269,23 +269,23 @@ export const DashboardOverview: React.FC = () => {
                                             <Calendar size={24} />
                                         </div>
                                         <div className="space-y-1">
-                                            <h5 className="font-black text-blue-950 uppercase tracking-tight text-sm">Awaiting Submissions</h5>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
+                                            <h5 className="font-black text-blue-950 uppercase tracking-tight text-base">Awaiting Submissions</h5>
+                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
                                                 No returns for {selectedParadeType} formation today.
                                             </p>
                                         </div>
                                         <button 
                                             onClick={() => setShowYesterday(true)}
-                                            className="mt-2 w-full flex justify-center items-center gap-2 px-5 py-3 bg-blue-900 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl shadow-lg active:scale-95 transition-transform"
+                                            className="mt-2 w-full flex justify-center items-center gap-2 px-5 py-3 bg-blue-900 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-lg active:scale-95 transition-transform"
                                         >
-                                            <History size={14} />
+                                            <History size={16} />
                                             View Archive
                                         </button>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center gap-2 opacity-60 pt-4">
-                                        <AlertCircle size={20} className="text-slate-400" />
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">No Historical Data</p>
+                                        <AlertCircle size={24} className="text-slate-400" />
+                                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest italic">No Historical Data</p>
                                     </div>
                                 )}
                             </div>
@@ -299,7 +299,7 @@ export const DashboardOverview: React.FC = () => {
                     title="SYSTEM ANALYTIC TRENDS"
                     data={chartData}
                 />
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                <div className="hidden lg:block bg-white p-6 rounded-lg shadow-sm border border-slate-200">
                     <div className="flex items-center justify-between mb-8">
                         <div>
                             <p className="text-[9px] font-black text-blue-900 uppercase tracking-[0.2em] mb-1">Queue Traffic</p>

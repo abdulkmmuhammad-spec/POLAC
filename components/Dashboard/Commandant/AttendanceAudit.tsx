@@ -396,39 +396,59 @@ export const AttendanceAudit: React.FC = () => {
 
                     {/* Mobile View - Tactical Event Cards */}
                     <div className="md:hidden space-y-4 p-4 bg-slate-50/50">
-                        {Object.entries(groupedRecords).flatMap(([rcStr, eventsMap]) => 
-                            Object.entries(eventsMap).map(([eventId, items]) => {
+                        {Object.entries(groupedRecords)
+                            .sort(([rcA], [rcB]) => parseInt(rcB) - parseInt(rcA))
+                            .flatMap(([rcStr, eventsMap]) => 
+                            Object.entries(eventsMap)
+                                .sort(([, itemsA], [, itemsB]) => new Date(itemsB[0].r.date).getTime() - new Date(itemsA[0].r.date).getTime())
+                                .map(([eventId, items]) => {
                                 const firstItem = items[0];
                                 const rc = parseInt(rcStr);
                                 return (
                                     <div key={eventId} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
                                         <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                                             <div>
-                                                <p className="text-[10px] font-black text-blue-900 uppercase tracking-widest mb-1">
+                                                <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">
                                                     {rc === 0 ? 'LEGACY' : formatRC(rc)}
                                                 </p>
                                                 <div className="flex items-center gap-2 text-slate-800">
-                                                    <Calendar size={12} className="text-slate-400" />
-                                                    <span className="text-[11px] font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
+                                                    <Calendar size={14} className="text-slate-400" />
+                                                    <span className="text-xs font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
                                                 </div>
                                             </div>
                                             <div className="text-right">
-                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter italic mb-1">{firstItem.r.paradeType}</p>
-                                                <span className="text-[10px] font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter italic mb-1">{firstItem.r.paradeType}</p>
+                                                <span className="text-[10px] font-black text-slate-900 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
                                                     {items.length} CADETS
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className="p-4">
-                                            <div className="flex flex-wrap gap-2">
+                                        <div className="p-4 bg-slate-50/30">
+                                            <div className="flex flex-col gap-3">
                                                 {items.map((cadet, cIdx) => (
-                                                    <div key={cIdx} className="flex items-center gap-1.5 bg-slate-50/50 px-2 py-1 rounded-lg border border-slate-100">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${
-                                                            cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-500' :
-                                                            cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-500' :
-                                                            'bg-indigo-500'
-                                                        }`} />
-                                                        <span className="text-[9px] font-bold text-slate-700 uppercase tracking-tight">{cadet.name}</span>
+                                                    <div key={cIdx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm transition-all hover:border-blue-200">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                                                                cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' :
+                                                                cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' :
+                                                                'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.4)]'
+                                                            }`} />
+                                                            <div>
+                                                                <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">{cadet.name}</span>
+                                                                {cadet.squad && (
+                                                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mt-0.5">SQUAD {cadet.squad}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="shrink-0">
+                                                            <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded border ${
+                                                                cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+                                                                cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                                                'bg-indigo-50 text-indigo-700 border-indigo-100'
+                                                            }`}>
+                                                                {cadet.status}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
