@@ -13,7 +13,13 @@ export const ParadeForm: React.FC = () => {
 const { currentUser } = useAuth();
     const { isDataLoading, refreshData, getLevelForCourse, activeRC, submissionSettings } = useParade();
 
-    const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
+    const getWATDateStr = () => {
+        const now = new Date();
+        const watOffsetMs = 60 * 60 * 1000;
+        return new Date(now.getTime() + watOffsetMs).toISOString().split('T')[0];
+    };
+
+    const [formDate, setFormDate] = useState(getWATDateStr());
     const [formParadeType, setFormParadeType] = useState<ParadeType>(ParadeType.MUSTER);
     const [counts, setCounts] = useState({
         present: currentUser?.totalCadets || 0,
@@ -98,7 +104,7 @@ const { currentUser } = useAuth();
         // ──── Submission Guards ───────────────────────────────────────────────
 
         // 1. Time Window Enforcement (only for "today")
-        const today = new Date().toISOString().split('T')[0];
+        const today = getWATDateStr();
         if (formDate === today) {
             const currentHour = new Date().getHours();
             const { musterStartHour, musterEndHour, tattooStartHour } = submissionSettings;
