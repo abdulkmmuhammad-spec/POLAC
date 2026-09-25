@@ -33,7 +33,7 @@ const NetworkErrorFallback: React.FC<{ error: any, onRetry: () => void }> = ({ e
 };
 
 export const DashboardOverview: React.FC = () => {
-    const { records, stats, courseSummary, yesterdaySummary, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
+    const { records, stats, courseSummary, yesterdaySummary, activeDate, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
     const [showYesterday, setShowYesterday] = React.useState(false);
 
     // Auto-detect if today's data has arrived and reset yesterday view
@@ -60,6 +60,14 @@ export const DashboardOverview: React.FC = () => {
         { id: ParadeType.TATTOO, label: 'TATTOO', icon: '🌙' },
     ];
 
+    // Format active date safely
+    const formattedActiveDate = React.useMemo(() => {
+        if (!activeDate) return '';
+        const [year, month, day] = activeDate.split('-');
+        const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        return dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }, [activeDate]);
+
     if (isError) {
         return <NetworkErrorFallback error={error} onRetry={refetchRecords} />;
     }
@@ -84,7 +92,7 @@ export const DashboardOverview: React.FC = () => {
                         </div>
                         <div>
                             <p className="text-[10px] font-black text-blue-900 uppercase tracking-[0.2em] mb-0.5">
-                                Tactical Summary • {showYesterday ? 'ARCHIVE DATA' : `Today ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`}
+                                Tactical Summary • {showYesterday ? 'ARCHIVE DATA' : `Today ${formattedActiveDate}`}
                             </p>
                             <h3 className="font-black text-slate-900 uppercase tracking-tight text-sm">
                                 {selectedParadeType} FORMATION STATE {showYesterday && '(YESTERDAY)'}
