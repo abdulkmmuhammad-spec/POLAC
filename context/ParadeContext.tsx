@@ -508,16 +508,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     );
 
     const activeDate = useMemo(() => {
-        const recordsForType = todayRecords.filter(r => r.paradeType === selectedParadeType);
-        if (recordsForType.length > 0) {
-            const dates = recordsForType.map(r => r.date).filter(Boolean);
-            dates.sort((a, b) => b.localeCompare(a));
-            return dates[0];
-        }
         const watOffsetMs = 60 * 60 * 1000;
-        const watDate = new Date(new Date().getTime() + watOffsetMs);
+        const now = new Date();
+        const watDate = new Date(now.getTime() + watOffsetMs);
         return watDate.toISOString().split('T')[0];
-    }, [todayRecords, selectedParadeType]);
+    }, []);
 
     const stats = useMemo<DashboardStats>(() => {
         // Use todayRecords — the complete, non-paginated snapshot of recent activity.
