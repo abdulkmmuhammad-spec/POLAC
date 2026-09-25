@@ -623,7 +623,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 sm:gap-4 max-w-4xl mx-auto">
                         {/* Primary Action: Dominant Full-Width Button on Mobile */}
                         <button
-                            onClick={exportToPDF}
+                            onClick={() => exportToPDF()}
                             className="w-full sm:flex-1 sm:max-w-xs bg-blue-600 sm:bg-slate-900 hover:bg-blue-700 sm:hover:bg-black text-white min-h-[48px] px-5 py-3 rounded-xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] shadow-lg group font-black text-xs uppercase tracking-wider"
                         >
                             <FileText size={18} className="group-hover:translate-y-[-2px] transition-transform shrink-0" />

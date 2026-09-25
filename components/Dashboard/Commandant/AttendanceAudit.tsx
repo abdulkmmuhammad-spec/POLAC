@@ -30,6 +30,7 @@ export const AttendanceAudit: React.FC = () => {
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
     const [isDefaultView, setIsDefaultView] = useState(true);
     const [expandedRCs, setExpandedRCs] = useState<Record<number, boolean>>({});
+    const [expandedEvents, setExpandedEvents] = useState<Record<string, boolean>>({});
     
     // New RPC States
     const [historicalData, setHistoricalData] = useState<any[]>([]);
@@ -38,6 +39,11 @@ export const AttendanceAudit: React.FC = () => {
     // Toggle accordion for an RC
     const toggleRC = (rc: number) => {
         setExpandedRCs(prev => ({ ...prev, [rc]: !prev[rc] }));
+    };
+
+    // Toggle event cadet truncation
+    const toggleEvent = (eventId: string) => {
+        setExpandedEvents(prev => ({ ...prev, [eventId]: !prev[eventId] }));
     };
 
     // Get unique course numbers for the filter dropdown
@@ -373,6 +379,8 @@ export const AttendanceAudit: React.FC = () => {
                                                 .sort(([, itemsA], [, itemsB]) => new Date(itemsB[0].r.date).getTime() - new Date(itemsA[0].r.date).getTime())
                                                 .map(([eventId, items]) => {
                                                     const firstItem = items[0];
+                                                    const isEventExpanded = expandedEvents[eventId] === true;
+                                                    const visibleItems = isEventExpanded ? items : items.slice(0, 8);
                                                     return (
                                                         <tr key={eventId} className="even:bg-slate-50/50 hover:bg-blue-50/30 transition-colors group">
                                                             <td className="px-8 py-6">
@@ -388,8 +396,8 @@ export const AttendanceAudit: React.FC = () => {
                                                                 </span>
                                                             </td>
                                                             <td className="px-6 py-6">
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {items.map((cadet, cIdx) => (
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    {visibleItems.map((cadet, cIdx) => (
                                                                         <div 
                                                                             key={cIdx} 
                                                                             className="group/chip flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-md border border-slate-200 shadow-sm hover:border-blue-900/30 transition-all"
@@ -407,6 +415,22 @@ export const AttendanceAudit: React.FC = () => {
                                                                             </span>
                                                                         </div>
                                                                     ))}
+                                                                    {!isEventExpanded && items.length > 8 && (
+                                                                        <button
+                                                                            onClick={() => toggleEvent(eventId)}
+                                                                            className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all shadow-sm active:scale-95"
+                                                                        >
+                                                                            +{items.length - 8} MORE CADETS
+                                                                        </button>
+                                                                    )}
+                                                                    {isEventExpanded && items.length > 8 && (
+                                                                        <button
+                                                                            onClick={() => toggleEvent(eventId)}
+                                                                            className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all shadow-sm active:scale-95"
+                                                                        >
+                                                                            COLLAPSE LIST
+                                                                        </button>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -428,6 +452,8 @@ export const AttendanceAudit: React.FC = () => {
                                 .map(([eventId, items]) => {
                                 const firstItem = items[0];
                                 const rc = parseInt(rcStr);
+                                const isEventExpanded = expandedEvents[eventId] === true;
+                                const visibleMobileItems = isEventExpanded ? items : items.slice(0, 4);
                                 return (
                                     <div key={eventId} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
                                         <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -449,7 +475,7 @@ export const AttendanceAudit: React.FC = () => {
                                         </div>
                                         <div className="p-4 bg-slate-50/30">
                                             <div className="flex flex-col gap-3">
-                                                {items.map((cadet, cIdx) => (
+                                                {visibleMobileItems.map((cadet, cIdx) => (
                                                     <div key={cIdx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm transition-all hover:border-blue-200">
                                                         <div className="flex items-center gap-3">
                                                             <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
@@ -476,6 +502,14 @@ export const AttendanceAudit: React.FC = () => {
                                                     </div>
                                                 ))}
                                             </div>
+                                            {items.length > 4 && (
+                                                <button
+                                                    onClick={() => toggleEvent(eventId)}
+                                                    className="mt-3 w-full py-2 bg-slate-100 hover:bg-slate-200 text-blue-900 rounded-lg text-[10px] font-black uppercase tracking-widest border border-slate-200 transition-colors flex items-center justify-center gap-1 active:scale-[0.98]"
+                                                >
+                                                    {isEventExpanded ? 'COLLAPSE LIST' : `SHOW ALL ${items.length} CADETS (+${items.length - 4} MORE)`}
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 );
