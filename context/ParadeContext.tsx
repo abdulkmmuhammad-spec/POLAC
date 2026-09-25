@@ -508,11 +508,19 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     );
 
     const activeDate = useMemo(() => {
+        // Default to the latest available submission date.
+        // This prevents the dashboard from showing an empty state just because the clock struck midnight,
+        // and synchronizes the view across all devices regardless of their local system clocks.
+        if (todayRecords && todayRecords.length > 0) {
+            return todayRecords[0].date;
+        }
+        
+        // Fallback to computed WAT date
         const watOffsetMs = 60 * 60 * 1000;
         const now = new Date();
         const watDate = new Date(now.getTime() + watOffsetMs);
         return watDate.toISOString().split('T')[0];
-    }, []);
+    }, [todayRecords]);
 
     const stats = useMemo<DashboardStats>(() => {
         // Use todayRecords — the complete, non-paginated snapshot of recent activity.
