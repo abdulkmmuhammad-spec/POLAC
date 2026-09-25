@@ -33,7 +33,7 @@ const NetworkErrorFallback: React.FC<{ error: any, onRetry: () => void }> = ({ e
 };
 
 export const DashboardOverview: React.FC = () => {
-    const { records, stats, courseSummary, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
+    const { records, stats, courseSummary, yesterdaySummary, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
     const [showYesterday, setShowYesterday] = React.useState(false);
 
     // Auto-detect if today's data has arrived and reset yesterday view
@@ -42,40 +42,6 @@ export const DashboardOverview: React.FC = () => {
             setShowYesterday(false);
         }
     }, [courseSummary.length, showYesterday]);
-
-    // Calculate Yesterday's Summary Fallback
-    const yesterdaySummary = React.useMemo(() => {
-        const now = new Date();
-        const watOffsetMs = 60 * 60 * 1000;
-        const watDate = new Date(now.getTime() + watOffsetMs);
-        watDate.setDate(watDate.getDate() - 1);
-        const yesterdayStr = watDate.toISOString().split('T')[0];
-        
-        const yesterdayRecords = records.filter(r => r.date === yesterdayStr && r.paradeType === selectedParadeType);
-        const courseNumbers = Array.from(
-            new Set(
-                yesterdayRecords
-                    .map(r => r.courseNumber ?? null)
-                    .filter((cn): cn is number => cn !== null)
-            )
-        ).sort((a: any, b: any) => (b as number) - (a as number));
-
-        return courseNumbers.map(cn => {
-            const courseRecords = yesterdayRecords.filter(r => r.courseNumber === cn);
-            return {
-                courseNumber: cn,
-                currentLevel: activeRC - cn + 1, // Simplified level calc matching context logic
-                total: courseRecords.reduce((s, r) => s + r.grandTotal, 0),
-                present: courseRecords.reduce((s, r) => s + r.presentCount, 0),
-                absent: courseRecords.reduce((s, r) => s + r.absentCount, 0),
-                sick: courseRecords.reduce((s, r) => s + r.sickCount, 0),
-                detention: courseRecords.reduce((s, r) => s + r.detentionCount, 0),
-                pass: courseRecords.reduce((s, r) => s + (r.passCount || 0), 0),
-                suspension: courseRecords.reduce((s, r) => s + (r.suspensionCount || 0), 0),
-                yet_to_report: courseRecords.reduce((s, r) => s + (r.yetToReportCount || 0), 0),
-            };
-        });
-    }, [records, activeRC, selectedParadeType]);
 
     const displayData = showYesterday ? yesterdaySummary : courseSummary;
     const isTodayEmpty = courseSummary.length === 0;

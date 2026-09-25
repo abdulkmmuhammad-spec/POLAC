@@ -31,6 +31,8 @@ interface ParadeContextType {
     stats: DashboardStats;
     /** Grouped summary per RC course with computed year levels. */
     courseSummary: CourseSummaryEntry[];
+    /** Grouped summary for yesterday. */
+    yesterdaySummary: CourseSummaryEntry[];
     /** The current highest active RC from app_settings. */
     activeRC: number;
     /** Refresh just the activeRC from the database. */
@@ -184,8 +186,8 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (!currentUser) return;
         try {
             const now = new Date();
-            // A 24-hour rolling window prevents device-specific clock desync from isolating data
-            const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+            // A 7-day rolling window ensures we have enough data for today and yesterday summaries, preventing pagination truncation bugs
+            const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
             const selectFields = `id, officer_id, officer_name, course_name, year_group, course_number,
                date, parade_type, present_count, absent_count, sick_count, detention_count,
@@ -504,12 +506,17 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     );
 
     const stats = useMemo<DashboardStats>(() => {
-        // Use todayRecords — the complete, non-paginated snapshot of today's activity.
-        const todayByType = todayRecords.filter(r => r.paradeType === selectedParadeType);
+        const watOffsetMs = 60 * 60 * 1000;
+        const now = new Date();
+        const watDate = new Date(now.getTime() + watOffsetMs);
+        const todayStr = watDate.toISOString().split('T')[0];
 
-        const activeStrength = currentUser?.role === UserRole.COURSE_OFFICER
-            ? (currentUser.totalCadets || 0)
-            : todayByType.reduce((sum, r) => sum + r.grandTotal, 0);
+        // Use todayRecords — the complete, non-paginated snapshot of recent activity.
+        const todayByType = todayRecords.filter(r => r.date === todayStr && r.paradeType === selectedParadeType);
+
+        const activeStrength = currentUser?.role === UserRole.COMMANDANT
+            ? todayByType.reduce((sum, r) => sum + r.grandTotal, 0)
+            : (currentUser?.totalCadets || 0);
 
         const presentCount = todayByType.reduce((sum, r) => sum + r.presentCount, 0);
 
@@ -522,7 +529,6 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             presentToday: percentage,
             absentThisWeek: records.filter(r => {
                 const d = new Date(r.date);
-                const now = new Date();
                 const start = new Date(now.setDate(now.getDate() - 7));
                 return d >= start;
             }).reduce((sum, r) => sum + r.absentCount, 0),
@@ -535,9 +541,13 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
      * calculates the current year level dynamically using activeRC.
      */
     const courseSummary = useMemo<CourseSummaryEntry[]>(() => {
-        // Use todayRecords — the complete, non-paginated snapshot of today's activity.
-        // FILTER BY SELECTED PARADE TYPE
-        const filtered = todayRecords.filter(r => r.paradeType === selectedParadeType);
+        const watOffsetMs = 60 * 60 * 1000;
+        const now = new Date();
+        const watDate = new Date(now.getTime() + watOffsetMs);
+        const todayStr = watDate.toISOString().split('T')[0];
+
+        // FILTER BY SELECTED PARADE TYPE AND TODAY'S DATE
+        const filtered = todayRecords.filter(r => r.date === todayStr && r.paradeType === selectedParadeType);
 
         // Collect all unique course numbers from records
         const courseNumbers = Array.from(
@@ -547,6 +557,42 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     .filter((cn): cn is number => cn !== null)
             )
         ).sort((a: any, b: any) => (b as number) - (a as number)); // highest RC first (newest cadets)
+
+        return courseNumbers.map(cn => {
+            const courseRecords = filtered.filter(r => r.courseNumber === cn);
+            return {
+                courseNumber: cn,
+                currentLevel: calculateCurrentLevel(cn as number, activeRC),
+                total: courseRecords.reduce((s, r) => s + r.grandTotal, 0),
+                present: courseRecords.reduce((s, r) => s + r.presentCount, 0),
+                absent: courseRecords.reduce((s, r) => s + r.absentCount, 0),
+                sick: courseRecords.reduce((s, r) => s + r.sickCount, 0),
+                detention: courseRecords.reduce((s, r) => s + r.detentionCount, 0),
+                pass: courseRecords.reduce((s, r) => s + (r.passCount || 0), 0),
+                suspension: courseRecords.reduce((s, r) => s + (r.suspensionCount || 0), 0),
+                yet_to_report: courseRecords.reduce((s, r) => s + (r.yetToReportCount || 0), 0),
+            };
+        });
+    }, [todayRecords, activeRC, selectedParadeType]);
+
+    const yesterdaySummary = useMemo<CourseSummaryEntry[]>(() => {
+        const watOffsetMs = 60 * 60 * 1000;
+        const now = new Date();
+        const watDate = new Date(now.getTime() + watOffsetMs);
+        watDate.setDate(watDate.getDate() - 1);
+        const yesterdayStr = watDate.toISOString().split('T')[0];
+
+        // FILTER BY SELECTED PARADE TYPE AND YESTERDAY'S DATE
+        const filtered = todayRecords.filter(r => r.date === yesterdayStr && r.paradeType === selectedParadeType);
+
+        // Collect all unique course numbers from records
+        const courseNumbers = Array.from(
+            new Set(
+                filtered
+                    .map(r => r.courseNumber ?? null)
+                    .filter((cn): cn is number => cn !== null)
+            )
+        ).sort((a: any, b: any) => (b as number) - (a as number));
 
         return courseNumbers.map(cn => {
             const courseRecords = filtered.filter(r => r.courseNumber === cn);
@@ -575,6 +621,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             refreshData,
             stats,
             courseSummary,
+            yesterdaySummary,
             activeRC,
             refreshActiveRC,
             submissionSettings,
