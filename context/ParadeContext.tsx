@@ -531,14 +531,31 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             ? Math.round((presentCount / activeStrength) * 100)
             : 0;
 
+        // Calculate current week boundaries (Monday - Sunday) using local time strings
+        const now = new Date();
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        
+        const monday = new Date(now.getFullYear(), now.getMonth(), diff);
+        const mondayStr = [
+            monday.getFullYear(),
+            String(monday.getMonth() + 1).padStart(2, '0'),
+            String(monday.getDate()).padStart(2, '0')
+        ].join('-');
+
+        const sunday = new Date(now.getFullYear(), now.getMonth(), diff + 6);
+        const sundayStr = [
+            sunday.getFullYear(),
+            String(sunday.getMonth() + 1).padStart(2, '0'),
+            String(sunday.getDate()).padStart(2, '0')
+        ].join('-');
+
         return {
             totalCadets: Math.round(activeStrength),
             presentToday: percentage,
             absentThisWeek: records.filter(r => {
-                const d = new Date(r.date);
-                const start = new Date();
-                start.setDate(start.getDate() - 7);
-                return d >= start;
+                // String comparison works perfectly for YYYY-MM-DD
+                return r.date >= mondayStr && r.date <= sundayStr;
             }).reduce((sum, r) => sum + r.absentCount, 0),
             sickCadets: todayByType.reduce((sum, r) => sum + r.sickCount, 0)
         };

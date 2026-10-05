@@ -187,20 +187,28 @@ export const CommandAnalytics: React.FC = () => {
 
     // Calculate Core Three Intel (v2.1 refined)
     const intel = useMemo(() => {
-        // Enforce Current Week Baseline (Mon-Sun)
+        // Enforce Current Week Baseline (Mon-Sun) using local time strings
         const now = new Date();
         const day = now.getDay();
         const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-        const monday = new Date(now.setDate(diff));
-        monday.setHours(0, 0, 0, 0);
+        
+        const monday = new Date(now.getFullYear(), now.getMonth(), diff);
+        const mondayStr = [
+            monday.getFullYear(),
+            String(monday.getMonth() + 1).padStart(2, '0'),
+            String(monday.getDate()).padStart(2, '0')
+        ].join('-');
 
-        const sunday = new Date(monday);
-        sunday.setDate(monday.getDate() + 6);
-        sunday.setHours(23, 59, 59, 999);
+        const sunday = new Date(now.getFullYear(), now.getMonth(), diff + 6);
+        const sundayStr = [
+            sunday.getFullYear(),
+            String(sunday.getMonth() + 1).padStart(2, '0'),
+            String(sunday.getDate()).padStart(2, '0')
+        ].join('-');
 
         const currentWeekRecordsAll = records.filter(r => {
-            const date = new Date(r.date);
-            return date >= monday && date <= sunday;
+            // String comparison works perfectly for YYYY-MM-DD
+            return r.date >= mondayStr && r.date <= sundayStr;
         });
 
         // 1. Academy Snapshot (Weekly Aggregated - ALL 14 Parade Cycles)
