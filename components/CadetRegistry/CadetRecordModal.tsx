@@ -471,9 +471,14 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                                 <div>
                                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Cadet Identity</p>
                                     <h3 className="text-xl font-black text-slate-800 leading-tight uppercase">{cadet.name}</h3>
-                                    <div className="flex items-center gap-2 mt-2">
+                                    <div className="flex flex-wrap items-center gap-2 mt-2">
                                         <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-black rounded border border-blue-100 uppercase">RC {cadet.course_number}</span>
                                         <span className="px-2 py-0.5 bg-slate-50 text-slate-600 text-[10px] font-black rounded border border-slate-100 uppercase">{cadet.squad}</span>
+                                        {cadet.npa_number && (
+                                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 text-[10px] font-mono font-bold rounded border border-emerald-200">
+                                                {cadet.npa_number}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
 

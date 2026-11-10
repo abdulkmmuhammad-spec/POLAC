@@ -102,6 +102,58 @@ export const AuditPayloadRenderer: React.FC<AuditPayloadRendererProps> = ({ log 
                         </p>
                     );
                 }
+                case 'COURSE_BULK_PURGED': {
+                    const courses: number[] = Array.isArray(payload.course_numbers) ? payload.course_numbers : [];
+                    const purgedCount = payload.purged_cadet_count ?? 0;
+                    const purgeMode = payload.purge_mode || 'SOFT_DELETE';
+                    const clientIp = payload.client_ip || 'LOCAL_CLIENT';
+                    const snapshotId = payload.snapshot_id;
+                    return (
+                        <div className="space-y-2">
+                            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                                Bulk Course Purge executed by {renderName(actorName || 'Commandant')} across{' '}
+                                {courses.map(rc => <React.Fragment key={rc}>{renderRC(rc)} </React.Fragment>)}
+                                purging <span className="font-black text-rose-700">{Number(purgedCount).toLocaleString()} cadet records</span>.
+                            </p>
+                            <div className="flex flex-wrap gap-2 text-[11px] font-bold">
+                                <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200">
+                                    Mode: {purgeMode}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-mono">
+                                    IP: {clientIp}
+                                </span>
+                                {snapshotId && (
+                                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 font-mono">
+                                        Snapshot: {String(snapshotId).slice(0, 8)}...
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    );
+                }
+                case 'COURSE_PURGE_RESTORED': {
+                    const courses: number[] = Array.isArray(payload.course_numbers) ? payload.course_numbers : [];
+                    const restoredCount = payload.restored_cadet_count ?? 0;
+                    const snapshotId = payload.snapshot_id;
+                    return (
+                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                            Emergency Snapshot Recovery executed by {renderName(actorName || 'Commandant')}: restored{' '}
+                            <span className="font-black text-emerald-700">{Number(restoredCount).toLocaleString()} cadet records</span> back into{' '}
+                            {courses.map(rc => <React.Fragment key={rc}>{renderRC(rc)} </React.Fragment>)}
+                            {snapshotId ? `(Snapshot ${String(snapshotId).slice(0, 8)}...)` : ''}.
+                        </p>
+                    );
+                }
+                case 'BULK_CADET_IMPORT': {
+                    const insertedCount = payload.inserted_count ?? 0;
+                    const schemaMode = payload.schema || 'DUAL_FORMAT';
+                    return (
+                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                            Bulk Cadet Roster Ingestion executed by {renderName(actorName || 'Commandant')}: synchronized{' '}
+                            <span className="font-black text-emerald-700">{Number(insertedCount).toLocaleString()} cadets</span> via <span className="font-mono font-bold text-blue-800">{schemaMode}</span>.
+                        </p>
+                    );
+                }
                 case 'SETTINGS_CHANGED': {
                     const diffs = payload.diff || [];
                     if (diffs.length === 0) {

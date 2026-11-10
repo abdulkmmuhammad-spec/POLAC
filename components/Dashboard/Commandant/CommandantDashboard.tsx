@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, Radio, ChevronRight, Shield } from 'lucide-react';
+import { Settings, Radio, ChevronRight, Shield, ShieldAlert } from 'lucide-react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 
 import { Sidebar } from '../../Layout/Sidebar';
@@ -8,6 +8,7 @@ import { DashboardOverview } from '../DashboardOverview';
 import { AttendanceAudit } from './AttendanceAudit';
 import { DefaulterAnalysis } from './DefaulterAnalysis';
 import { CadetManager } from '../../CadetRegistry/CadetManager';
+import { BulkCoursePurgeModal } from '../../CadetRegistry/BulkCoursePurgeModal';
 import { CommandAnalytics } from './CommandAnalytics';
 import { OfficerManager } from './OfficerManager';
 import { AuditLogView } from '../../Settings/AuditLogView';
@@ -227,8 +228,10 @@ const { currentUser } = useAuth();
 };
 
 const SettingsContainer: React.FC = () => {
+    const { activeRC, refreshData } = useParade();
     const [activeTab, setActiveTab] = useState<'general' | 'audit' | 'credentials' | 'alerts' | 'lifecycle'>('general');
     const [incomingRC, setIncomingRC] = useState<number | null>(null);
+    const [isBulkPurgeOpen, setIsBulkPurgeOpen] = useState(false);
 
     const tabs = [
         { id: 'general', label: 'Administrative Parameters' },
@@ -294,11 +297,47 @@ const SettingsContainer: React.FC = () => {
                     <HistoricalAlertsView />
                 ) : activeTab === 'lifecycle' ? (
                     <div className="max-w-2xl space-y-8">
+                        {/* Bulk Course Purge & Re-Enrollment Console Card */}
+                        <div className="bg-white rounded-3xl border border-rose-200 shadow-sm overflow-hidden">
+                            <div className="p-5 bg-gradient-to-r from-slate-900 to-rose-950 text-white flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                                        <ShieldAlert size={20} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-black uppercase tracking-wider">
+                                            Bulk Course Purge & Re-Enrollment Console
+                                        </h3>
+                                        <p className="text-[11px] text-slate-300 mt-0.5">
+                                            Purge one or multiple Regular Courses with mandatory CSV backup, soft-delete snapshot recovery & instant dual-format seeding
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsBulkPurgeOpen(true)}
+                                    className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shrink-0 shadow-md transition-all"
+                                >
+                                    Launch Console
+                                </button>
+                            </div>
+                        </div>
+
                         <HandoverWizard prefilledTargetRC={incomingRC} onClearPrefill={() => setIncomingRC(null)} />
                         <GraduationPanel onCommissionIncoming={(newRC) => {
                             setIncomingRC(newRC);
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                         }} />
+
+                        <BulkCoursePurgeModal
+                            isOpen={isBulkPurgeOpen}
+                            onClose={() => setIsBulkPurgeOpen(false)}
+                            activeRC={activeRC}
+                            onPurgeAndSeedComplete={() => {
+                                refreshData();
+                                window.dispatchEvent(new Event('cadet-registry-updated'));
+                            }}
+                        />
                     </div>
                 ) : (
                     <AuditLogView />

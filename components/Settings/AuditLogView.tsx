@@ -71,8 +71,11 @@ export const AuditLogView: React.FC = () => {
     const getActionColor = (type: string) => {
         switch (type) {
             case 'CADET_MODIFIED': return 'bg-amber-100 text-amber-700 border-amber-200';
-            case 'CADET_ADDED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'CADET_REMOVED': return 'bg-rose-100 text-rose-700 border-rose-200';
+            case 'CADET_ADDED':
+            case 'BULK_CADET_IMPORT':
+            case 'COURSE_PURGE_RESTORED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'CADET_REMOVED':
+            case 'COURSE_BULK_PURGED': return 'bg-rose-100 text-rose-700 border-rose-200';
             case 'SETTINGS_CHANGED': return 'bg-blue-100 text-blue-700 border-blue-200';
             case 'OFFICER_INVITED': return 'bg-purple-100 text-purple-700 border-purple-200';
             default: return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -82,8 +85,11 @@ export const AuditLogView: React.FC = () => {
     const getActionBorderColor = (type: string) => {
         switch (type) {
             case 'CADET_MODIFIED': return 'border-amber-500';
-            case 'CADET_ADDED': return 'border-emerald-500';
-            case 'CADET_REMOVED': return 'border-rose-500';
+            case 'CADET_ADDED':
+            case 'BULK_CADET_IMPORT':
+            case 'COURSE_PURGE_RESTORED': return 'border-emerald-500';
+            case 'CADET_REMOVED':
+            case 'COURSE_BULK_PURGED': return 'border-rose-500';
             case 'SETTINGS_CHANGED': return 'border-blue-600';
             case 'OFFICER_INVITED': return 'border-purple-500';
             default: return 'border-slate-500';
@@ -144,6 +150,9 @@ export const AuditLogView: React.FC = () => {
                         onChange={(e) => setFilters({ ...filters, actionType: e.target.value })}
                     >
                         <option value="">All Actions</option>
+                        <option value="COURSE_BULK_PURGED">Course Bulk Purged</option>
+                        <option value="COURSE_PURGE_RESTORED">Course Snapshot Restored</option>
+                        <option value="BULK_CADET_IMPORT">Bulk Cadet Import</option>
                         <option value="CADET_MODIFIED">Cadet Modified</option>
                         <option value="CADET_ADDED">Cadet Added</option>
                         <option value="CADET_REMOVED">Cadet Removed</option>

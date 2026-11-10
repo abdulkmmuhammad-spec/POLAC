@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, RefreshCcw } from 'lucide-react';
+import { Plus, Trash2, RefreshCcw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
 import { ParadeType, CadetStatus, CadetDetail } from '../../types';
@@ -36,12 +36,21 @@ const { currentUser } = useAuth();
     const [showPreview, setShowPreview] = useState(false);
     const [previewData, setPreviewData] = useState<any>(null);
 
+    // Ledger Local State
+    const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'ABSENT' | 'SICK' | string>('ALL');
+    const [ledgerSearch, setLedgerSearch] = useState<string>('');
+    const [currentPage, setCurrentPage] = useState<number>(1);
+    const ITEMS_PER_PAGE = 10;
+
     // Determine the officer's course number — fall back to activeRC if needed
     const officerCourseNumber = currentUser?.courseNumber
         ?? (currentUser?.yearGroup ? (activeRC - currentUser.yearGroup + 1) : activeRC);
 
-    const handleAddCadet = () => {
-        if (!tempCadet.name || !tempCadet.squad) return;
+    const handleQuickAdd = (status: CadetStatus) => {
+        if (!tempCadet.name || !tempCadet.squad) {
+            toast.error("Please select or enter a cadet first.");
+            return;
+        }
 
         // Prevent duplicate names in the non-present list
         const isDuplicate = cadetDetailsList.some(
@@ -53,8 +62,10 @@ const { currentUser } = useAuth();
             return;
         }
 
-        setCadetDetailsList([...cadetDetailsList, tempCadet]);
+        // LIFO Insertion: Prepend new cadet so it appears at top of Page 1
+        setCadetDetailsList([{ ...tempCadet, status }, ...cadetDetailsList]);
         setTempCadet({ name: '', squad: '', status: CadetStatus.ABSENT });
+        setCurrentPage(1);
     };
 
     const handleSubmission = () => {
@@ -170,6 +181,30 @@ const { currentUser } = useAuth();
         ? `${formatRC(officerCourseNumber)} — YEAR ${getLevelForCourse(officerCourseNumber)}`
         : '';
 
+    // Filtered & Paginated Ledger list
+    const filteredCadets = cadetDetailsList.filter(cadet => {
+        const matchesFilter = ledgerFilter === 'ALL' || cadet.status === ledgerFilter;
+        const matchesSearch = !ledgerSearch.trim() ||
+            cadet.name.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
+            cadet.squad.toLowerCase().includes(ledgerSearch.toLowerCase());
+        return matchesFilter && matchesSearch;
+    });
+
+    const totalPages = Math.ceil(filteredCadets.length / ITEMS_PER_PAGE) || 1;
+    const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+    const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedCadets = filteredCadets.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+    const filterTabs = [
+        { id: 'ALL', label: 'All', count: cadetDetailsList.length },
+        { id: CadetStatus.ABSENT, label: 'Absent', count: cadetDetailsList.filter(c => c.status === CadetStatus.ABSENT).length },
+        { id: CadetStatus.SICK, label: 'Sick', count: cadetDetailsList.filter(c => c.status === CadetStatus.SICK).length },
+        { id: CadetStatus.DETENTION, label: 'Detent', count: cadetDetailsList.filter(c => c.status === CadetStatus.DETENTION).length },
+        { id: CadetStatus.PASS, label: 'Pass', count: cadetDetailsList.filter(c => c.status === CadetStatus.PASS).length },
+        { id: CadetStatus.SUSPENSION, label: 'Susp', count: cadetDetailsList.filter(c => c.status === CadetStatus.SUSPENSION).length },
+        { id: CadetStatus.YET_TO_REPORT, label: 'YTR', count: cadetDetailsList.filter(c => c.status === CadetStatus.YET_TO_REPORT).length },
+    ];
+
     return (
         <div className="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
             <div className="p-6 md:p-8 bg-blue-900 text-white">
@@ -280,66 +315,133 @@ const { currentUser } = useAuth();
                 </div>
 
                 <div className="pt-6 border-t border-slate-100">
-                    <h4 className="font-bold text-slate-800 mb-4">Nominal Roll (Non-Present Cadets)</h4>
-
-                    {/* CADET PREVIEW CARD */}
-                    {tempCadet.name && (
-                        <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                            <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-inner">
-                                {tempCadet.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex-1">
-                                <p className="text-xs font-bold text-blue-600 uppercase tracking-widest leading-none mb-1">Cadet Preview</p>
-                                <h5 className="font-bold text-slate-900 leading-tight">{tempCadet.name}</h5>
-                                <p className="text-sm text-slate-500">{tempCadet.squad || 'Squad not specified'}</p>
-                            </div>
-                            <div className="text-right">
-                                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${tempCadet.status === CadetStatus.ABSENT ? 'bg-rose-100 text-rose-600' :
-                                    tempCadet.status === CadetStatus.SICK ? 'bg-amber-100 text-amber-600' :
-                                        tempCadet.status === CadetStatus.DETENTION ? 'bg-indigo-100 text-indigo-600' :
-                                            tempCadet.status === CadetStatus.PASS ? 'bg-purple-100 text-purple-600' :
-                                                tempCadet.status === CadetStatus.SUSPENSION ? 'bg-slate-200 text-slate-700' :
-                                                    'bg-cyan-100 text-cyan-600'
-                                    }`}>
-                                    {tempCadet.status === CadetStatus.YET_TO_REPORT ? 'YTR' : tempCadet.status}
-                                </span>
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
+                        <h4 className="font-bold text-slate-800">Nominal Roll (Non-Present Cadets)</h4>
+                        
+                        {/* COMPACT INLINE TRACKER */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            {([
+                                { key: 'absent', status: CadetStatus.ABSENT, label: 'Abs', color: 'rose' },
+                                { key: 'sick', status: CadetStatus.SICK, label: 'Sick', color: 'amber' },
+                                { key: 'detention', status: CadetStatus.DETENTION, label: 'Det', color: 'indigo' },
+                                { key: 'pass', status: CadetStatus.PASS, label: 'Pass', color: 'purple' },
+                                { key: 'suspension', status: CadetStatus.SUSPENSION, label: 'Susp', color: 'slate' },
+                                { key: 'yetToReport', status: CadetStatus.YET_TO_REPORT, label: 'YTR', color: 'cyan' },
+                            ] as const).map(item => {
+                                const required = counts[item.key as keyof typeof counts] as number;
+                                if (required === 0) return null;
+                                const added = cadetDetailsList.filter(c => c.status === item.status).length;
+                                const isComplete = added === required;
+                                const isOver = added > required;
+                                
+                                return (
+                                    <div key={item.key} className={`px-2 py-1 rounded flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider border transition-all ${isOver ? 'border-rose-400 bg-rose-50 text-rose-600' : isComplete ? 'border-emerald-400 bg-emerald-50 text-emerald-600' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                        <span>{item.label}</span>
+                                        <span className={`px-1.5 py-0.5 rounded ${isOver ? 'bg-rose-200 text-rose-800' : isComplete ? 'bg-emerald-200 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>{added}/{required}</span>
+                                    </div>
+                                );
+                            })}
+                            <div className="px-2 py-1 rounded flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider border border-blue-200 bg-blue-50 text-blue-700 ml-1">
+                                <span>TOTAL</span>
+                                <span className="bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded">{cadetDetailsList.length}/{counts.absent + counts.sick + counts.detention + counts.pass + counts.suspension + counts.yetToReport}</span>
                             </div>
                         </div>
-                    )}
+                    </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    {/* COMPACT SEARCH & QUICK-ADD ACTION BAR */}
+                    <div className="mb-6 bg-slate-50/50 p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
                         <CadetSelector
                             courseNumber={officerCourseNumber}
                             onSelect={(cadet) => setTempCadet({ ...tempCadet, name: cadet.name, squad: cadet.squad })}
                             onInputChange={(name) => setTempCadet(prev => ({ ...prev, name, squad: '' }))}
                         />
-                        <div className="flex gap-2">
-                            <select
-                                className="flex-1 px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
-                                value={tempCadet.status}
-                                onChange={(e) => setTempCadet({ ...tempCadet, status: e.target.value as CadetStatus })}
-                            >
-                                <option value={CadetStatus.ABSENT}>Absent</option>
-                                <option value={CadetStatus.SICK}>Sick</option>
-                                <option value={CadetStatus.DETENTION}>Detention</option>
-                                <option value={CadetStatus.PASS}>On Pass</option>
-                                <option value={CadetStatus.SUSPENSION}>On Suspension</option>
-                                <option value={CadetStatus.YET_TO_REPORT}>Yet to Report</option>
-                            </select>
-                            <button
-                                onClick={handleAddCadet}
-                                className="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
-                                title="Add Cadet"
-                            >
-                                <Plus size={24} />
+
+                        {/* COMPACT CONFIRMATION PREVIEW */}
+                        <div className={`overflow-hidden transition-all duration-300 ${tempCadet.name ? 'max-h-20 opacity-100 mt-3' : 'max-h-0 opacity-0 mt-0'}`}>
+                            <div className="flex items-center gap-3 bg-blue-50/80 p-2.5 rounded-xl border border-blue-100 shadow-[inset_0_1px_3px_rgba(0,0,0,0.02)]">
+                                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-inner shrink-0">
+                                    {tempCadet.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="flex-1 truncate">
+                                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest leading-none mb-0.5">Target Cadet</p>
+                                    <p className="text-sm font-bold text-slate-800 truncate">
+                                        {tempCadet.name} <span className="text-slate-500 font-medium text-xs ml-1">• {tempCadet.squad || 'Squad Unknown'}</span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className={`mt-3 flex flex-wrap gap-2 transition-all duration-300 ${tempCadet.name ? 'opacity-100' : 'opacity-40 grayscale pointer-events-none'}`}>
+                            <button onClick={() => handleQuickAdd(CadetStatus.ABSENT)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-rose-600 hover:bg-rose-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-rose-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
+                                <Plus size={14} /> Absent
+                            </button>
+                            <button onClick={() => handleQuickAdd(CadetStatus.SICK)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-amber-600 hover:bg-amber-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-amber-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
+                                <Plus size={14} /> Sick
+                            </button>
+                            <button onClick={() => handleQuickAdd(CadetStatus.DETENTION)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-indigo-600 hover:bg-indigo-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-indigo-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
+                                <Plus size={14} /> Detent
+                            </button>
+                            <button onClick={() => handleQuickAdd(CadetStatus.PASS)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-purple-600 hover:bg-purple-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-purple-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
+                                <Plus size={14} /> Pass
+                            </button>
+                            <button onClick={() => handleQuickAdd(CadetStatus.SUSPENSION)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-slate-600 hover:bg-slate-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-slate-300 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
+                                <Plus size={14} /> Susp
+                            </button>
+                            <button onClick={() => handleQuickAdd(CadetStatus.YET_TO_REPORT)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-cyan-600 hover:bg-cyan-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-cyan-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
+                                <Plus size={14} /> YTR
                             </button>
                         </div>
                     </div>
 
-                    <div className="space-y-2">
-                        {cadetDetailsList.length > 0 ? (
-                            cadetDetailsList.map((c, i) => (
-                                <div key={i} className="group flex items-center justify-between p-3 bg-slate-50 hover:bg-white rounded-xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all">
+                    {/* LEDGER FILTER TABS & AUDIT QUICK SEARCH */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4">
+                        {/* Contextual Filter Tabs */}
+                        <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 custom-scrollbar">
+                            {filterTabs.map(tab => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => {
+                                        setLedgerFilter(tab.id);
+                                        setCurrentPage(1);
+                                    }}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                                        ledgerFilter === tab.id
+                                            ? 'bg-blue-600 text-white shadow-sm'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    }`}
+                                >
+                                    <span>{tab.label}</span>
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                                        ledgerFilter === tab.id ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                        {tab.count}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Local Audit Quick Search */}
+                        <div className="relative shrink-0 sm:w-56">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                            <input
+                                type="text"
+                                placeholder="Search ledger..."
+                                value={ledgerSearch}
+                                onChange={(e) => {
+                                    setLedgerSearch(e.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    {/* SMART LEDGER LIST VIEW */}
+                    <div className="space-y-2 min-h-[220px]">
+                        {paginatedCadets.length > 0 ? (
+                            paginatedCadets.map((c, i) => (
+                                <div key={`${c.name}-${startIndex + i}`} className="group flex items-center justify-between p-3 bg-slate-50 hover:bg-white rounded-xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all">
                                     <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
                                             {c.name.charAt(0).toUpperCase()}
@@ -349,18 +451,21 @@ const { currentUser } = useAuth();
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-4">
-                                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${c.status === CadetStatus.ABSENT ? 'text-rose-500 bg-rose-50' :
+                                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${
+                                            c.status === CadetStatus.ABSENT ? 'text-rose-500 bg-rose-50' :
                                             c.status === CadetStatus.SICK ? 'text-amber-500 bg-amber-50' :
-                                                c.status === CadetStatus.DETENTION ? 'text-indigo-500 bg-indigo-50' :
-                                                    c.status === CadetStatus.PASS ? 'text-purple-500 bg-purple-50' :
-                                                        c.status === CadetStatus.SUSPENSION ? 'text-slate-500 bg-slate-100' :
-                                                            'text-cyan-500 bg-cyan-50'
-                                            }`}>
+                                            c.status === CadetStatus.DETENTION ? 'text-indigo-500 bg-indigo-50' :
+                                            c.status === CadetStatus.PASS ? 'text-purple-500 bg-purple-50' :
+                                            c.status === CadetStatus.SUSPENSION ? 'text-slate-500 bg-slate-100' :
+                                            'text-cyan-500 bg-cyan-50'
+                                        }`}>
                                             {c.status === CadetStatus.YET_TO_REPORT ? 'YTR' : c.status}
                                         </span>
                                         <button
-                                            onClick={() => setCadetDetailsList(cadetDetailsList.filter((_, idx) => idx !== i))}
+                                            type="button"
+                                            onClick={() => setCadetDetailsList(cadetDetailsList.filter(item => item !== c))}
                                             className="text-slate-300 hover:text-rose-600 transition-colors"
+                                            title="Remove cadet"
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -368,11 +473,49 @@ const { currentUser } = useAuth();
                                 </div>
                             ))
                         ) : (
-                            <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                                <p className="text-slate-400 text-sm italic">No non-present cadets added yet.</p>
+                            <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center">
+                                <p className="text-slate-400 text-sm italic">
+                                    {cadetDetailsList.length === 0
+                                        ? "No non-present cadets added yet."
+                                        : "No cadets match your filter or search criteria."}
+                                </p>
                             </div>
                         )}
                     </div>
+
+                    {/* SMART PAGINATION FOOTER */}
+                    {filteredCadets.length > 0 && (
+                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+                            <div>
+                                Showing <span className="font-bold text-slate-700">{startIndex + 1}</span> to{' '}
+                                <span className="font-bold text-slate-700">
+                                    {Math.min(startIndex + ITEMS_PER_PAGE, filteredCadets.length)}
+                                </span>{' '}
+                                of <span className="font-bold text-slate-700">{filteredCadets.length}</span> cadets
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={safeCurrentPage === 1}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 font-semibold text-slate-700 transition-all"
+                                >
+                                    <ChevronLeft size={14} /> Previous
+                                </button>
+                                <span className="px-2 py-1 font-bold text-slate-600">
+                                    Page {safeCurrentPage} of {totalPages}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={safeCurrentPage >= totalPages}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 font-semibold text-slate-700 transition-all"
+                                >
+                                    Next <ChevronRight size={14} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <button

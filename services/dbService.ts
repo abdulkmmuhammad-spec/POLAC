@@ -1,5 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
-import { ParadeRecord, ParadeRecordMetadata, FullParadeRecord, CadetDetail, User, Notification, CadetStatus, AuditEvent } from '../types';
+import {
+  ParadeRecord,
+  ParadeRecordMetadata,
+  FullParadeRecord,
+  CadetDetail,
+  User,
+  Notification,
+  CadetStatus,
+  AuditEvent,
+  CourseImpactSummary,
+  CourseImpactBreakdownItem,
+  CoursePurgeMode,
+  CoursePurgeSnapshot,
+  BulkCoursePurgeResult
+} from '../types';
 
 /**
  * The Supabase client requires a valid URL and Anon Key.
@@ -285,8 +299,35 @@ export const dbService = {
 
   // ─── Parade Records ───────────────────────────────────────────────────────
 
-  getRecords: async ({ viewerId, role, courseNumber, cursor, limit = 20 }: { viewerId?: string | number; role?: string; courseNumber?: number; cursor?: string; limit?: number } = {}): Promise<{ data: ParadeRecordMetadata[]; nextCursor: string | null; error: any }> => {
+  getRecords: async ({
+    viewerId,
+    role,
+    courseNumber,
+    officerId,
+    startDate,
+    endDate,
+    start_date,
+    end_date,
+    paradeType,
+    cursor,
+    limit = 20
+  }: {
+    viewerId?: string | number;
+    role?: string;
+    courseNumber?: number;
+    officerId?: string | number;
+    startDate?: string;
+    endDate?: string;
+    start_date?: string;
+    end_date?: string;
+    paradeType?: string;
+    cursor?: string;
+    limit?: number;
+  } = {}): Promise<{ data: ParadeRecordMetadata[]; nextCursor: string | null; error: any }> => {
     try {
+      const effectiveStart = start_date || startDate;
+      const effectiveEnd = end_date || endDate;
+
       // ── Explicit column projection ─────────────────────────────────────────
       // Never use select('*') on parade_records. Pinning to named columns
       // ensures future schema additions (e.g. large text blobs, audit trails)
@@ -310,6 +351,29 @@ export const dbService = {
         if (courseNumber !== undefined) {
           query = query.eq('course_number', courseNumber);
         }
+
+        if (officerId !== undefined) {
+          query = query.eq('officer_id', officerId);
+        }
+      }
+
+      // Apply indexed ISO 8601 timestamp range bounds on created_at
+      if (effectiveStart) {
+        const startISO = effectiveStart.includes('T')
+          ? effectiveStart
+          : `${effectiveStart}T00:00:00.000Z`;
+        query = query.gte('created_at', startISO);
+      }
+
+      if (effectiveEnd) {
+        const endISO = effectiveEnd.includes('T')
+          ? effectiveEnd
+          : `${effectiveEnd}T23:59:59.999Z`;
+        query = query.lte('created_at', endISO);
+      }
+
+      if (paradeType && paradeType !== 'all') {
+        query = query.eq('parade_type', paradeType);
       }
 
       query = query
@@ -738,7 +802,7 @@ export const dbService = {
     try {
       let query = supabase
         .from('cadet_registry')
-        .select('id, name, squad, course_number, year_group, avatar_url, status, relegated_from_rc')
+        .select('id, name, squad, course_number, year_group, avatar_url, status, relegated_from_rc, npa_number, admission_year')
         .order('course_number', { ascending: true }) // Year 5 at the top, Year 1 at the bottom
         .order('squad', { ascending: true })
         .order('name', { ascending: true });
@@ -761,7 +825,7 @@ export const dbService = {
       }
 
       if (searchTerm) {
-        query = query.or(`name.ilike.%${searchTerm}%,squad.ilike.%${searchTerm}%`);
+        query = query.or(`name.ilike.%${searchTerm}%,squad.ilike.%${searchTerm}%,npa_number.ilike.%${searchTerm}%`);
       }
 
       if (from !== undefined && to !== undefined) {
@@ -906,7 +970,15 @@ export const dbService = {
     }
   },
 
-  addCadetToRegistry: async (cadet: { name: string; squad: string; course_number: number; year_group?: number }) => {
+  addCadetToRegistry: async (cadet: {
+    name: string;
+    squad: string;
+    course_number: number;
+    year_group?: number;
+    npa_number?: string;
+    admission_year?: number;
+    status?: string;
+  }) => {
     try {
       const { error } = await supabase
         .from('cadet_registry')
@@ -918,13 +990,109 @@ export const dbService = {
     }
   },
 
-  bulkAddCadetsToRegistry: async (cadets: { name: string; squad: string; course_number: number; year_group?: number }[]) => {
+  bulkAddCadetsToRegistry: async (
+    cadets: {
+      name: string;
+      squad: string;
+      course_number: number;
+      year_group?: number;
+      npa_number?: string;
+      admission_year?: number;
+      status?: string;
+    }[],
+    adminId?: string
+  ) => {
     try {
       if (cadets.length === 0) return;
-      const { error } = await supabase
-        .from('cadet_registry')
-        .insert(cadets);
-      if (error) throw error;
+
+      // 1. Strict intra-batch deduplication to prevent PostgreSQL 21000:
+      // "ON CONFLICT DO UPDATE command cannot affect row a second time"
+      const dedupedNpaMap = new Map<string, (typeof cadets)[0]>();
+      const legacyCadets: (typeof cadets) = [];
+
+      for (const c of cadets) {
+        if (c.npa_number && c.npa_number.trim().length > 0) {
+          const normKey = c.npa_number.trim().toUpperCase();
+          // Keep the last occurrence within the batch
+          dedupedNpaMap.set(normKey, {
+            ...c,
+            name: c.name?.trim().toUpperCase(),
+            squad: c.squad?.trim().toUpperCase(),
+            npa_number: normKey
+          });
+        } else {
+          legacyCadets.push({
+            ...c,
+            name: c.name?.trim().toUpperCase(),
+            squad: c.squad?.trim().toUpperCase()
+          });
+        }
+      }
+
+      const npaCadets = Array.from(dedupedNpaMap.values());
+      const allDedupedCadets = [...npaCadets, ...legacyCadets];
+
+      // 2. Resolve admin ID from parameter, local session, or auth user
+      let effectiveAdminId = adminId;
+      if (!effectiveAdminId && typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem('polac_session');
+          if (stored) {
+            const user = JSON.parse(stored);
+            effectiveAdminId = user.id;
+          }
+        } catch {}
+      }
+
+      if (!effectiveAdminId) {
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          effectiveAdminId = authData?.user?.id;
+        } catch {}
+      }
+
+      // 3. Attempt server-side atomic ingestion via bulk_import_cadets RPC
+      if (effectiveAdminId) {
+        try {
+          const { data, error: rpcError } = await supabase.rpc('bulk_import_cadets', {
+            p_admin_id: effectiveAdminId,
+            p_cadet_data: allDedupedCadets
+          });
+
+          if (!rpcError && data?.success) {
+            return data;
+          }
+          if (rpcError) {
+            console.warn('[dbService] bulk_import_cadets RPC returned error, attempting direct table upsert:', rpcError.message);
+          }
+        } catch (rpcErr) {
+          console.warn('[dbService] RPC execution error, falling back to direct table upsert:', rpcErr);
+        }
+      }
+
+      // 4. Direct Table Upsert & Insert Fallback
+      // Upsert strictly deduplicated NPA cadets in chunks to prevent payload bottlenecks
+      const CHUNK_SIZE = 200;
+      if (npaCadets.length > 0) {
+        for (let i = 0; i < npaCadets.length; i += CHUNK_SIZE) {
+          const chunk = npaCadets.slice(i, i + CHUNK_SIZE);
+          const { error: upsertError } = await supabase
+            .from('cadet_registry')
+            .upsert(chunk, { onConflict: 'npa_number' });
+          if (upsertError) throw upsertError;
+        }
+      }
+
+      // Insert legacy cadets in chunks
+      if (legacyCadets.length > 0) {
+        for (let i = 0; i < legacyCadets.length; i += CHUNK_SIZE) {
+          const chunk = legacyCadets.slice(i, i + CHUNK_SIZE);
+          const { error: insertError } = await supabase
+            .from('cadet_registry')
+            .insert(chunk);
+          if (insertError) throw insertError;
+        }
+      }
     } catch (err) {
       console.error('Supabase Error (bulkAddCadetsToRegistry):', err);
       throw err;
@@ -1021,6 +1189,486 @@ export const dbService = {
       console.error('Photo Upload Error:', err);
       return { publicUrl: null, error: err };
     }
+  },
+
+  // ─── Bulk Course Deletion, Impact Audit & Snapshot Recovery ───────────────
+
+  /**
+   * Returns a summary of all Regular Courses (RCs) currently in the registry
+   * merged with the active academy RC window so admins can select any course.
+   */
+  getAvailableCoursesSummary: async (activeRC = 12): Promise<CourseImpactBreakdownItem[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('cadet_registry')
+        .select('course_number, squad, status');
+
+      if (error) throw error;
+
+      const courseMap = new Map<number, { total: number; active: number; squads: Set<string> }>();
+
+      // Seed standard academy courses around activeRC (e.g., RC 8 through activeRC + 1)
+      for (let rc = Math.max(1, activeRC - 4); rc <= activeRC + 1; rc++) {
+        courseMap.set(rc, { total: 0, active: 0, squads: new Set() });
+      }
+
+      for (const row of data || []) {
+        const rc = Number(row.course_number);
+        if (!rc || isNaN(rc)) continue;
+        if (!courseMap.has(rc)) {
+          courseMap.set(rc, { total: 0, active: 0, squads: new Set() });
+        }
+        const entry = courseMap.get(rc)!;
+        entry.total += 1;
+        if (!row.status || row.status === 'ACTIVE') {
+          entry.active += 1;
+        }
+        if (row.squad) {
+          entry.squads.add(String(row.squad).trim().toUpperCase());
+        }
+      }
+
+      return Array.from(courseMap.entries())
+        .map(([courseNumber, stats]) => ({
+          courseNumber,
+          totalCadets: stats.total,
+          activeCadets: stats.active,
+          squadCount: stats.squads.size
+        }))
+        .sort((a, b) => b.courseNumber - a.courseNumber);
+    } catch (err) {
+      console.error('Supabase Error (getAvailableCoursesSummary):', err);
+      return [];
+    }
+  },
+
+  /**
+   * Computes real-time impact counters for one or multiple selected Regular Courses:
+   * - Total & active cadets
+   * - Parade attendance records
+   * - Cadet attendance & disciplinary logs
+   * - Assigned Course Officers & Webhook/Push Subscriptions
+   */
+  getCoursesImpactSummary: async (courseNumbers: number[]): Promise<CourseImpactSummary> => {
+    const emptySummary: CourseImpactSummary = {
+      totalCadets: 0,
+      activeCadets: 0,
+      paradeRecordsCount: 0,
+      attendanceLogsCount: 0,
+      disciplinaryLogsCount: 0,
+      assignedOfficersCount: 0,
+      pushSubscriptionsCount: 0,
+      courseBreakdown: []
+    };
+
+    if (!courseNumbers || courseNumbers.length === 0) {
+      return emptySummary;
+    }
+
+    try {
+      // 1. Try server-side atomic RPC first
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_courses_impact_summary', {
+        p_course_numbers: courseNumbers
+      });
+
+      if (!rpcError && rpcData && typeof rpcData.totalCadets === 'number') {
+        return {
+          totalCadets: rpcData.totalCadets || 0,
+          activeCadets: rpcData.activeCadets || 0,
+          paradeRecordsCount: rpcData.paradeRecordsCount || 0,
+          attendanceLogsCount: rpcData.attendanceLogsCount || 0,
+          disciplinaryLogsCount: rpcData.disciplinaryLogsCount || 0,
+          assignedOfficersCount: rpcData.assignedOfficersCount || 0,
+          pushSubscriptionsCount: rpcData.pushSubscriptionsCount || 0,
+          courseBreakdown: Array.isArray(rpcData.courseBreakdown) ? rpcData.courseBreakdown : []
+        };
+      }
+    } catch (rpcErr) {
+      console.warn('[dbService] get_courses_impact_summary RPC fallback:', rpcErr);
+    }
+
+    // 2. Resilient Client-Side Aggregation Fallback
+    try {
+      const [cadetsRes, paradesRes, officersRes] = await Promise.all([
+        supabase
+          .from('cadet_registry')
+          .select('course_number, squad, status')
+          .in('course_number', courseNumbers),
+        supabase
+          .from('parade_records')
+          .select('id, absent_count, sick_count, detention_count, pass_count, suspension_count, yet_to_report_count, grand_total')
+          .in('course_number', courseNumbers),
+        supabase
+          .from('users')
+          .select('id, course_number')
+          .eq('role', 'course_officer')
+      ]);
+
+      const cadets = cadetsRes.data || [];
+      const parades = paradesRes.data || [];
+      const officers = (officersRes.data || []).filter(o =>
+        o.course_number && courseNumbers.includes(parseInt(String(o.course_number), 10))
+      );
+
+      let pushSubscriptionsCount = 0;
+      if (officers.length > 0) {
+        const officerIds = officers.map(o => String(o.id));
+        const { count: pushCount } = await supabase
+          .from('push_subscriptions')
+          .select('*', { count: 'exact', head: true })
+          .in('user_id', officerIds);
+        pushSubscriptionsCount = pushCount || 0;
+      }
+
+      // Compute breakdown per course
+      const breakdownMap = new Map<number, { total: number; active: number; squads: Set<string> }>();
+      for (const rc of courseNumbers) {
+        breakdownMap.set(rc, { total: 0, active: 0, squads: new Set() });
+      }
+      for (const c of cadets) {
+        const rc = Number(c.course_number);
+        if (!breakdownMap.has(rc)) {
+          breakdownMap.set(rc, { total: 0, active: 0, squads: new Set() });
+        }
+        const entry = breakdownMap.get(rc)!;
+        entry.total += 1;
+        if (!c.status || c.status === 'ACTIVE') entry.active += 1;
+        if (c.squad) entry.squads.add(String(c.squad).trim().toUpperCase());
+      }
+
+      // Compute attendance & disciplinary counts from parade records
+      let attendanceLogsCount = 0;
+      let disciplinaryLogsCount = 0;
+      for (const p of parades) {
+        const nonPresent =
+          (Number(p.absent_count) || 0) +
+          (Number(p.sick_count) || 0) +
+          (Number(p.detention_count) || 0) +
+          (Number(p.pass_count) || 0) +
+          (Number(p.suspension_count) || 0) +
+          (Number(p.yet_to_report_count) || 0);
+        disciplinaryLogsCount += nonPresent;
+        attendanceLogsCount += Number(p.grand_total) || nonPresent;
+      }
+
+      return {
+        totalCadets: cadets.length,
+        activeCadets: cadets.filter(c => !c.status || c.status === 'ACTIVE').length,
+        paradeRecordsCount: parades.length,
+        attendanceLogsCount,
+        disciplinaryLogsCount,
+        assignedOfficersCount: officers.length,
+        pushSubscriptionsCount,
+        courseBreakdown: Array.from(breakdownMap.entries())
+          .map(([courseNumber, s]) => ({
+            courseNumber,
+            totalCadets: s.total,
+            activeCadets: s.active,
+            squadCount: s.squads.size
+          }))
+          .sort((a, b) => a.courseNumber - b.courseNumber)
+      };
+    } catch (err) {
+      console.error('Supabase Error (getCoursesImpactSummary fallback):', err);
+      return emptySummary;
+    }
+  },
+
+  /**
+   * Fetches all cadet records for the given Regular Courses for CSV backup export.
+   */
+  getCadetsByCourses: async (courseNumbers: number[]): Promise<any[]> => {
+    if (!courseNumbers || courseNumbers.length === 0) return [];
+    try {
+      const { data, error } = await supabase
+        .from('cadet_registry')
+        .select('id, name, squad, course_number, year_group, status, npa_number, admission_year, avatar_url, relegated_from_rc, created_at')
+        .in('course_number', courseNumbers)
+        .order('course_number', { ascending: true })
+        .order('squad', { ascending: true })
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    } catch (err) {
+      console.error('Supabase Error (getCadetsByCourses):', err);
+      throw err;
+    }
+  },
+
+  /**
+   * Executes an atomic, role-verified bulk course purge with snapshot archiving and forensic audit logging.
+   */
+  executeBulkCoursePurge: async (options: {
+    courseNumbers: number[];
+    actorId: string;
+    actorName: string;
+    purgeMode: CoursePurgeMode;
+    purgeAttendance?: boolean;
+    confirmationPhrase?: string;
+  }): Promise<BulkCoursePurgeResult> => {
+    const {
+      courseNumbers,
+      actorId,
+      actorName,
+      purgeMode,
+      purgeAttendance = false,
+      confirmationPhrase = ''
+    } = options;
+
+    if (!courseNumbers || courseNumbers.length === 0) {
+      throw new Error('At least one Regular Course (RC) must be selected for purge.');
+    }
+
+    // Resolve client metadata
+    const clientIp = typeof window !== 'undefined' ? window.location.hostname || 'LOCAL_CLIENT' : 'SERVER';
+
+    // 1. Attempt server-side atomic transaction RPC first
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('execute_bulk_course_purge', {
+        p_course_numbers: courseNumbers,
+        p_actor_id: actorId,
+        p_actor_name: actorName,
+        p_purge_mode: purgeMode,
+        p_purge_attendance: purgeAttendance,
+        p_client_ip: clientIp,
+        p_confirmation_phrase: confirmationPhrase
+      });
+
+      if (!rpcError && rpcData?.success) {
+        return rpcData as BulkCoursePurgeResult;
+      }
+      if (rpcError) {
+        console.warn('[dbService] execute_bulk_course_purge RPC unavailable, executing verified fallback:', rpcError.message);
+      }
+    } catch (rpcErr) {
+      console.warn('[dbService] execute_bulk_course_purge RPC exception, executing fallback:', rpcErr);
+    }
+
+    // 2. Fallback execution if SQL migration RPC is not yet deployed on remote Supabase:
+    // Verify Commandant privilege in public.users
+    const { data: adminCheck, error: authErr } = await supabase
+      .from('users')
+      .select('id, role, full_name')
+      .eq('id', actorId)
+      .eq('role', 'commandant')
+      .single();
+
+    if (authErr || !adminCheck) {
+      throw new Error('Unauthorized: Only designated Commandant accounts can execute bulk course purge operations.');
+    }
+
+    // Capture full snapshot before deletion
+    const snapshotCadets = await dbService.getCadetsByCourses(courseNumbers);
+    const snapshotId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `snap_${Date.now()}`;
+
+    // Save to localStorage emergency snapshot cache in case course_purge_snapshots table isn't migrated yet
+    if (typeof window !== 'undefined' && purgeMode === 'SOFT_DELETE') {
+      try {
+        const existingRaw = localStorage.getItem('polac_course_purge_snapshots');
+        const existingList: CoursePurgeSnapshot[] = existingRaw ? JSON.parse(existingRaw) : [];
+        const newSnap: CoursePurgeSnapshot = {
+          id: snapshotId,
+          courseNumbers,
+          purgeMode,
+          cadetCount: snapshotCadets.length,
+          paradeRecordsAffected: 0,
+          disciplinaryLogsAffected: 0,
+          isRecoverable: true,
+          actorId,
+          actorName,
+          clientIp,
+          confirmationPhrase,
+          restoredAt: null,
+          createdAt: new Date().toISOString(),
+          snapshotData: snapshotCadets
+        };
+        localStorage.setItem('polac_course_purge_snapshots', JSON.stringify([newSnap, ...existingList.slice(0, 9)]));
+      } catch (storageErr) {
+        console.warn('[dbService] Local snapshot backup warning:', storageErr);
+      }
+    }
+
+    // Optionally purge attendance records if requested
+    let purgedParadesCount = 0;
+    if (purgeAttendance) {
+      const { data: prs } = await supabase
+        .from('parade_records')
+        .select('id')
+        .in('course_number', courseNumbers);
+      if (prs && prs.length > 0) {
+        const prIds = prs.map(p => p.id);
+        await supabase.from('cadet_details').delete().in('record_id', prIds);
+        await supabase.from('parade_records').delete().in('course_number', courseNumbers);
+        purgedParadesCount = prs.length;
+      }
+    }
+
+    // Execute delete on cadet_registry for targeted courses
+    const { error: deleteErr } = await supabase
+      .from('cadet_registry')
+      .delete()
+      .in('course_number', courseNumbers);
+
+    if (deleteErr) throw deleteErr;
+
+    // Write forensic audit event
+    await dbService.logAuditEvent({
+      actorId,
+      actorName,
+      actionType: 'COURSE_BULK_PURGED',
+      targetId: `RC_${courseNumbers.join('_')}`,
+      payload: {
+        course_numbers: courseNumbers,
+        purged_cadet_count: snapshotCadets.length,
+        purge_mode: purgeMode,
+        purge_attendance: purgeAttendance,
+        parade_records_affected: purgedParadesCount,
+        snapshot_id: snapshotId,
+        is_recoverable: purgeMode === 'SOFT_DELETE',
+        client_ip: clientIp,
+        confirmation_phrase: confirmationPhrase
+      }
+    });
+
+    return {
+      success: true,
+      snapshotId,
+      purgedCadetCount: snapshotCadets.length,
+      paradeRecordsAffected: purgedParadesCount,
+      disciplinaryLogsAffected: 0,
+      courseNumbers,
+      purgeMode,
+      isRecoverable: purgeMode === 'SOFT_DELETE',
+      timestamp: new Date().toISOString()
+    };
+  },
+
+  /**
+   * Retrieves recent bulk course purge snapshots for emergency audit window recovery.
+   */
+  getCoursePurgeSnapshots: async (): Promise<CoursePurgeSnapshot[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('course_purge_snapshots')
+        .select('id, course_numbers, purge_mode, cadet_count, parade_records_affected, disciplinary_logs_affected, is_recoverable, actor_id, actor_name, client_ip, confirmation_phrase, restored_at, restored_by_name, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (!error && data) {
+        return data.map(row => ({
+          id: row.id,
+          courseNumbers: row.course_numbers || [],
+          purgeMode: row.purge_mode as CoursePurgeMode,
+          cadetCount: row.cadet_count || 0,
+          paradeRecordsAffected: row.parade_records_affected || 0,
+          disciplinaryLogsAffected: row.disciplinary_logs_affected || 0,
+          isRecoverable: Boolean(row.is_recoverable),
+          actorId: row.actor_id,
+          actorName: row.actor_name || 'COMMANDANT',
+          clientIp: row.client_ip || 'LOCAL_CLIENT',
+          confirmationPhrase: row.confirmation_phrase,
+          restoredAt: row.restored_at,
+          restoredByName: row.restored_by_name,
+          createdAt: row.created_at
+        }));
+      }
+    } catch (err) {
+      console.warn('[dbService] course_purge_snapshots table query fallback:', err);
+    }
+
+    // Fallback to localStorage snapshot cache if table not yet migrated
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('polac_course_purge_snapshots');
+        if (raw) {
+          return JSON.parse(raw);
+        }
+      } catch {}
+    }
+
+    return [];
+  },
+
+  /**
+   * Restores a soft-deleted course purge snapshot back into cadet_registry.
+   */
+  restoreCoursePurgeSnapshot: async (
+    snapshotId: string,
+    actorId: string,
+    actorName: string
+  ): Promise<{ success: boolean; restoredCadetCount: number; courseNumbers: number[] }> => {
+    const clientIp = typeof window !== 'undefined' ? window.location.hostname || 'LOCAL_CLIENT' : 'SERVER';
+
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('restore_course_purge_snapshot', {
+        p_snapshot_id: snapshotId,
+        p_actor_id: actorId,
+        p_actor_name: actorName,
+        p_client_ip: clientIp
+      });
+
+      if (!rpcError && rpcData?.success) {
+        return {
+          success: true,
+          restoredCadetCount: rpcData.restoredCadetCount || 0,
+          courseNumbers: rpcData.courseNumbers || []
+        };
+      }
+      if (rpcError) {
+        console.warn('[dbService] restore_course_purge_snapshot RPC fallback:', rpcError.message);
+      }
+    } catch (rpcErr) {
+      console.warn('[dbService] restore_course_purge_snapshot exception fallback:', rpcErr);
+    }
+
+    // Fallback: check localStorage snapshot cache
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('polac_course_purge_snapshots');
+      if (raw) {
+        const list: CoursePurgeSnapshot[] = JSON.parse(raw);
+        const snap = list.find(s => s.id === snapshotId);
+        if (snap && snap.snapshotData && snap.snapshotData.length > 0) {
+          const payload = snap.snapshotData.map((c: any) => ({
+            name: c.name,
+            squad: c.squad,
+            course_number: c.course_number,
+            year_group: c.year_group || 1,
+            npa_number: c.npa_number || undefined,
+            admission_year: c.admission_year || undefined,
+            status: c.status || 'ACTIVE'
+          }));
+
+          await dbService.bulkAddCadetsToRegistry(payload, actorId);
+
+          // Mark restored in localStorage
+          snap.restoredAt = new Date().toISOString();
+          snap.restoredByName = actorName;
+          localStorage.setItem('polac_course_purge_snapshots', JSON.stringify(list));
+
+          await dbService.logAuditEvent({
+            actorId,
+            actorName,
+            actionType: 'COURSE_PURGE_RESTORED',
+            targetId: `SNAPSHOT_${snapshotId}`,
+            payload: {
+              snapshot_id: snapshotId,
+              course_numbers: snap.courseNumbers,
+              restored_cadet_count: payload.length,
+              client_ip: clientIp
+            }
+          });
+
+          return {
+            success: true,
+            restoredCadetCount: payload.length,
+            courseNumbers: snap.courseNumbers
+          };
+        }
+      }
+    }
+
+    throw new Error('Could not restore snapshot: snapshot record not found or not recoverable.');
   }
 };
 

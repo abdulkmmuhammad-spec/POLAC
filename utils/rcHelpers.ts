@@ -37,3 +37,73 @@ export const formatRCWithLevel = (courseNumber: number, activeRC: number): strin
     const level = calculateCurrentLevel(courseNumber, activeRC);
     return `Regular Course ${courseNumber} — Year ${level}`;
 };
+
+/**
+ * Base offset for Nigerian Police Academy Regular Course (RC) admission year derivation.
+ *
+ * Ground truth mappings:
+ *   - Admission Year 2024 → RC 11 (2024 - 2013 = 11)
+ *   - Admission Year 2023 → RC 10 (2023 - 2013 = 10)
+ *   - Admission Year 2022 → RC 9  (2022 - 2013 = 9)
+ *
+ * Formula: RC Number = Admission Year - ADMISSION_YEAR_BASE_OFFSET
+ */
+export const ADMISSION_YEAR_BASE_OFFSET = 2013;
+
+/**
+ * High-confidence reference map of NPA admission years to verified RC course numbers.
+ */
+export const KNOWN_ADMISSION_YEAR_TO_RC: Readonly<Record<number, number>> = Object.freeze({
+    2014: 1,
+    2015: 2,
+    2016: 3,
+    2017: 4,
+    2018: 5,
+    2019: 6,
+    2020: 7,
+    2021: 8,
+    2022: 9,
+    2023: 10,
+    2024: 11,
+    2025: 12,
+    2026: 13,
+    2027: 14,
+    2028: 15,
+    2029: 16,
+    2030: 17,
+});
+
+/**
+ * Automatically deduces the Regular Course (RC) number from an extracted admission year.
+ * Checks known cohorts first, then falls back to the scalable offset formula.
+ *
+ * @param admissionYear - 4-digit admission year (e.g., 2023)
+ * @returns The integer RC number (e.g., 10), or null if the year is invalid or cannot be mapped
+ */
+export const calculateRCFromAdmissionYear = (admissionYear: number): number | null => {
+    if (!admissionYear || isNaN(admissionYear) || !Number.isInteger(admissionYear)) {
+        return null;
+    }
+
+    if (KNOWN_ADMISSION_YEAR_TO_RC[admissionYear] !== undefined) {
+        return KNOWN_ADMISSION_YEAR_TO_RC[admissionYear];
+    }
+
+    const derivedRC = admissionYear - ADMISSION_YEAR_BASE_OFFSET;
+    // RC numbers must be positive integers within reasonable historical/future bounds (RC 1 to RC 100)
+    if (derivedRC >= 1 && derivedRC <= 100) {
+        return derivedRC;
+    }
+
+    return null;
+};
+
+/**
+ * Reverses an RC number to deduce the corresponding admission year.
+ *
+ * @param rcNumber - Regular Course number (e.g., 10 for RC 10)
+ * @returns 4-digit admission year (e.g., 2023)
+ */
+export const calculateAdmissionYearFromRC = (rcNumber: number): number => {
+    return rcNumber + ADMISSION_YEAR_BASE_OFFSET;
+};

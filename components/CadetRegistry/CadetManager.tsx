@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Trash2, Users, Search, Download, Upload, FileText } from 'lucide-react';
+import { Plus, Trash2, Users, Search, Download, Upload, FileText, ChevronDown, ShieldAlert } from 'lucide-react';
 import { dbService } from '../../services/dbService';
 import { useParade } from '../../context/ParadeContext';
 import { formatRC, calculateCurrentLevel } from '../../utils/rcHelpers';
@@ -9,6 +9,13 @@ import { toast } from 'react-hot-toast';
 import { reportService } from '../../services/reportService';
 import { CadetRecordModal } from './CadetRecordModal';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
+import { CadetUploadModal } from './CadetUploadModal';
+import { BulkCoursePurgeModal } from './BulkCoursePurgeModal';
+import {
+    downloadNPACSVTemplate,
+    downloadNPAExcelTemplate,
+    downloadLegacyExcelTemplate
+} from '../../services/cadetImportService';
 
 export const CadetManager: React.FC = () => {
     const location = useLocation();
@@ -26,6 +33,23 @@ export const CadetManager: React.FC = () => {
     const [graduatedCohorts, setGraduatedCohorts] = useState<any[]>([]);
     const [selectedGradCohort, setSelectedGradCohort] = useState<number | null>(null);
     const [gradCohortCadets, setGradCohortCadets] = useState<any[]>([]);
+
+    // Upload & Ingress Modals
+    const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+    const [isBulkPurgeModalOpen, setIsBulkPurgeModalOpen] = useState(false);
+    const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+    const templateMenuRef = useRef<HTMLDivElement>(null);
+
+    // Close template menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (templateMenuRef.current && !templateMenuRef.current.contains(event.target as Node)) {
+                setShowTemplateMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const PAGE_SIZE = 50;
 
@@ -254,131 +278,7 @@ export const CadetManager: React.FC = () => {
     };
 
     const handleDownloadTemplate = () => {
-        const template = [
-            { Name: 'MANI UMAR DAHIRU', Squad: 'SQUAD 3', RC_Number: 12 },
-            { Name: 'ABDULSHAKUR MAI GANDI', Squad: 'SQUAD 8', RC_Number: 11 },
-        ];
-        const ws = XLSX.utils.json_to_sheet(template);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Template');
-        XLSX.writeFile(wb, 'Cadet_Registry_Template.xlsx');
-    };
-
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-            try {
-                const data = evt.target?.result;
-                if (!data) throw new Error('Could not read file data');
-
-                const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const sheet = workbook.Sheets[sheetName];
-                const json = XLSX.utils.sheet_to_json(sheet) as any[];
-
-                if (!json || json.length === 0) {
-                    toast.error('The selected sheet appears to be empty.');
-                    return;
-                }
-
-                const cadetsToUpload: any[] = [];
-                const errors: string[] = [];
-
-                json.forEach((row, index) => {
-                    const name = row.Name || row.name || row.NAME || row['Full Name'] || row['Full_Name'];
-                    const squad = row.Squad || row.squad || row.SQUAD || row.unit || row.Unit || row.Company || row.Platoon;
-
-                    // Accept RC_Number, RC, Course, course_number
-                    const rcRaw = row.RC_Number ?? row.RC ?? row.Course ?? row.course_number ?? row['Course Number'];
-                    // Also support old "Year" column for migration convenience
-                    const yearRaw = row.Year || row.year || row.year_group || row.Year_Group || row.YearGroup || row['Year Group'];
-
-                    if (!name || !squad) {
-                        if (Object.keys(row).length > 0) {
-                            errors.push(`Row ${index + 2}: Missing name or squad`);
-                        }
-                        return;
-                    }
-
-                    let courseNumber: number | null = null;
-
-                    if (rcRaw !== undefined && rcRaw !== null && rcRaw !== '') {
-                        const parsed = parseInt(String(rcRaw).trim(), 10);
-                        if (!isNaN(parsed)) courseNumber = parsed;
-                    }
-
-                    // If no RC_Number provided but Year exists, convert: course_number = active_rc - year + 1
-                    if (courseNumber === null && yearRaw !== undefined) {
-                        const yearStr = String(yearRaw).trim();
-                        const yearMatch = yearStr.match(/(\d+)/);
-                        if (yearMatch) {
-                            const yearNum = parseInt(yearMatch[1], 10);
-                            courseNumber = activeRC - yearNum + 1;
-                        }
-                    }
-
-                    if (courseNumber === null) {
-                        errors.push(`Row ${index + 2}: Missing or invalid RC_Number (e.g., 12)`);
-                        return;
-                    }
-
-                    cadetsToUpload.push({
-                        name: String(name).trim(),
-                        squad: String(squad).trim(),
-                        course_number: courseNumber,
-                        year_group: calculateCurrentLevel(courseNumber, activeRC)
-                    });
-                });
-
-                if (cadetsToUpload.length === 0) {
-                    let msg = 'No valid cadet records found.\n\nRequired columns: Name, Squad, RC_Number\n(RC_Number is the course number, e.g., 12 for RC 12)';
-                    if (errors.length > 0) msg += '\n\nIssues found:\n' + errors.slice(0, 5).join('\n') + (errors.length > 5 ? '\n...' : '');
-                    toast.error(msg);
-                    return;
-                }
-
-                setIsLoading(true);
-                try {
-                    await dbService.bulkAddCadetsToRegistry(cadetsToUpload);
-                    toast.success(`Successfully imported ${cadetsToUpload.length} cadets!`);
-                    if (errors.length > 0) {
-                        console.warn('Some rows were skipped:', errors);
-                    }
-                    fetchCadets(true);
-
-                    try {
-                        // Log as audit notification
-                        await dbService.addNotification({
-                            type: 'cadet_added',
-                            title: 'Cadets Bulk Imported',
-                            content: `${cadetsToUpload.length} cadets imported via Excel upload`,
-                            timestamp: new Date().toISOString(),
-                            read: false,
-                            officerName: 'Commandant',
-                            yearGroup: 1,
-                            courseNumber: 0
-                        });
-                    } catch (auditErr) {
-                        console.error('Failed to log audit notification for bulk import:', auditErr);
-                        toast.error('Import successful, but failed to log audit trail.');
-                    }
-                } catch (dbErr) {
-                    console.error('Database Error during bulk import:', dbErr);
-                    const errorDetails = dbErr.message || dbErr.details || 'Check for duplicate names or database connection issues.';
-                    toast.error(`Database Error: ${errorDetails}`);
-                }
-            } catch (parseErr) {
-                console.error('Excel Parsing Error:', parseErr);
-                toast.error(`Error reading Excel file: ${parseErr.message || 'Please ensure it is a valid .xlsx file'}`);
-            } finally {
-                setIsLoading(false);
-                if (e.target) e.target.value = '';
-            }
-        };
-        reader.readAsArrayBuffer(file);
+        downloadNPACSVTemplate();
     };
 
 
@@ -402,24 +302,131 @@ export const CadetManager: React.FC = () => {
                 <div className="p-8">
                     <div className="flex flex-wrap gap-4 mb-8 p-6 bg-slate-50 rounded-md border border-slate-200">
                         <div className="flex-1 min-w-[200px]">
-                            <p className="text-[9px] font-black text-blue-900 uppercase tracking-widest mb-1">Batch Ingress</p>
+                            <div className="flex items-center gap-2 mb-1">
+                                <p className="text-[9px] font-black text-blue-900 uppercase tracking-widest">Batch Ingress</p>
+                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    Dual Schema Support
+                                </span>
+                            </div>
                             <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight">
-                                High-volume registry synchronization via secure Excel uplink.
+                                High-volume registry synchronization supporting 2-Column NPA format and 3-Column Legacy templates.
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
+                            {/* GET TEMPLATE DROPDOWN */}
+                            <div className="relative" ref={templateMenuRef}>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowTemplateMenu(!showTemplateMenu)}
+                                    className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded text-[9px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
+                                >
+                                    <Download size={14} className="text-blue-900" />
+                                    <span>Get Template</span>
+                                    <ChevronDown size={12} className={`text-slate-400 transition-transform ${showTemplateMenu ? 'rotate-180' : ''}`} />
+                                </button>
+
+                                {showTemplateMenu && (
+                                    <div className="absolute right-0 sm:left-0 sm:right-auto mt-2 w-72 bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-30 animate-in fade-in zoom-in-95 duration-150">
+                                        <div className="px-3 py-1.5 border-b border-slate-100">
+                                            <p className="text-[8px] font-black uppercase tracking-widest text-blue-900">
+                                                Select Enrollment Template
+                                            </p>
+                                        </div>
+
+                                        {/* Option 1: New NPA Format (CSV) */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                downloadNPACSVTemplate();
+                                                setShowTemplateMenu(false);
+                                            }}
+                                            className="w-full text-left px-3 py-2.5 hover:bg-emerald-50/70 transition-colors flex items-start gap-2.5 group"
+                                        >
+                                            <div className="w-7 h-7 rounded bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
+                                                <FileText size={14} />
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight group-hover:text-emerald-900">
+                                                        New NPA Format (CSV)
+                                                    </span>
+                                                    <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[8px] font-black rounded uppercase">
+                                                        Recommended
+                                                    </span>
+                                                </div>
+                                                <p className="text-[9px] text-slate-500 font-medium leading-tight mt-0.5">
+                                                    2 columns: <code className="text-slate-700 font-bold">NPA Number, Name</code>. Auto-derives RC & Squad.
+                                                </p>
+                                            </div>
+                                        </button>
+
+                                        {/* Option 2: New NPA Format (XLSX) */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                downloadNPAExcelTemplate();
+                                                setShowTemplateMenu(false);
+                                            }}
+                                            className="w-full text-left px-3 py-2.5 hover:bg-blue-50/70 transition-colors flex items-start gap-2.5 group"
+                                        >
+                                            <div className="w-7 h-7 rounded bg-blue-100 text-blue-900 flex items-center justify-center shrink-0 mt-0.5">
+                                                <FileText size={14} />
+                                            </div>
+                                            <div>
+                                                <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight group-hover:text-blue-900">
+                                                    New NPA Format (Excel .xlsx)
+                                                </span>
+                                                <p className="text-[9px] text-slate-500 font-medium leading-tight mt-0.5">
+                                                    2 columns: <code className="text-slate-700 font-bold">NPA Number, Name</code>
+                                                </p>
+                                            </div>
+                                        </button>
+
+                                        {/* Option 3: Legacy Format (XLSX) */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                downloadLegacyExcelTemplate();
+                                                setShowTemplateMenu(false);
+                                            }}
+                                            className="w-full text-left px-3 py-2.5 hover:bg-slate-50 transition-colors flex items-start gap-2.5 group border-t border-slate-100"
+                                        >
+                                            <div className="w-7 h-7 rounded bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                                                <FileText size={14} />
+                                            </div>
+                                            <div>
+                                                <span className="text-[10px] font-black text-slate-700 uppercase tracking-tight group-hover:text-slate-900">
+                                                    Legacy Template (Excel .xlsx)
+                                                </span>
+                                                <p className="text-[9px] text-slate-500 font-medium leading-tight mt-0.5">
+                                                    3 columns: <code className="text-slate-700 font-bold">Name, Squad, RC_Number</code>
+                                                </p>
+                                            </div>
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* UPLOAD DATA BUTTON */}
                             <button
-                                onClick={handleDownloadTemplate}
-                                className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 rounded text-[9px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50 transition-all shadow-sm"
+                                type="button"
+                                onClick={() => setIsUploadModalOpen(true)}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-blue-900 text-white rounded text-[9px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-md active:scale-95"
                             >
-                                <Download size={14} />
-                                Get Template
-                            </button>
-                            <label className="flex items-center gap-2 px-5 py-2.5 bg-blue-900 text-white rounded text-[9px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all cursor-pointer shadow-md">
                                 <Upload size={14} />
                                 Upload Data
-                                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} disabled={isLoading} />
-                            </label>
+                            </button>
+
+                            {/* BULK COURSE PURGE & RE-ENROLL BUTTON */}
+                            <button
+                                type="button"
+                                onClick={() => setIsBulkPurgeModalOpen(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-rose-700 text-white rounded text-[9px] font-black uppercase tracking-widest hover:bg-rose-800 transition-all shadow-md active:scale-95"
+                                title="Purge one or multiple Regular Courses with CSV backup and immediately re-enroll"
+                            >
+                                <ShieldAlert size={14} />
+                                Purge & Re-Seed Course
+                            </button>
                         </div>
                     </div>
 
@@ -589,12 +596,19 @@ export const CadetManager: React.FC = () => {
                                 return (
                                     <tr key={cadet.id} className={`hover:bg-slate-50/80 transition-all group font-mono ${cadet.status === 'DISMISSED' ? 'opacity-40 grayscale' : ''}`}>
                                         <td className="px-8 py-4">
-                                            <button
-                                                onClick={() => setSelectedCadet(cadet)}
-                                                className={`font-black uppercase tracking-tighter text-[11px] ${cadet.status === 'DISMISSED' ? 'text-slate-600' : 'text-blue-900 hover:text-blue-700'}`}
-                                            >
-                                                {cadet.name}
-                                            </button>
+                                            <div className="flex flex-col">
+                                                <button
+                                                    onClick={() => setSelectedCadet(cadet)}
+                                                    className={`font-black uppercase tracking-tighter text-[11px] text-left ${cadet.status === 'DISMISSED' ? 'text-slate-600' : 'text-blue-900 hover:text-blue-700'}`}
+                                                >
+                                                    {cadet.name}
+                                                </button>
+                                                {cadet.npa_number && (
+                                                    <span className="text-[9px] font-mono text-slate-400 font-bold tracking-wider mt-0.5">
+                                                        {cadet.npa_number}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         {cadet.status === 'DISMISSED' ? (
                                             <td className="px-8 py-4" colSpan={3}>
@@ -644,6 +658,11 @@ export const CadetManager: React.FC = () => {
                                                 >
                                                     {cadet.name}
                                                 </button>
+                                                {cadet.npa_number && (
+                                                    <span className="text-[9px] font-mono text-slate-400 font-bold tracking-wider mt-0.5 block">
+                                                        {cadet.npa_number}
+                                                    </span>
+                                                )}
                                                 <button
                                                     onClick={() => handleDeleteCadet(cadet.id, cadet.name)}
                                                     className="text-slate-300 p-1"
@@ -724,6 +743,21 @@ export const CadetManager: React.FC = () => {
                 title="Review Cadet Enrollment"
                 type="cadet"
                 data={previewData}
+            />
+
+            <CadetUploadModal
+                isOpen={isUploadModalOpen}
+                onClose={() => setIsUploadModalOpen(false)}
+                activeRC={activeRC}
+                onSuccess={() => fetchCadets(true)}
+            />
+
+            <BulkCoursePurgeModal
+                isOpen={isBulkPurgeModalOpen}
+                onClose={() => setIsBulkPurgeModalOpen(false)}
+                activeRC={activeRC}
+                initialSelectedRC={courseFilter !== 'all' ? courseFilter : undefined}
+                onPurgeAndSeedComplete={() => fetchCadets(true)}
             />
 
             {selectedGradCohort !== null && (

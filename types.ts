@@ -133,8 +133,109 @@ export interface AuditEvent {
   id: string;
   actorId: string | null;
   actorName: string | null;
-  actionType: 'CADET_MODIFIED' | 'CADET_ADDED' | 'CADET_REMOVED' | 'SETTINGS_CHANGED' | 'OFFICER_INVITED' | 'OFFICER_ASSIGNED' | 'CREDENTIAL_OVERRIDE' | 'COURSE_GRADUATION' | 'CADET_DISMISSED';
+  actionType:
+    | 'CADET_MODIFIED'
+    | 'CADET_ADDED'
+    | 'CADET_REMOVED'
+    | 'SETTINGS_CHANGED'
+    | 'OFFICER_INVITED'
+    | 'OFFICER_ASSIGNED'
+    | 'CREDENTIAL_OVERRIDE'
+    | 'COURSE_GRADUATION'
+    | 'CADET_DISMISSED'
+    | 'COURSE_BULK_PURGED'
+    | 'COURSE_PURGE_RESTORED'
+    | 'BULK_CADET_IMPORT'
+    | string;
   targetId?: string;
   payload: any;
   createdAt: string;
+}
+
+export type CoursePurgeMode = 'SOFT_DELETE' | 'HARD_DELETE';
+
+export interface CourseImpactBreakdownItem {
+  courseNumber: number;
+  totalCadets: number;
+  activeCadets: number;
+  squadCount: number;
+}
+
+export interface CourseImpactSummary {
+  totalCadets: number;
+  activeCadets: number;
+  paradeRecordsCount: number;
+  attendanceLogsCount: number;
+  disciplinaryLogsCount: number;
+  assignedOfficersCount: number;
+  pushSubscriptionsCount: number;
+  courseBreakdown: CourseImpactBreakdownItem[];
+}
+
+export interface CoursePurgeSnapshot {
+  id: string;
+  courseNumbers: number[];
+  purgeMode: CoursePurgeMode;
+  cadetCount: number;
+  paradeRecordsAffected: number;
+  disciplinaryLogsAffected: number;
+  isRecoverable: boolean;
+  actorId: string | null;
+  actorName: string;
+  clientIp: string;
+  confirmationPhrase?: string;
+  restoredAt: string | null;
+  restoredByName?: string | null;
+  createdAt: string;
+  snapshotData?: any[];
+}
+
+export interface BulkCoursePurgeResult {
+  success: boolean;
+  snapshotId: string | null;
+  purgedCadetCount: number;
+  paradeRecordsAffected: number;
+  disciplinaryLogsAffected: number;
+  courseNumbers: number[];
+  purgeMode: CoursePurgeMode;
+  isRecoverable: boolean;
+  timestamp: string;
+}
+
+export interface CadetRegistryItem {
+  id: string | number;
+  name: string;
+  squad: string;
+  course_number: number;
+  year_group: number;
+  status: 'ACTIVE' | 'DISMISSED' | 'GRADUATED' | string;
+  avatar_url?: string | null;
+  relegated_from_rc?: number | null;
+  npa_number?: string | null;
+  admission_year?: number | null;
+  created_at?: string;
+}
+
+export type TemplateImportFormat = 'NPA_FORMAT' | 'LEGACY_FORMAT' | 'UNKNOWN';
+
+export interface ParsedCadetRow {
+  rowNumber: number;
+  isValid: boolean;
+  errors: string[];
+  name: string;
+  squad: string;
+  course_number: number;
+  year_group?: number;
+  npa_number?: string;
+  admission_year?: number;
+  rawData: Record<string, any>;
+}
+
+export interface CadetImportParseResult {
+  detectedFormat: TemplateImportFormat;
+  totalRows: number;
+  validRows: ParsedCadetRow[];
+  invalidRows: ParsedCadetRow[];
+  allRows: ParsedCadetRow[];
+  globalErrors: string[];
 }
