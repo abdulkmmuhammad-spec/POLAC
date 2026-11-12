@@ -279,7 +279,7 @@ export const CustomDateRangePopover: React.FC<CustomDateRangePopoverProps> = ({
     return (
         <div
             ref={popoverRef}
-            className="absolute right-0 left-0 sm:left-auto top-full mt-2 z-40 w-full sm:w-[580px] bg-white rounded-3xl shadow-2xl border border-slate-200 p-5 animate-in fade-in zoom-in-95 duration-150"
+            className="fixed inset-x-3 top-20 sm:absolute sm:inset-x-auto sm:right-auto sm:left-0 sm:top-full sm:mt-2 z-50 w-auto sm:w-[580px] max-h-[82vh] sm:max-h-none overflow-y-auto bg-white rounded-3xl shadow-2xl border border-slate-200 p-4 sm:p-5 animate-in fade-in zoom-in-95 duration-150"
         >
             {/* Popover Header */}
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">

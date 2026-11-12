@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo, useCallback } from 'react';
-import { ParadeRecordMetadata, Notification, DashboardStats, UserRole, ParadeType, AuditEvent } from '../types';
+import { ParadeRecordMetadata, Notification, DashboardStats, UserRole, ParadeType, AuditEvent, CommandantRemark } from '../types';
 import { dbService, supabase } from '../services/dbService';
 import { useAuth } from './AuthContext';
 import { calculateCurrentLevel } from '../utils/rcHelpers';
@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, X } from 'lucide-react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 
-interface CourseSummaryEntry {
+export interface CourseSummaryEntry {
     courseNumber: number;
     currentLevel: number;
     total: number;
@@ -21,11 +21,14 @@ interface CourseSummaryEntry {
     pass: number;
     suspension: number;
     yet_to_report: number;
+    latestSubmission?: ParadeRecordMetadata;
 }
 
 interface ParadeContextType {
     records: ParadeRecordMetadata[];
     notifications: Notification[];
+    remarks: CommandantRemark[];
+    refreshRemarks: () => Promise<void>;
     isDataLoading: boolean;
     refreshData: (officerNameFilter?: string) => Promise<void>;
     stats: DashboardStats;
@@ -95,6 +98,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const { currentUser } = useAuth();
     const queryClient = useQueryClient();
     const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [remarks, setRemarks] = useState<CommandantRemark[]>([]);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [activeRC, setActiveRC] = useState<number>(12); // sensible default
     const [submissionSettings, setSubmissionSettings] = useState({
@@ -250,12 +254,34 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     }, [currentUser]);
 
+    const refreshRemarks = useCallback(async () => {
+        try {
+            const data = await dbService.getCommandantRemarks(
+                currentUser?.role === UserRole.COMMANDANT
+                    ? undefined
+                    : {
+                        courseOfficerId: currentUser?.id,
+                        courseNumber: currentUser?.courseNumber
+                    }
+            );
+            setRemarks(data);
+        } catch (err) {
+            console.warn('Error fetching commandant remarks:', err);
+        }
+    }, [currentUser]);
+
     const refreshData = useCallback(async (officerNameFilter?: string) => {
         setIsRefreshing(true);
         try {
             try {
+                const effectiveOfficer =
+                    officerNameFilter ??
+                    (currentUser?.role === UserRole.COMMANDANT ? undefined : currentUser?.fullName);
+                const effectiveCourse =
+                    currentUser?.role === UserRole.COMMANDANT ? undefined : currentUser?.courseNumber;
+
                 const [notifsRes, rcRes, settingsRes, count] = await Promise.all([
-                    dbService.getNotifications(officerNameFilter),
+                    dbService.getNotifications(effectiveOfficer, effectiveCourse),
                     dbService.getActiveRC(),
                     dbService.getSubmissionSettings(),
                     dbService.getTotalRecordsCount()
@@ -273,13 +299,14 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             await queryClient.invalidateQueries({ queryKey: ['paradeRecords'] });
             await refetchRecords();
             await fetchTodayRecords();
+            await refreshRemarks();
         } catch (error) {
             console.error('Error refreshing data:', error);
             toast.error('Failed to sync master parade data. Please check your connection.');
         } finally {
             setIsRefreshing(false);
         }
-    }, [queryClient, refetchRecords, fetchTodayRecords]);
+    }, [queryClient, refetchRecords, fetchTodayRecords, refreshRemarks]);
 
     const loadMoreRecords = async () => {
         if (!hasMoreRecords || isDataLoading) return;
@@ -331,13 +358,59 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         refreshData();
     }, []);
 
-    // Trigger fetchTodayRecords as soon as currentUser is available (after auth resolves).
+    // Trigger fetchTodayRecords and refreshRemarks as soon as currentUser is available (after auth resolves).
     // This is the correct place to fire the today-scoped query.
     useEffect(() => {
         if (currentUser) {
             fetchTodayRecords();
+            refreshRemarks();
         }
-    }, [currentUser, fetchTodayRecords]);
+    }, [currentUser, fetchTodayRecords, refreshRemarks]);
+
+    useEffect(() => {
+        const handleRemarksSync = (e: Event) => {
+            const detail = (e as CustomEvent)?.detail;
+            if (detail && (detail.action === 'resolved' || detail.action === 'followed_up')) {
+                const targetCourse = detail.courseNumber;
+                setNotifications(prev => {
+                    const resolvedIds: string[] = [];
+                    const updated = prev.map(n => {
+                        const isRemarkNotif =
+                            n.type === 'commandant_remark' ||
+                            n.type === 'remark_response' ||
+                            n.type === 'remark_resolved' ||
+                            (n.title || '').toLowerCase().includes("commandant's parade remark") ||
+                            (n.title || '').toLowerCase().includes('officer justification') ||
+                            (n.title || '').toLowerCase().includes('parade inquiry');
+                        const matchesCourse =
+                            !targetCourse ||
+                            Number(n.courseNumber) === Number(targetCourse) ||
+                            (n.title || '').includes(`RC ${targetCourse}`);
+
+                        if (isRemarkNotif && matchesCourse) {
+                            resolvedIds.push(String(n.id));
+                            return { ...n, read: true };
+                        }
+                        return n;
+                    });
+
+                    if (resolvedIds.length > 0 && typeof window !== 'undefined') {
+                        try {
+                            const raw = localStorage.getItem('polac_resolved_notification_ids');
+                            const existing: string[] = raw ? JSON.parse(raw) : [];
+                            const merged = Array.from(new Set([...resolvedIds, ...existing])).slice(0, 500);
+                            localStorage.setItem('polac_resolved_notification_ids', JSON.stringify(merged));
+                        } catch {}
+                    }
+
+                    return updated;
+                });
+            }
+            refreshRemarks();
+        };
+        window.addEventListener('commandant-remarks-updated', handleRemarksSync);
+        return () => window.removeEventListener('commandant-remarks-updated', handleRemarksSync);
+    }, [refreshRemarks]);
 
     // ── Auto-Select Latest Submitted Parade Type ──
     // Ensures the Commandant Tactical Summary always defaults to the last submitted parade state (e.g. TATTOO, MUSTER, SPECIAL)
@@ -350,9 +423,9 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     }, [records]);
 
-    // ── Resilient Background Auto-Sync Interval for Commandant Dashboard ──
+    // ── Resilient Background Auto-Sync Interval for Commandant & Course Officer Dashboards ──
     useEffect(() => {
-        if (!currentUser || currentUser.role !== UserRole.COMMANDANT) return;
+        if (!currentUser) return;
 
         const intervalId = setInterval(() => {
             if (!document.hidden) {
@@ -370,7 +443,8 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const fetchInitial = async () => {
             try {
                 const officerNameFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.fullName;
-                const notifsRes = await dbService.getNotifications(officerNameFilter);
+                const courseFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.courseNumber;
+                const notifsRes = await dbService.getNotifications(officerNameFilter, courseFilter);
                 setNotifications(notifsRes.data);
             } catch (err) {
                 console.error('Initial notification fetch error:', err);
@@ -398,12 +472,45 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                         archivedAt: raw.archived_at
                     };
 
-                    if (currentUser.role === UserRole.COMMANDANT || newNotif.officerName === currentUser.fullName) {
+                    const matchesCourseOfficer =
+                        (newNotif.officerName &&
+                            currentUser.fullName &&
+                            newNotif.officerName.toLowerCase() === currentUser.fullName.toLowerCase()) ||
+                        (currentUser.courseNumber &&
+                            newNotif.courseNumber &&
+                            Number(newNotif.courseNumber) === Number(currentUser.courseNumber));
+
+                    if (currentUser.role === UserRole.COMMANDANT || matchesCourseOfficer) {
+                        const isCommandantSelfOutbound =
+                            currentUser.role === UserRole.COMMANDANT &&
+                            (newNotif.type === 'commandant_remark' || newNotif.type === 'remark_resolved');
+
+                        if (isCommandantSelfOutbound) {
+                            newNotif.read = true;
+                            try {
+                                const rawIds = localStorage.getItem('polac_resolved_notification_ids');
+                                const existingIds: string[] = rawIds ? JSON.parse(rawIds) : [];
+                                if (!existingIds.includes(String(newNotif.id))) {
+                                    existingIds.unshift(String(newNotif.id));
+                                    localStorage.setItem('polac_resolved_notification_ids', JSON.stringify(existingIds.slice(0, 500)));
+                                }
+                            } catch {}
+                            setNotifications((prev) => [newNotif, ...prev]);
+                            return;
+                        }
+
                         setNotifications((prev) => [newNotif, ...prev]);
 
-                        // Automatically trigger data refresh when a new parade state entry is submitted
+                        // Automatically trigger data/remarks refresh when a new parade state or remark arrives
                         if (newNotif.type === 'parade_submission' || newNotif.type === 'parade_update') {
                             refreshData();
+                        }
+                        if (
+                            newNotif.type === 'commandant_remark' ||
+                            newNotif.type === 'remark_response' ||
+                            newNotif.type === 'remark_resolved'
+                        ) {
+                            refreshRemarks();
                         }
 
                         const severity = inferSeverity(newNotif);
@@ -414,27 +521,105 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                             audioService.play('intel');
                         }
 
+                        // Trigger native phone/OS push notification banner for Course Officers when permission is granted
+                        if (
+                            typeof window !== 'undefined' &&
+                            'Notification' in window &&
+                            window.Notification.permission === 'granted' &&
+                            localStorage.getItem('polac_local_push_enabled') !== 'false'
+                        ) {
+                            const targetUrl =
+                                newNotif.type === 'commandant_remark' || newNotif.type === 'remark_resolved'
+                                    ? '/officer/history'
+                                    : '/';
+                            const requireUserInteraction =
+                                severity === 'critical' ||
+                                newNotif.type === 'commandant_remark' ||
+                                newNotif.type === 'remark_resolved';
+                            if ('serviceWorker' in navigator) {
+                                navigator.serviceWorker.ready
+                                    .then((reg) => {
+                                        reg.showNotification(newNotif.title, {
+                                            body: newNotif.content,
+                                            icon: '/logo.png',
+                                            badge: '/logo.png',
+                                            tag: `polac-notif-${newNotif.id}`,
+                                            renotify: true,
+                                            vibrate: [200, 100, 200, 100, 200],
+                                            requireInteraction: requireUserInteraction,
+                                            data: {
+                                                url: targetUrl,
+                                                courseNumber: newNotif.courseNumber
+                                            }
+                                        } as any);
+                                    })
+                                    .catch(() => {
+                                        try {
+                                            new window.Notification(newNotif.title, {
+                                                body: newNotif.content,
+                                                icon: '/logo.png',
+                                                tag: `polac-notif-${newNotif.id}`
+                                            });
+                                        } catch {}
+                                    });
+                            } else {
+                                try {
+                                    new window.Notification(newNotif.title, {
+                                        body: newNotif.content,
+                                        icon: '/logo.png',
+                                        tag: `polac-notif-${newNotif.id}`
+                                    });
+                                } catch {}
+                            }
+                        }
+
                         toast.custom((t) => (
                             <motion.div
                                 initial={{ opacity: 0, y: -20, scale: 0.9 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.9 }}
-                                className={`flex items-center gap-4 px-6 py-4 rounded-2xl border shadow-2xl backdrop-blur-xl ${
-                                    severity === 'critical' 
-                                    ? 'bg-rose-900/90 border-rose-500/50 text-white' 
-                                    : 'bg-blue-900/90 border-blue-500/50 text-white'
+                                className={`w-[92vw] max-w-md flex items-center gap-3.5 px-4 sm:px-6 py-4 rounded-2xl border shadow-2xl backdrop-blur-xl cursor-pointer ${
+                                    newNotif.type === 'remark_resolved'
+                                    ? 'bg-emerald-900/95 border-emerald-500/60 text-white'
+                                    : severity === 'critical' 
+                                    ? 'bg-rose-900/95 border-rose-500/60 text-white' 
+                                    : 'bg-blue-900/95 border-blue-500/60 text-white'
                                 }`}
-                                onClick={() => toast.dismiss(t.id)}
+                                onClick={() => {
+                                    toast.dismiss(t.id);
+                                    if (
+                                        currentUser.role !== UserRole.COMMANDANT &&
+                                        (newNotif.type === 'commandant_remark' || newNotif.type === 'remark_resolved')
+                                    ) {
+                                        window.dispatchEvent(
+                                            new CustomEvent('open-officer-remark-reply', {
+                                                detail: {
+                                                    courseNumber: newNotif.courseNumber,
+                                                    notification: newNotif
+                                                }
+                                            })
+                                        );
+                                    }
+                                }}
                             >
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 ${severity === 'critical' ? 'animate-pulse' : ''}`}>
+                                <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center bg-white/10 border border-white/20 ${severity === 'critical' ? 'animate-pulse' : ''}`}>
                                     <Bell size={18} />
                                 </div>
-                                <div className="flex-1">
-                                    <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-0.5">
-                                        {severity === 'critical' ? 'Priority Alert' : 'Inbound Intel'}
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-0.5">
+                                        {newNotif.type === 'commandant_remark'
+                                            ? 'Commandant Remark • Tap to Reply'
+                                            : newNotif.type === 'remark_resolved'
+                                            ? 'Parade Inquiry Resolved • Tap to View'
+                                            : severity === 'critical'
+                                            ? 'Priority Alert'
+                                            : 'Inbound Intel'}
                                     </p>
-                                    <p className="text-sm font-black leading-tight truncate max-w-[200px]">
+                                    <p className="text-xs sm:text-sm font-black leading-tight truncate">
                                         {newNotif.title}
+                                    </p>
+                                    <p className="text-[11px] opacity-85 line-clamp-1 mt-0.5">
+                                        {newNotif.content}
                                     </p>
                                 </div>
                                 <button 
@@ -442,12 +627,12 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                                         e.stopPropagation();
                                         toast.dismiss(t.id);
                                     }}
-                                    className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                                    className="p-1.5 hover:bg-white/10 rounded-lg transition-colors shrink-0"
                                 >
                                     <X size={16} />
                                 </button>
                             </motion.div>
-                        ), { duration: 5000, position: 'top-center' });
+                        ), { duration: 8000, position: 'top-center' });
                     }
                 }
             )
@@ -494,12 +679,19 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     fetchTodayRecords();
                 }
             )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'commandant_remarks' },
+                () => {
+                    refreshRemarks();
+                }
+            )
             .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [currentUser, refreshData]);
+    }, [currentUser, refreshData, refreshRemarks]);
 
     /** Helper exposed via context to compute year level for a given course number */
     const getLevelForCourse = useCallback(
@@ -591,6 +783,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 pass: courseRecords.reduce((s, r) => s + (r.passCount || 0), 0),
                 suspension: courseRecords.reduce((s, r) => s + (r.suspensionCount || 0), 0),
                 yet_to_report: courseRecords.reduce((s, r) => s + (r.yetToReportCount || 0), 0),
+                latestSubmission: courseRecords[0],
             };
         });
     }, [todayRecords, activeRC, selectedParadeType]);
@@ -625,6 +818,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 pass: courseRecords.reduce((s, r) => s + (r.passCount || 0), 0),
                 suspension: courseRecords.reduce((s, r) => s + (r.suspensionCount || 0), 0),
                 yet_to_report: courseRecords.reduce((s, r) => s + (r.yetToReportCount || 0), 0),
+                latestSubmission: courseRecords[0],
             };
         });
     }, [todayRecords, activeRC, selectedParadeType]);
@@ -635,6 +829,8 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         <ParadeContext.Provider value={{
             records,
             notifications,
+            remarks,
+            refreshRemarks,
             isDataLoading,
             refreshData,
             stats,

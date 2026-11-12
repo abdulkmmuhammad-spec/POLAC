@@ -299,16 +299,16 @@ const SettingsContainer: React.FC = () => {
                     <div className="max-w-2xl space-y-8">
                         {/* Bulk Course Purge & Re-Enrollment Console Card */}
                         <div className="bg-white rounded-3xl border border-rose-200 shadow-sm overflow-hidden">
-                            <div className="p-5 bg-gradient-to-r from-slate-900 to-rose-950 text-white flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                            <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 to-rose-950 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                <div className="flex items-start sm:items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
                                         <ShieldAlert size={20} />
                                     </div>
                                     <div>
                                         <h3 className="text-sm font-black uppercase tracking-wider">
                                             Bulk Course Purge & Re-Enrollment Console
                                         </h3>
-                                        <p className="text-[11px] text-slate-300 mt-0.5">
+                                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
                                             Purge one or multiple Regular Courses with mandatory CSV backup, soft-delete snapshot recovery & instant dual-format seeding
                                         </p>
                                     </div>
@@ -316,7 +316,7 @@ const SettingsContainer: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => setIsBulkPurgeOpen(true)}
-                                    className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shrink-0 shadow-md transition-all"
+                                    className="w-full sm:w-auto min-h-[42px] px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shrink-0 shadow-md transition-all flex items-center justify-center"
                                 >
                                     Launch Console
                                 </button>
@@ -384,7 +384,6 @@ export const CommandantDashboard: React.FC = () => {
                             onResolve={markNotificationRead} // In this context, resolving is acknowledging
                             onView={(alert) => {
                                 setSelectedAlert(alert);
-                                markNotificationRead(alert.id);
                             }}
                         />
 

@@ -289,7 +289,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             
             doc.setFontSize(10);
             doc.setFont('helvetica', 'normal');
-            doc.text('OFFICE OF THE COMMANDANT • TAC-REPORT V4.0', 110, 32, { align: 'center' });
+            doc.text('DIRECTOR FIELD STUDIES • TAC-REPORT V4.0', 110, 32, { align: 'center' });
             doc.text(`AUDIT_ID: ${auditId} | AUTHORITATIVE_FILE`, 110, 38, { align: 'center' });
 
             // 2. Identification Block (with Photo if available)
@@ -344,7 +344,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             // 4. Command Assessment
             const finalY = (doc as any).lastAutoTable.finalY + 20;
             doc.setFont('helvetica', 'bold');
-            doc.text("II. COMMANDANT'S ASSESSMENT", 20, finalY);
+            doc.text("II. DIRECTOR FIELD STUDIES ASSESSMENT", 20, finalY);
             doc.setFont('times', 'italic');
             doc.setFontSize(12);
             doc.setTextColor(70);
@@ -362,7 +362,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
             doc.text(`GENERATED: ${new Date().toLocaleString()} | NPA_FORENSIC_CMS`, 20, 280);
 
             doc.text('__________________________', 140, 270);
-            doc.text('OFFICE OF THE COMMANDANT', 140, 275);
+            doc.text('DIRECTOR FIELD STUDIES', 140, 275);
 
             if (previewOnly) {
                 const blobUrl = doc.output('bloburl');
@@ -545,7 +545,7 @@ export const CadetRecordModal: React.FC<CadetRecordModalProps> = ({ cadet, activ
                             <section className="p-6 bg-[#f8fafc] border-l-4 border-slate-800 rounded-r-2xl h-fit">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                                     <Shield size={12} className="text-slate-800" />
-                                    Commandant's Institutional Assessment
+                                    Director Field Studies Assessment
                                 </p>
                                 <p className="text-sm font-medium text-slate-600 italic leading-relaxed">
                                     "{standing.label === 'EXEMPLARY' 

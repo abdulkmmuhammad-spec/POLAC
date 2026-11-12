@@ -1,17 +1,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Download, FileText, Calendar, RotateCcw, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { Download, FileText, Calendar, RotateCcw, Search, ChevronDown, ChevronUp, Flag, MessageSquarePlus } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useParade } from '../../../context/ParadeContext';
 import { CadetStatus } from '../../../types';
 import { reportService } from '../../../services/reportService';
 import { dbService, supabase } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
+import { ParadeRemarkDrawer, ParadeRemarkTarget } from './ParadeRemarkDrawer';
 import * as XLSX from 'xlsx';
 
 export const AttendanceAudit: React.FC = () => {
     const location = useLocation();
     const {
         records,
+        remarks,
         refreshData,
         activeRC,
         loadMoreRecords,
@@ -35,6 +37,32 @@ export const AttendanceAudit: React.FC = () => {
     // New RPC States
     const [historicalData, setHistoricalData] = useState<any[]>([]);
     const [isHistoricalLoading, setIsHistoricalLoading] = useState(false);
+    const [activeRemarkTarget, setActiveRemarkTarget] = useState<ParadeRemarkTarget | null>(null);
+
+    const openEventRemarkDrawer = (firstItem: any, items: any[], rc: number) => {
+        const rec = firstItem?.r || {};
+        const matchedRecord = records.find(r => String(r.id) === String(rec.id));
+        if (matchedRecord) {
+            setActiveRemarkTarget(matchedRecord);
+            return;
+        }
+        const absentCount = items.filter(i => String(i.status).toLowerCase() === 'absent').length;
+        const sickCount = items.filter(i => String(i.status).toLowerCase() === 'sick').length;
+        const detentionCount = items.filter(i => String(i.status).toLowerCase() === 'detention').length;
+        setActiveRemarkTarget({
+            id: rec.id || `${rc}-${rec.date}-${rec.paradeType}`,
+            officerName: rec.officerName || `${formatRC(rc)} Course Officer`,
+            courseNumber: rc || rec.courseNumber,
+            yearGroup: rec.yearGroup || calculateCurrentLevel(rc, activeRC),
+            date: rec.date || new Date().toISOString().split('T')[0],
+            paradeType: rec.paradeType || 'muster',
+            presentCount: rec.presentCount ?? 0,
+            absentCount: rec.absentCount ?? absentCount,
+            sickCount: rec.sickCount ?? sickCount,
+            detentionCount: rec.detentionCount ?? detentionCount,
+            grandTotal: rec.grandTotal ?? items.length
+        });
+    };
 
     // Toggle accordion for an RC
     const toggleRC = (rc: number) => {
@@ -220,41 +248,41 @@ export const AttendanceAudit: React.FC = () => {
             {/* Tactical Control Panel */}
             <div className="bg-white/80 backdrop-blur-md p-4 md:p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-wrap items-center gap-4">
-                        <div className="flex bg-slate-100 p-1 rounded-md shrink-0 border border-slate-200">
+                    <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full sm:w-auto">
+                        <div className="flex bg-slate-100 p-1 rounded-md shrink-0 border border-slate-200 w-full sm:w-auto">
                             <button
                                 onClick={() => setIsDefaultView(true)}
-                                className={`px-5 py-2.5 rounded text-sm font-black uppercase tracking-widest transition-all ${isDefaultView ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+                                className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2.5 rounded text-xs sm:text-sm font-black uppercase tracking-widest transition-all ${isDefaultView ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
                             >
                                 Current Week
                             </button>
                             <button
                                 onClick={() => setIsDefaultView(false)}
-                                className={`px-5 py-2.5 rounded text-sm font-black uppercase tracking-widest transition-all ${!isDefaultView ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+                                className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2.5 rounded text-xs sm:text-sm font-black uppercase tracking-widest transition-all ${!isDefaultView ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
                             >
                                 Historical Trace
                             </button>
                         </div>
 
                         {!isDefaultView && (
-                            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 shrink-0">
+                            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 animate-in fade-in slide-in-from-left-2 w-full sm:w-auto">
                                 <input
                                     type="date"
-                                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-bold uppercase outline-none focus:ring-1 focus:ring-blue-900"
+                                    className="flex-1 sm:flex-initial px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-bold uppercase outline-none focus:ring-1 focus:ring-blue-900"
                                     value={dateRange.start}
                                     onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                                 />
                                 <span className="text-slate-400 font-black text-[10px]">TO</span>
                                 <input
                                     type="date"
-                                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-bold uppercase outline-none focus:ring-1 focus:ring-blue-900"
+                                    className="flex-1 sm:flex-initial px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-bold uppercase outline-none focus:ring-1 focus:ring-blue-900"
                                     value={dateRange.end}
                                     onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                                 />
                                 <button
                                     onClick={handleHistoricalSearch}
                                     disabled={isHistoricalLoading}
-                                    className="px-4 py-2 bg-blue-900 text-white rounded-md text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                                    className="w-full sm:w-auto justify-center px-4 py-2.5 bg-blue-900 text-white rounded-md text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all flex items-center gap-2 disabled:opacity-50"
                                 >
                                     {isHistoricalLoading ? 'SEARCHING...' : 'SEARCH DATABASE'}
                                 </button>
@@ -262,17 +290,17 @@ export const AttendanceAudit: React.FC = () => {
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
                         <button
                             onClick={handleExport}
-                            className="flex items-center gap-3 px-5 py-2.5 bg-emerald-600 text-white rounded-md text-sm font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
+                            className="flex-1 sm:flex-initial justify-center flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-2.5 bg-emerald-600 text-white rounded-md text-xs sm:text-sm font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
                         >
                             <Download size={16} />
                             EXPORT XLS
                         </button>
                         <button
                             onClick={() => reportService.generateAuditReport({ filteredRecords, title: "OFFICIAL AUDIT REPORT", officerName: "COMMANDANT" })}
-                            className="flex items-center gap-3 px-5 py-2.5 bg-blue-900 text-white rounded-md text-sm font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-sm"
+                            className="flex-1 sm:flex-initial justify-center flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-2.5 bg-blue-900 text-white rounded-md text-xs sm:text-sm font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-sm"
                         >
                             <FileText size={16} />
                             GENERATE PDF
@@ -296,7 +324,7 @@ export const AttendanceAudit: React.FC = () => {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-                        <div className="flex bg-slate-100 p-1 rounded-md border border-slate-200">
+                        <div className="flex overflow-x-auto max-w-full bg-slate-100 p-1 rounded-md border border-slate-200 w-full sm:w-auto">
                             {[
                                 { id: 'all', label: 'ALL' },
                                 { id: CadetStatus.ABSENT, label: 'ABSENTEES ONLY' },
@@ -306,31 +334,33 @@ export const AttendanceAudit: React.FC = () => {
                                 <button
                                     key={filter.id}
                                     onClick={() => setAuditStatusFilter(filter.id)}
-                                    className={`px-4 py-2 rounded text-[11.5px] font-black uppercase tracking-tight transition-all ${auditStatusFilter === filter.id ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+                                    className={`shrink-0 px-3 sm:px-4 py-2 rounded text-[11px] font-black uppercase tracking-tight transition-all ${auditStatusFilter === filter.id ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
                                 >
                                     {filter.label}
                                 </button>
                             ))}
                         </div>
 
-                        <select
-                            className="px-5 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm font-black uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-900 appearance-none min-w-[180px]"
-                            value={auditCourseFilter}
-                            onChange={(e) => setAuditCourseFilter(e.target.value)}
-                        >
-                            <option value="all">RC: ALL MODULES</option>
-                            {availableCourses.map(cn => (
-                                <option key={cn} value={cn}>{formatRC(cn)}</option>
-                            ))}
-                        </select>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <select
+                                className="flex-1 sm:flex-initial px-4 sm:px-5 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-xs sm:text-sm font-black uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-900 appearance-none min-w-[140px] sm:min-w-[180px]"
+                                value={auditCourseFilter}
+                                onChange={(e) => setAuditCourseFilter(e.target.value)}
+                            >
+                                <option value="all">RC: ALL MODULES</option>
+                                {availableCourses.map(cn => (
+                                    <option key={cn} value={cn}>{formatRC(cn)}</option>
+                                ))}
+                            </select>
 
-                        <button
-                            onClick={handleReset}
-                            className="p-2.5 text-slate-400 hover:text-blue-900 hover:bg-slate-50 rounded-md transition-all border border-slate-200"
-                            title="Purge Parameters"
-                        >
-                            <RotateCcw size={14} />
-                        </button>
+                            <button
+                                onClick={handleReset}
+                                className="p-2.5 text-slate-400 hover:text-blue-900 hover:bg-slate-50 rounded-md transition-all border border-slate-200 shrink-0"
+                                title="Purge Parameters"
+                            >
+                                <RotateCcw size={14} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -388,7 +418,19 @@ export const AttendanceAudit: React.FC = () => {
                                                                     <Calendar size={14} className="text-blue-900" />
                                                                     <span className="text-sm font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
                                                                 </div>
-                                                                <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest italic">{firstItem.r.paradeType}</p>
+                                                                <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest italic mb-2.5">{firstItem.r.paradeType}</p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openEventRemarkDrawer(firstItem, items, rc)}
+                                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-black uppercase tracking-wider transition-all"
+                                                                >
+                                                                    <Flag size={11} />
+                                                                    <span>
+                                                                        Flag / Remark
+                                                                        {remarks.filter(rm => String(rm.submissionId) === String(firstItem.r.id)).length > 0 &&
+                                                                            ` (${remarks.filter(rm => String(rm.submissionId) === String(firstItem.r.id)).length})`}
+                                                                    </span>
+                                                                </button>
                                                             </td>
                                                             <td className="px-6 py-6 text-center">
                                                                 <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 text-slate-900 text-xs font-black border border-slate-200 shadow-sm">
@@ -468,9 +510,19 @@ export const AttendanceAudit: React.FC = () => {
                                             </div>
                                             <div className="text-right">
                                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter italic mb-1">{firstItem.r.paradeType}</p>
-                                                <span className="text-[10px] font-black text-slate-900 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
-                                                    {items.length} CADETS
-                                                </span>
+                                                <div className="flex items-center gap-1.5 justify-end">
+                                                    <span className="text-[10px] font-black text-slate-900 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
+                                                        {items.length} CADETS
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openEventRemarkDrawer(firstItem, items, rc)}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-black uppercase"
+                                                    >
+                                                        <MessageSquarePlus size={11} />
+                                                        <span>Remark</span>
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="p-4 bg-slate-50/30">
@@ -577,6 +629,12 @@ export const AttendanceAudit: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            <ParadeRemarkDrawer
+                submission={activeRemarkTarget}
+                isOpen={Boolean(activeRemarkTarget)}
+                onClose={() => setActiveRemarkTarget(null)}
+            />
         </div>
     );
 };

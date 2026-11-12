@@ -52,11 +52,18 @@ self.addEventListener('notificationclick', (event) => {
   // Check if the app is already open and focus it, or open a new window
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // If a window is already open to this URL, focus it
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
-        if (client.url === urlToOpen && 'focus' in client) {
-          return client.focus();
+        if ('focus' in client) {
+          client.focus();
+          client.postMessage({
+            type: 'PUSH_NOTIFICATION_CLICK',
+            url: urlToOpen,
+            remarkId: event.notification.data?.remarkId,
+            submissionId: event.notification.data?.submissionId,
+            courseNumber: event.notification.data?.courseNumber
+          });
+          return;
         }
       }
       // Otherwise, open a new window

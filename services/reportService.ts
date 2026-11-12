@@ -234,7 +234,7 @@ export const reportService = {
         doc.setFontSize(11);
         doc.setTextColor(0);
         doc.text('__________________________', 140, currentY + 15);
-        doc.text('OFFICE OF THE COMMANDANT', 140, currentY + 21);
+        doc.text('DIRECTOR FIELD STUDIES', 140, currentY + 21);
         doc.setFontSize(9);
         doc.setTextColor(150);
         doc.text(`VALIDATED SECURE_ID: ${auditId}`, 140, currentY + 27);
@@ -488,7 +488,7 @@ export const reportService = {
             doc.line(15, currentY - 5, 195, currentY - 5);
         });
 
-        // 6. Section C: Commandant’s Assessment (Serif / Times)
+        // 6. Section C: Director Field Studies Assessment (Serif / Times)
         if (currentY > 240) {
             doc.addPage();
             doc.setDrawColor(30, 58, 138);
@@ -500,7 +500,7 @@ export const reportService = {
         doc.setFontSize(14.8);
         doc.setTextColor(30, 58, 138);
         doc.setFont('helvetica', 'bold');
-        doc.text("SECTION C: COMMANDANT'S ASSESSMENT", 15, currentY);
+        doc.text("SECTION C: DIRECTOR FIELD STUDIES ASSESSMENT", 15, currentY);
 
         const sortedByAttendance = [...courseWiseData].sort((a, b) => b.avgAttendance - a.avgAttendance);
         const bestRC = sortedByAttendance[0];
@@ -519,7 +519,7 @@ export const reportService = {
         doc.setFontSize(11);
         doc.setTextColor(0);
         doc.text('__________________________', 140, 260);
-        doc.text('OFFICE OF THE COMMANDANT', 140, 266);
+        doc.text('DIRECTOR FIELD STUDIES', 140, 266);
         doc.setFontSize(9);
         doc.setTextColor(150);
         doc.text(`VALIDATED SECURE_ID: ${auditId}`, 140, 272);

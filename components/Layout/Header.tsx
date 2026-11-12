@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCcw, LogOut, Bell, Menu, Volume2, VolumeX } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { RefreshCcw, LogOut, Bell, Menu, Volume2, VolumeX, Radio, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -25,18 +25,33 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
     const [showDrawer, setShowDrawer] = useState(false);
     const [showConfirmClear, setShowConfirmClear] = useState(false);
     const [isAudioArmed, setIsAudioArmed] = useState(false);
+    const [showSystemStatus, setShowSystemStatus] = useState(false);
     const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
     const [showPreviewModal, setShowPreviewModal] = useState(false);
+    const statusPopoverRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (statusPopoverRef.current && !statusPopoverRef.current.contains(event.target as Node)) {
+                setShowSystemStatus(false);
+            }
+        };
+        if (showSystemStatus) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showSystemStatus]);
 
     // Determine if user is commandant (sees all) or course officer (sees only own)
     const isCommandant = currentUser?.role === UserRole.COMMANDANT;
     const officerNameFilter = !isCommandant ? currentUser?.fullName : undefined;
 
-    // Filter notifications for display - course officers only see their own
+    // Filter notifications for display - course officers see notifications matching their name or assigned course
     const displayNotifications = isCommandant
         ? notifications
         : notifications.filter(n =>
             n.officerName?.toLowerCase() === currentUser?.fullName?.toLowerCase() ||
+            (currentUser?.courseNumber && n.courseNumber && Number(n.courseNumber) === Number(currentUser.courseNumber)) ||
             !n.officerName
         );
 
@@ -53,10 +68,14 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
 
     const toggleAudio = (e: React.MouseEvent) => {
         e.stopPropagation();
-        audioService.unlock().then(() => {
-            setIsAudioArmed(true);
-            audioService.play('success');
-        });
+        if (isAudioArmed) {
+            setIsAudioArmed(false);
+        } else {
+            audioService.unlock().then(() => {
+                setIsAudioArmed(true);
+                audioService.play('success');
+            });
+        }
     };
 
     const handleClearLogs = async () => {
@@ -72,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
 
     return (
         <header className="bg-blue-900 border-b border-white/10 h-20 flex items-center justify-between px-4 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-            <div className="flex items-center gap-1 md:gap-4 min-w-0">
+            <div className="flex items-center gap-2 md:gap-4 min-w-0">
                 {onMenuClick && (
                     <button
                         onClick={onMenuClick}
@@ -81,37 +100,105 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                         <Menu size={24} />
                     </button>
                 )}
-                <div className="flex items-center gap-3">
-                    <div className="flex w-8 h-8 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex w-8 h-8 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 items-center justify-center shrink-0 shadow-sm overflow-hidden">
                         <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col min-w-0">
                         <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
-                        <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight">{title}</h2>
+                        <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight truncate">{title}</h2>
                     </div>
                 </div>
-                <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded-full border border-emerald-500/20 shrink-0 uppercase tracking-widest ml-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    LIVE AUTO-SYNC
-                </span>
             </div>
 
-            <div className="flex items-center gap-1 md:gap-4 shrink-0">
-                {/* Audio Status Guard */}
-                <button
-                    onClick={toggleAudio}
-                    className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full transition-all border ${
-                        isAudioArmed 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400 animate-pulse'
-                    }`}
-                    title={isAudioArmed ? 'Audio Alerts Armed' : 'Click to Arm Audio Alerts'}
-                >
-                    {isAudioArmed ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                    <span className="text-[9px] font-black uppercase tracking-wider">
-                        {isAudioArmed ? 'Armed' : 'Muted'}
-                    </span>
-                </button>
+            <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
+                {/* Collapsed System Status Popover (Relocated Live Auto-Sync & Audio State) */}
+                <div className="relative" ref={statusPopoverRef}>
+                    <button
+                        type="button"
+                        onClick={() => setShowSystemStatus(prev => !prev)}
+                        className="p-2.5 rounded-xl transition-all relative text-blue-200 hover:text-white hover:bg-white/10 border border-white/5 bg-white/5 flex items-center justify-center"
+                        title="System Telemetry & Audio Status"
+                        aria-label="System Telemetry & Audio Status"
+                    >
+                        <Radio size={18} />
+                        <span
+                            className={`absolute top-2 right-2 w-2 h-2 rounded-full border border-blue-900 ${
+                                isAudioArmed ? 'bg-emerald-400' : 'bg-blue-400'
+                            }`}
+                        />
+                    </button>
+
+                    <AnimatePresence>
+                        {showSystemStatus && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                                transition={{ duration: 0.15 }}
+                                className="fixed inset-x-3 top-[5.25rem] sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2.5 sm:w-72 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700/80 p-4 z-50 space-y-3.5"
+                            >
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                                        System Telemetry
+                                    </span>
+                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded-full border border-emerald-500/20 uppercase tracking-widest">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                        Live Auto-Sync
+                                    </span>
+                                </div>
+
+                                <div className="space-y-2.5">
+                                    <div className="flex items-center justify-between bg-slate-800/70 px-3 py-2.5 rounded-xl border border-slate-700/60">
+                                        <div className="flex items-center gap-2.5">
+                                            <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                                            <div>
+                                                <p className="text-[11px] font-bold text-slate-200 leading-none">
+                                                    Realtime Stream
+                                                </p>
+                                                <p className="text-[9px] text-slate-400 mt-1">
+                                                    WebSocket + 20s resilient sync
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase">
+                                            Active
+                                        </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between bg-slate-800/70 px-3 py-2.5 rounded-xl border border-slate-700/60">
+                                        <div className="flex items-center gap-2.5">
+                                            {isAudioArmed ? (
+                                                <Volume2 size={15} className="text-emerald-400 shrink-0" />
+                                            ) : (
+                                                <VolumeX size={15} className="text-slate-400 shrink-0" />
+                                            )}
+                                            <div>
+                                                <p className="text-[11px] font-bold text-slate-200 leading-none">
+                                                    Acoustic Alerts
+                                                </p>
+                                                <p className="text-[9px] text-slate-400 mt-1">
+                                                    {isAudioArmed ? 'Tactical chimes armed' : 'Audio chimes muted'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={toggleAudio}
+                                            className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all border ${
+                                                isAudioArmed
+                                                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                                                    : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                                            }`}
+                                        >
+                                            {isAudioArmed ? 'Armed' : 'Muted'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
 
                 {/* Notification Bell */}
                 <button

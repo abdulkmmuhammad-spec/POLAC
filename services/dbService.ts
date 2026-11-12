@@ -12,7 +12,9 @@ import {
   CourseImpactBreakdownItem,
   CoursePurgeMode,
   CoursePurgeSnapshot,
-  BulkCoursePurgeResult
+  BulkCoursePurgeResult,
+  CommandantRemark,
+  CommandantRemarkStatus
 } from '../types';
 
 /**
@@ -596,7 +598,17 @@ export const dbService = {
 
   // ─── Notifications ────────────────────────────────────────────────────────
 
-  getNotifications: async (officerName?: string): Promise<{ data: Notification[]; error: any }> => {
+  getNotifications: async (officerName?: string, courseNumber?: number): Promise<{ data: Notification[]; error: any }> => {
+    const getLocalReadIds = (): Set<string> => {
+      if (typeof window === 'undefined') return new Set();
+      try {
+        const raw = localStorage.getItem('polac_resolved_notification_ids');
+        return raw ? new Set(JSON.parse(raw)) : new Set();
+      } catch {
+        return new Set();
+      }
+    };
+
     try {
       let query = supabase
         .from('notifications')
@@ -604,27 +616,35 @@ export const dbService = {
         .is('archived_at', null) // Only fetch non-archived items by default
         .order('timestamp', { ascending: false });
 
-      // If officerName provided, filter by it (for course officers)
-      if (officerName) {
+      // If officerName or courseNumber provided (for course officers), match either officer_name or course_number
+      if (officerName && courseNumber && courseNumber > 0) {
+        query = query.or(`officer_name.ilike.%${officerName}%,course_number.eq.${courseNumber}`);
+      } else if (officerName) {
         query = query.ilike('officer_name', `%${officerName}%`);
+      } else if (courseNumber && courseNumber > 0) {
+        query = query.eq('course_number', courseNumber);
       }
 
       const { data, error } = await query.limit(50);
 
       if (error) throw error;
+      const localReadIds = getLocalReadIds();
       return {
-        data: (data || []).map(n => ({
-          id: n.id,
-          type: n.type,
-          title: n.title,
-          content: n.content,
-          timestamp: n.timestamp,
-          read: n.read,
-          officerName: n.officer_name,
-          yearGroup: n.year_group,
-          courseNumber: n.course_number,
-          archivedAt: n.archived_at
-        })),
+        data: (data || []).map(n => {
+          const isLocallyRead = localReadIds.has(String(n.id));
+          return {
+            id: n.id,
+            type: n.type,
+            title: n.title,
+            content: n.content,
+            timestamp: n.timestamp,
+            read: Boolean(n.read || isLocallyRead),
+            officerName: n.officer_name,
+            yearGroup: n.year_group,
+            courseNumber: n.course_number,
+            archivedAt: n.archived_at
+          };
+        }),
         error: null
       };
     } catch (err: any) {
@@ -739,6 +759,11 @@ export const dbService = {
 
       if (pushUsers && pushUsers.length > 0) {
         const uniqueUserIds = Array.from(new Set(pushUsers.map(p => p.user_id)));
+        const targetUrl =
+          notif.metadata?.route ||
+          (notif.type === 'commandant_remark' || notif.type === 'remark_resolved'
+            ? '/officer/history'
+            : '/');
         for (const uid of uniqueUserIds) {
           supabase.functions.invoke('send-web-push', {
             body: {
@@ -747,7 +772,10 @@ export const dbService = {
                 title: notif.title,
                 body: notif.content,
                 icon: '/logo.png',
-                url: '/'
+                url: targetUrl,
+                remarkId: notif.metadata?.remarkId,
+                submissionId: notif.metadata?.recordId,
+                courseNumber: notif.courseNumber
               }
             }
           }).catch(pushErr => console.warn('[Push Notification] Edge function dispatch warning for user:', uid, pushErr));
@@ -760,6 +788,16 @@ export const dbService = {
   },
 
   markNotificationRead: async (id: string) => {
+    if (typeof window !== 'undefined' && id) {
+      try {
+        const raw = localStorage.getItem('polac_resolved_notification_ids');
+        const list: string[] = raw ? JSON.parse(raw) : [];
+        if (!list.includes(String(id))) {
+          list.unshift(String(id));
+          localStorage.setItem('polac_resolved_notification_ids', JSON.stringify(list.slice(0, 500)));
+        }
+      } catch {}
+    }
     try {
       const { error } = await supabase
         .from('notifications')
@@ -1669,6 +1707,718 @@ export const dbService = {
     }
 
     throw new Error('Could not restore snapshot: snapshot record not found or not recoverable.');
+  },
+
+  // ─── Commandant Parade Remarks & Audit Trail ──────────────────────────────
+
+  getCommandantRemarks: async (filters?: {
+    submissionId?: string | number;
+    courseOfficerId?: string | number;
+    courseNumber?: number;
+    status?: CommandantRemarkStatus | 'all';
+  }): Promise<CommandantRemark[]> => {
+    const readLocalCache = (): CommandantRemark[] => {
+      if (typeof window === 'undefined') return [];
+      try {
+        const raw = localStorage.getItem('polac_commandant_remarks');
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const writeLocalCache = (items: CommandantRemark[]) => {
+      if (typeof window === 'undefined') return;
+      try {
+        localStorage.setItem('polac_commandant_remarks', JSON.stringify(items));
+      } catch {}
+    };
+
+    const applyFilters = (list: CommandantRemark[]): CommandantRemark[] => {
+      return list
+        .filter(item => {
+          if (filters?.submissionId && String(item.submissionId) !== String(filters.submissionId)) {
+            return false;
+          }
+          if (filters?.courseOfficerId && item.courseOfficerId && String(item.courseOfficerId) !== String(filters.courseOfficerId)) {
+            // Also allow matching by courseNumber if officer is assigned to that course
+            if (!filters?.courseNumber || Number(item.courseNumber) !== Number(filters.courseNumber)) {
+              return false;
+            }
+          }
+          if (filters?.courseNumber && item.courseNumber && Number(item.courseNumber) !== Number(filters.courseNumber)) {
+            return false;
+          }
+          if (filters?.status && filters.status !== 'all' && item.status !== filters.status) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    };
+
+    const localItems = readLocalCache();
+
+    // Synchronize cross-device remarks from public.notifications (which is always provisioned in Supabase)
+    try {
+      let notifQuery = supabase
+        .from('notifications')
+        .select('id, type, title, content, timestamp, read, officer_name, year_group, course_number, archived_at')
+        .in('type', ['commandant_remark', 'remark_response', 'remark_resolved'])
+        .order('timestamp', { ascending: true })
+        .limit(200);
+
+      if (filters?.courseNumber) {
+        notifQuery = notifQuery.eq('course_number', filters.courseNumber);
+      }
+
+      const { data: notifRows, error: notifError } = await notifQuery;
+
+      if (!notifError && notifRows && notifRows.length > 0) {
+        const reconstructedByCourse = new Map<number, CommandantRemark[]>();
+
+        for (const row of notifRows) {
+          const cNum = Number(row.course_number || 0);
+          if (!reconstructedByCourse.has(cNum)) {
+            reconstructedByCourse.set(cNum, []);
+          }
+          const courseRemarks = reconstructedByCourse.get(cNum)!;
+          const contentStr = String(row.content || '');
+          const titleStr = String(row.title || '');
+
+          if (row.type === 'commandant_remark') {
+            const match = contentStr.match(/^(?:Follow-up inquiry|Inquiry) on ([A-Za-z0-9_ -]+)\s*\(([^)]+)\):\s*"([\s\S]*)"$/i);
+            const paradeType = match ? match[1].trim().toLowerCase() : 'muster';
+            const paradeDate = match ? match[2].trim() : String(row.timestamp || '').split('T')[0];
+            const remarkText = match ? match[3].trim() : contentStr;
+            const isFollowUp = titleStr.toLowerCase().includes('follow-up') || contentStr.toLowerCase().startsWith('follow-up');
+
+            const latestActive = [...courseRemarks].reverse().find(r => r.status !== 'resolved');
+
+            if (isFollowUp && latestActive) {
+              const updatedThread = [...(latestActive.thread || [])];
+              if (latestActive.remarkText) {
+                updatedThread.push({
+                  id: `msg-cmd-${latestActive.updatedAt}`,
+                  senderRole: 'commandant',
+                  senderName: latestActive.commandantName || 'Director Field Studies',
+                  message: latestActive.remarkText,
+                  timestamp: latestActive.updatedAt || latestActive.createdAt
+                });
+              }
+              if (latestActive.officerResponse) {
+                updatedThread.push({
+                  id: `msg-off-${latestActive.respondedAt || latestActive.updatedAt}`,
+                  senderRole: 'course_officer',
+                  senderName: latestActive.courseOfficerName || row.officer_name || 'Course Officer',
+                  message: latestActive.officerResponse,
+                  timestamp: latestActive.respondedAt || latestActive.updatedAt
+                });
+              }
+              latestActive.remarkText = remarkText;
+              latestActive.officerResponse = null;
+              latestActive.respondedAt = null;
+              latestActive.status = 'pending';
+              latestActive.resolvedAt = null;
+              latestActive.thread = updatedThread;
+              latestActive.updatedAt = row.timestamp;
+            } else {
+              // Check if localItems already has a matching remark for this course + remarkText
+              const matchingLocal = localItems.find(
+                l =>
+                  Number(l.courseNumber || 0) === cNum &&
+                  (l.remarkText === remarkText ||
+                    l.thread?.some(t => t.message === remarkText))
+              );
+
+              courseRemarks.push({
+                id: matchingLocal?.id || `notif-rmk-${row.id}`,
+                submissionId: matchingLocal?.submissionId || `rc-${cNum || 'all'}-${paradeDate}`,
+                commandantId: matchingLocal?.commandantId || null,
+                commandantName: matchingLocal?.commandantName || 'Director Field Studies',
+                courseOfficerId: matchingLocal?.courseOfficerId || null,
+                courseOfficerName: row.officer_name || matchingLocal?.courseOfficerName || `RC ${cNum} Course Officer`,
+                courseNumber: cNum || null,
+                paradeType: matchingLocal?.paradeType || paradeType,
+                paradeDate: matchingLocal?.paradeDate || paradeDate,
+                remarkText,
+                officerResponse: null,
+                respondedAt: null,
+                status: 'pending',
+                resolvedAt: null,
+                thread: matchingLocal?.thread ? [...matchingLocal.thread] : [],
+                createdAt: row.timestamp,
+                updatedAt: row.timestamp
+              });
+            }
+          } else if (row.type === 'remark_response') {
+            const respMatch = contentStr.match(/responded to parade inquiry:\s*"([\s\S]*)"$/i);
+            const parsedResponse = respMatch ? respMatch[1].trim() : contentStr;
+            const target = [...courseRemarks].reverse().find(r => r.status !== 'resolved');
+            if (target) {
+              target.officerResponse = parsedResponse;
+              target.respondedAt = row.timestamp;
+              target.courseOfficerName = row.officer_name || target.courseOfficerName;
+              target.status = 'addressed';
+              target.updatedAt = row.timestamp;
+            }
+          } else if (row.type === 'remark_resolved') {
+            const target = [...courseRemarks].reverse().find(r => r.status !== 'resolved') || courseRemarks[courseRemarks.length - 1];
+            if (target) {
+              target.status = 'resolved';
+              target.resolvedAt = row.timestamp;
+              target.updatedAt = row.timestamp;
+            }
+          }
+        }
+
+        const reconstructedList = Array.from(reconstructedByCourse.values()).flat();
+
+        // Merge reconstructed remarks with local cache
+        const mergedById = new Map<string, CommandantRemark>();
+        for (const item of localItems) {
+          mergedById.set(item.id, item);
+        }
+        for (const rem of reconstructedList) {
+          const existing = mergedById.get(rem.id);
+          if (!existing) {
+            mergedById.set(rem.id, rem);
+          } else {
+            const existingTime = new Date(existing.updatedAt || existing.createdAt).getTime();
+            const remTime = new Date(rem.updatedAt || rem.createdAt).getTime();
+            if (remTime >= existingTime || (existing.status === 'pending' && rem.status !== 'pending')) {
+              mergedById.set(rem.id, {
+                ...existing,
+                ...rem,
+                submissionId: existing.submissionId || rem.submissionId,
+                thread: (rem.thread && rem.thread.length >= (existing.thread?.length || 0)) ? rem.thread : existing.thread
+              });
+            }
+          }
+        }
+
+        const mergedList = Array.from(mergedById.values());
+        writeLocalCache(mergedList);
+        return applyFilters(mergedList);
+      }
+    } catch (err) {
+      console.warn('[dbService] getCommandantRemarks notification sync fallback:', err);
+    }
+
+    return applyFilters(localItems);
+  },
+
+  createCommandantRemark: async (payload: {
+    submissionId: string | number;
+    commandantId?: string | number | null;
+    commandantName?: string;
+    courseOfficerId?: string | number | null;
+    courseOfficerName?: string;
+    courseNumber?: number;
+    paradeType?: string;
+    paradeDate?: string;
+    remarkText: string;
+  }): Promise<CommandantRemark> => {
+    const nowISO = new Date().toISOString();
+    const generatedId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `rmk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const newRemark: CommandantRemark = {
+      id: generatedId,
+      submissionId: String(payload.submissionId),
+      commandantId: payload.commandantId ? String(payload.commandantId) : null,
+      commandantName: payload.commandantName || 'COMMANDANT',
+      courseOfficerId: payload.courseOfficerId ? String(payload.courseOfficerId) : null,
+      courseOfficerName: payload.courseOfficerName || 'Course Officer',
+      courseNumber: payload.courseNumber ?? null,
+      paradeType: payload.paradeType || 'muster',
+      paradeDate: payload.paradeDate || nowISO.split('T')[0],
+      remarkText: payload.remarkText.trim(),
+      officerResponse: null,
+      respondedAt: null,
+      status: 'pending',
+      resolvedAt: null,
+      createdAt: nowISO,
+      updatedAt: nowISO
+    };
+
+    if (import.meta.env.VITE_ENABLE_REMARKS_TABLE === 'true') {
+      try {
+        const { data, error } = await supabase
+          .from('commandant_remarks')
+          .insert({
+            id: newRemark.id,
+            submission_id: newRemark.submissionId,
+            commandant_id: newRemark.commandantId,
+            commandant_name: newRemark.commandantName,
+            course_officer_id: newRemark.courseOfficerId,
+            course_officer_name: newRemark.courseOfficerName,
+            course_number: newRemark.courseNumber,
+            parade_type: newRemark.paradeType,
+            parade_date: newRemark.paradeDate,
+            remark_text: newRemark.remarkText,
+            status: 'pending',
+            created_at: nowISO,
+            updated_at: nowISO
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          newRemark.id = data.id;
+        }
+      } catch {}
+    }
+
+    // Persist in localStorage cache as well for resilience
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('polac_commandant_remarks');
+        const list: CommandantRemark[] = raw ? JSON.parse(raw) : [];
+        localStorage.setItem('polac_commandant_remarks', JSON.stringify([newRemark, ...list]));
+        window.dispatchEvent(new CustomEvent('commandant-remarks-updated'));
+      } catch {}
+    }
+
+    // Targeted Notification Dispatch to Course Officer
+    await dbService.addNotification({
+      type: 'commandant_remark',
+      title: `Commandant's Parade Remark — RC ${newRemark.courseNumber || 'N/A'}`,
+      content: `Inquiry on ${String(newRemark.paradeType || 'Parade').toUpperCase()} (${newRemark.paradeDate}): "${newRemark.remarkText}"`,
+      timestamp: nowISO,
+      read: false,
+      officerName: newRemark.courseOfficerName || 'Course Officer',
+      yearGroup: 1,
+      courseNumber: newRemark.courseNumber || undefined,
+      metadata: {
+        recordId: newRemark.submissionId,
+        remarkId: newRemark.id,
+        courseNumber: newRemark.courseNumber || undefined,
+        paradeType: newRemark.paradeType || undefined,
+        date: newRemark.paradeDate || undefined,
+        route: '/officer/history'
+      }
+    });
+
+    // Forensic Audit Trail
+    await dbService.logAuditEvent({
+      actorId: newRemark.commandantId || null,
+      actorName: newRemark.commandantName,
+      actionType: 'COMMANDANT_REMARK_ISSUED',
+      targetId: String(newRemark.submissionId),
+      payload: {
+        remark_id: newRemark.id,
+        submission_id: newRemark.submissionId,
+        course_number: newRemark.courseNumber,
+        course_officer_name: newRemark.courseOfficerName,
+        parade_type: newRemark.paradeType,
+        parade_date: newRemark.paradeDate,
+        remark_text: newRemark.remarkText
+      }
+    });
+
+    return newRemark;
+  },
+
+  respondToCommandantRemark: async (payload: {
+    remarkId: string;
+    officerResponse: string;
+    officerName: string;
+    officerId?: string | number | null;
+  }): Promise<CommandantRemark | null> => {
+    const nowISO = new Date().toISOString();
+    const trimmedResponse = payload.officerResponse.trim();
+    let updatedRemark: CommandantRemark | null = null;
+
+    if (import.meta.env.VITE_ENABLE_REMARKS_TABLE === 'true') {
+      try {
+        const { data, error } = await supabase
+          .from('commandant_remarks')
+          .update({
+            officer_response: trimmedResponse,
+            responded_at: nowISO,
+            status: 'addressed',
+            updated_at: nowISO
+          })
+          .eq('id', payload.remarkId)
+          .select()
+          .single();
+
+        if (!error && data) {
+          updatedRemark = {
+            id: data.id,
+            submissionId: String(data.submission_id),
+            commandantId: data.commandant_id,
+            commandantName: data.commandant_name || 'COMMANDANT',
+            courseOfficerId: data.course_officer_id,
+            courseOfficerName: data.course_officer_name,
+            courseNumber: data.course_number,
+            paradeType: data.parade_type,
+            paradeDate: data.parade_date,
+            remarkText: data.remark_text,
+            officerResponse: data.officer_response,
+            respondedAt: data.responded_at,
+            status: (data.status as CommandantRemarkStatus) || 'addressed',
+            resolvedAt: data.resolved_at,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+          };
+        }
+      } catch {}
+    }
+
+    // Update localStorage cache
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('polac_commandant_remarks');
+        if (raw) {
+          const list: CommandantRemark[] = JSON.parse(raw);
+          const idx = list.findIndex(r => r.id === payload.remarkId);
+          if (idx !== -1) {
+            list[idx] = {
+              ...list[idx],
+              officerResponse: trimmedResponse,
+              respondedAt: nowISO,
+              status: 'addressed',
+              updatedAt: nowISO
+            };
+            if (!updatedRemark) updatedRemark = list[idx];
+            localStorage.setItem('polac_commandant_remarks', JSON.stringify(list));
+          }
+        }
+        window.dispatchEvent(new CustomEvent('commandant-remarks-updated'));
+      } catch {}
+    }
+
+    // Mark the previous commandant_remark notifications for this course as read in Supabase
+    try {
+      if (updatedRemark?.courseNumber) {
+        await supabase
+          .from('notifications')
+          .update({ read: true })
+          .eq('course_number', updatedRemark.courseNumber)
+          .eq('type', 'commandant_remark');
+      }
+    } catch {}
+
+    // Notify Commandant of Course Officer's response
+    await dbService.addNotification({
+      type: 'remark_response',
+      title: `Officer Justification Filed — RC ${updatedRemark?.courseNumber || 'N/A'}`,
+      content: `${payload.officerName} responded to parade inquiry: "${trimmedResponse}"`,
+      timestamp: nowISO,
+      read: false,
+      officerName: payload.officerName,
+      yearGroup: 1,
+      courseNumber: updatedRemark?.courseNumber || undefined,
+      metadata: {
+        recordId: updatedRemark?.submissionId,
+        remarkId: payload.remarkId,
+        courseNumber: updatedRemark?.courseNumber || undefined,
+        paradeType: updatedRemark?.paradeType || undefined,
+        route: '/commandant'
+      }
+    });
+
+    await dbService.logAuditEvent({
+      actorId: payload.officerId ? String(payload.officerId) : null,
+      actorName: payload.officerName,
+      actionType: 'COMMANDANT_REMARK_RESPONDED',
+      targetId: updatedRemark?.submissionId || payload.remarkId,
+      payload: {
+        remark_id: payload.remarkId,
+        submission_id: updatedRemark?.submissionId,
+        course_number: updatedRemark?.courseNumber,
+        officer_response: trimmedResponse
+      }
+    });
+
+    return updatedRemark;
+  },
+
+  resolveCommandantRemark: async (payload: {
+    remarkId: string;
+    commandantName?: string;
+    commandantId?: string | number | null;
+  }): Promise<CommandantRemark | null> => {
+    const nowISO = new Date().toISOString();
+    let resolvedRemark: CommandantRemark | null = null;
+
+    if (import.meta.env.VITE_ENABLE_REMARKS_TABLE === 'true') {
+      try {
+        const { data, error } = await supabase
+          .from('commandant_remarks')
+          .update({
+            status: 'resolved',
+            resolved_at: nowISO,
+            updated_at: nowISO
+          })
+          .eq('id', payload.remarkId)
+          .select()
+          .single();
+
+        if (!error && data) {
+          resolvedRemark = {
+            id: data.id,
+            submissionId: String(data.submission_id),
+            commandantId: data.commandant_id,
+            commandantName: data.commandant_name || 'COMMANDANT',
+            courseOfficerId: data.course_officer_id,
+            courseOfficerName: data.course_officer_name,
+            courseNumber: data.course_number,
+            paradeType: data.parade_type,
+            paradeDate: data.parade_date,
+            remarkText: data.remark_text,
+            officerResponse: data.officer_response,
+            respondedAt: data.responded_at,
+            status: 'resolved',
+            resolvedAt: data.resolved_at,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+          };
+        }
+      } catch {}
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('polac_commandant_remarks');
+        if (raw) {
+          const list: CommandantRemark[] = JSON.parse(raw);
+          const idx = list.findIndex(r => r.id === payload.remarkId);
+          if (idx !== -1) {
+            list[idx] = {
+              ...list[idx],
+              status: 'resolved',
+              resolvedAt: nowISO,
+              updatedAt: nowISO
+            };
+            if (!resolvedRemark) resolvedRemark = list[idx];
+            localStorage.setItem('polac_commandant_remarks', JSON.stringify(list));
+          }
+        }
+        window.dispatchEvent(
+          new CustomEvent('commandant-remarks-updated', {
+            detail: {
+              action: 'resolved',
+              remarkId: payload.remarkId,
+              courseNumber: resolvedRemark?.courseNumber
+            }
+          })
+        );
+      } catch {}
+    }
+
+    // If resolvedRemark was not found in localStorage, look it up via getCommandantRemarks()
+    if (!resolvedRemark) {
+      try {
+        const allRemarks = await dbService.getCommandantRemarks();
+        const found = allRemarks.find(r => String(r.id) === String(payload.remarkId));
+        if (found) {
+          resolvedRemark = {
+            ...found,
+            status: 'resolved',
+            resolvedAt: nowISO,
+            updatedAt: nowISO
+          };
+        }
+      } catch {}
+    }
+
+    // Mark related remark notifications for this course as read in Supabase so Priority HUD will not resurface them
+    try {
+      if (resolvedRemark?.courseNumber) {
+        await supabase
+          .from('notifications')
+          .update({ read: true })
+          .eq('course_number', resolvedRemark.courseNumber)
+          .in('type', ['commandant_remark', 'remark_response']);
+      }
+    } catch {}
+
+    // Always dispatch resolution notification & Web Push to the Course Officer's phone
+    await dbService.addNotification({
+      type: 'remark_resolved',
+      title: `Parade Inquiry Resolved — RC ${resolvedRemark?.courseNumber || 'N/A'}`,
+      content: `Director Field Studies acknowledged and resolved the inquiry on ${String(resolvedRemark?.paradeType || 'Parade').toUpperCase()} (${resolvedRemark?.paradeDate || nowISO.split('T')[0]}).`,
+      timestamp: nowISO,
+      read: false,
+      officerName:
+        resolvedRemark?.courseOfficerName ||
+        (resolvedRemark?.courseNumber ? `RC ${resolvedRemark.courseNumber} Course Officer` : 'Course Officer'),
+      yearGroup: 1,
+      courseNumber: resolvedRemark?.courseNumber || undefined,
+      metadata: {
+        recordId: resolvedRemark?.submissionId,
+        remarkId: payload.remarkId,
+        courseNumber: resolvedRemark?.courseNumber || undefined,
+        route: '/officer/history'
+      }
+    });
+
+    await dbService.logAuditEvent({
+      actorId: payload.commandantId ? String(payload.commandantId) : null,
+      actorName: payload.commandantName || 'COMMANDANT',
+      actionType: 'COMMANDANT_REMARK_RESOLVED',
+      targetId: resolvedRemark?.submissionId || payload.remarkId,
+      payload: {
+        remark_id: payload.remarkId,
+        submission_id: resolvedRemark?.submissionId,
+        course_number: resolvedRemark?.courseNumber,
+        status: 'resolved'
+      }
+    });
+
+    return resolvedRemark;
+  },
+
+  followUpCommandantRemark: async (payload: {
+    remark: CommandantRemark;
+    followUpText: string;
+    commandantName?: string;
+    commandantId?: string | number | null;
+  }): Promise<CommandantRemark | null> => {
+    const nowISO = new Date().toISOString();
+    const trimmedFollowUp = payload.followUpText.trim();
+    const prevRemark = payload.remark;
+
+    // Build preserved conversation history thread
+    const updatedThread = [...(prevRemark.thread || [])];
+    if (prevRemark.remarkText) {
+      updatedThread.push({
+        id: `msg-cmd-${Date.now()}-1`,
+        senderRole: 'commandant',
+        senderName: prevRemark.commandantName || 'COMMANDANT',
+        message: prevRemark.remarkText,
+        timestamp: prevRemark.updatedAt || prevRemark.createdAt
+      });
+    }
+    if (prevRemark.officerResponse) {
+      updatedThread.push({
+        id: `msg-off-${Date.now()}-2`,
+        senderRole: 'course_officer',
+        senderName: prevRemark.courseOfficerName || 'Course Officer',
+        message: prevRemark.officerResponse,
+        timestamp: prevRemark.respondedAt || nowISO
+      });
+    }
+
+    let updatedRemark: CommandantRemark = {
+      ...prevRemark,
+      remarkText: trimmedFollowUp,
+      officerResponse: null,
+      respondedAt: null,
+      status: 'pending',
+      resolvedAt: null,
+      thread: updatedThread,
+      updatedAt: nowISO
+    };
+
+    if (import.meta.env.VITE_ENABLE_REMARKS_TABLE === 'true') {
+      try {
+        const { data, error } = await supabase
+          .from('commandant_remarks')
+          .update({
+            remark_text: trimmedFollowUp,
+            officer_response: null,
+            responded_at: null,
+            status: 'pending',
+            resolved_at: null,
+            updated_at: nowISO
+          })
+          .eq('id', prevRemark.id)
+          .select()
+          .single();
+
+        if (!error && data) {
+          updatedRemark = {
+            ...updatedRemark,
+            id: data.id,
+            submissionId: String(data.submission_id),
+            remarkText: data.remark_text,
+            officerResponse: data.officer_response,
+            respondedAt: data.responded_at,
+            status: (data.status as CommandantRemarkStatus) || 'pending',
+            updatedAt: data.updated_at
+          };
+        }
+      } catch {}
+    }
+
+    // Persist updated remark & thread in localStorage cache
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('polac_commandant_remarks');
+        const list: CommandantRemark[] = raw ? JSON.parse(raw) : [];
+        const idx = list.findIndex(r => r.id === prevRemark.id);
+        if (idx !== -1) {
+          list[idx] = updatedRemark;
+        } else {
+          list.unshift(updatedRemark);
+        }
+        localStorage.setItem('polac_commandant_remarks', JSON.stringify(list));
+        window.dispatchEvent(
+          new CustomEvent('commandant-remarks-updated', {
+            detail: {
+              action: 'followed_up',
+              remarkId: updatedRemark.id,
+              courseNumber: updatedRemark.courseNumber
+            }
+          })
+        );
+      } catch {}
+    }
+
+    // Mark prior remark_response notifications for this course as read so the Commandant's Priority HUD clears
+    try {
+      if (updatedRemark.courseNumber) {
+        await supabase
+          .from('notifications')
+          .update({ read: true })
+          .eq('course_number', updatedRemark.courseNumber)
+          .in('type', ['commandant_remark', 'remark_response']);
+      }
+    } catch {}
+
+    // Dispatch Follow-Up Notification to Course Officer
+    await dbService.addNotification({
+      type: 'commandant_remark',
+      title: `Commandant's Parade Remark (Follow-Up) — RC ${updatedRemark.courseNumber || 'N/A'}`,
+      content: `Follow-up inquiry on ${String(updatedRemark.paradeType || 'Parade').toUpperCase()} (${updatedRemark.paradeDate}): "${trimmedFollowUp}"`,
+      timestamp: nowISO,
+      read: false,
+      officerName: updatedRemark.courseOfficerName || 'Course Officer',
+      yearGroup: 1,
+      courseNumber: updatedRemark.courseNumber || undefined,
+      metadata: {
+        recordId: updatedRemark.submissionId,
+        remarkId: updatedRemark.id,
+        courseNumber: updatedRemark.courseNumber || undefined,
+        paradeType: updatedRemark.paradeType || undefined,
+        date: updatedRemark.paradeDate || undefined,
+        route: '/officer/history'
+      }
+    });
+
+    await dbService.logAuditEvent({
+      actorId: payload.commandantId ? String(payload.commandantId) : null,
+      actorName: payload.commandantName || 'COMMANDANT',
+      actionType: 'COMMANDANT_REMARK_ISSUED',
+      targetId: String(updatedRemark.submissionId),
+      payload: {
+        remark_id: updatedRemark.id,
+        submission_id: updatedRemark.submissionId,
+        course_number: updatedRemark.courseNumber,
+        course_officer_name: updatedRemark.courseOfficerName,
+        parade_type: updatedRemark.paradeType,
+        parade_date: updatedRemark.paradeDate,
+        remark_text: `[FOLLOW-UP] ${trimmedFollowUp}`
+      }
+    });
+
+    return updatedRemark;
   }
 };
 

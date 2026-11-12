@@ -146,10 +146,43 @@ export interface AuditEvent {
     | 'COURSE_BULK_PURGED'
     | 'COURSE_PURGE_RESTORED'
     | 'BULK_CADET_IMPORT'
+    | 'COMMANDANT_REMARK_ISSUED'
+    | 'COMMANDANT_REMARK_RESPONDED'
+    | 'COMMANDANT_REMARK_RESOLVED'
     | string;
   targetId?: string;
   payload: any;
   createdAt: string;
+}
+
+export type CommandantRemarkStatus = 'pending' | 'addressed' | 'resolved';
+
+export interface RemarkThreadMessage {
+  id: string;
+  senderRole: 'commandant' | 'course_officer';
+  senderName: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface CommandantRemark {
+  id: string;
+  submissionId: string;
+  commandantId?: string | null;
+  commandantName: string;
+  courseOfficerId?: string | null;
+  courseOfficerName?: string | null;
+  courseNumber?: number | null;
+  paradeType?: ParadeType | string | null;
+  paradeDate?: string | null;
+  remarkText: string;
+  officerResponse?: string | null;
+  respondedAt?: string | null;
+  status: CommandantRemarkStatus;
+  resolvedAt?: string | null;
+  thread?: RemarkThreadMessage[];
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export type CoursePurgeMode = 'SOFT_DELETE' | 'HARD_DELETE';

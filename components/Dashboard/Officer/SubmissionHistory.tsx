@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import {
     History,
@@ -11,13 +11,19 @@ import {
     X,
     RotateCcw,
     Filter,
-    ChevronDown
+    ChevronDown,
+    Flag,
+    AlertTriangle,
+    CheckCheck,
+    Clock,
+    MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useParade } from '../../../context/ParadeContext';
 import { dbService } from '../../../services/dbService';
 import { SubmissionPreviewModal } from './SubmissionPreviewModal';
 import { CustomDateRangePopover } from './CustomDateRangePopover';
+import { ParadeRemarkDrawer } from '../Commandant/ParadeRemarkDrawer';
 import { ParadeRecordMetadata } from '../../../types';
 import {
     DateFilterPreset,
@@ -41,6 +47,7 @@ export const SubmissionHistory: React.FC = () => {
     const { currentUser } = useAuth();
     const {
         records: contextRecords,
+        remarks,
         loadMoreRecords: loadMoreContextRecords,
         hasMoreRecords: hasMoreContextRecords,
         isDataLoading: isContextLoading,
@@ -49,6 +56,8 @@ export const SubmissionHistory: React.FC = () => {
     } = useParade();
 
     const [searchParams, setSearchParams] = useSearchParams();
+    const location = useLocation();
+    const [focusRemarkLog, setFocusRemarkLog] = useState<boolean>(false);
 
     // Read initial filter states from URL search parameters for bookmarkable/shareable views
     const urlPreset = searchParams.get('preset') as DateFilterPreset | null;
@@ -65,6 +74,98 @@ export const SubmissionHistory: React.FC = () => {
     const [debouncedSearch, setDebouncedSearch] = useState<string>(urlQuery);
     const [isCustomPopoverOpen, setIsCustomPopoverOpen] = useState<boolean>(false);
     const [selectedRecord, setSelectedRecord] = useState<ParadeRecordMetadata | null>(null);
+    const [remarkDrawerRecord, setRemarkDrawerRecord] = useState<ParadeRecordMetadata | null>(null);
+
+    const getRecordRemarks = useCallback(
+        (recordId: string | number) => {
+            return remarks.filter(rm => String(rm.submissionId) === String(recordId));
+        },
+        [remarks]
+    );
+
+    const pendingRemarksList = useMemo(() => {
+        return remarks.filter(rm => rm.status === 'pending' && !rm.officerResponse);
+    }, [remarks]);
+
+    const openDrawerForPayload = useCallback(
+        (payload: {
+            submissionId?: string | number;
+            remarkId?: string;
+            courseNumber?: number;
+            paradeType?: string;
+            remark?: any;
+            focusLog?: boolean;
+        }) => {
+            if (!payload) return;
+            const matchedRemark =
+                payload.remark ||
+                (payload.remarkId
+                    ? remarks.find(r => String(r.id) === String(payload.remarkId))
+                    : undefined) ||
+                (payload.submissionId
+                    ? remarks.find(r => String(r.submissionId) === String(payload.submissionId))
+                    : undefined) ||
+                remarks[0];
+
+            const targetSubId = payload.submissionId || matchedRemark?.submissionId;
+            if (targetSubId) {
+                const recordMatch = contextRecords.find(r => String(r.id) === String(targetSubId));
+                if (recordMatch) {
+                    setFocusRemarkLog(Boolean(payload.focusLog ?? true));
+                    setRemarkDrawerRecord(recordMatch);
+                    return;
+                }
+            }
+
+            if (matchedRemark) {
+                setFocusRemarkLog(Boolean(payload.focusLog ?? true));
+                setRemarkDrawerRecord({
+                    id: String(matchedRemark.submissionId),
+                    officerId: matchedRemark.courseOfficerId || currentUser?.id || '',
+                    officerName: matchedRemark.courseOfficerName || currentUser?.fullName || 'Course Officer',
+                    courseName: `RC ${matchedRemark.courseNumber}`,
+                    courseNumber: matchedRemark.courseNumber,
+                    yearGroup: currentUser?.yearGroup || 1,
+                    date: matchedRemark.paradeDate || new Date().toISOString().split('T')[0],
+                    paradeType: (matchedRemark.paradeType as any) || 'MUSTER',
+                    presentCount: 0,
+                    absentCount: 0,
+                    sickCount: 0,
+                    detentionCount: 0,
+                    passCount: 0,
+                    suspensionCount: 0,
+                    yetToReportCount: 0,
+                    grandTotal: 0,
+                    createdAt: matchedRemark.createdAt
+                });
+            }
+        },
+        [remarks, contextRecords, currentUser]
+    );
+
+    useEffect(() => {
+        const navState = location.state as any;
+        if (navState && (navState.openRemarkSubmissionId || navState.remarkId || navState.focusLog)) {
+            openDrawerForPayload({
+                submissionId: navState.openRemarkSubmissionId,
+                remarkId: navState.remarkId,
+                courseNumber: navState.courseNumber,
+                paradeType: navState.paradeType,
+                focusLog: true
+            });
+        }
+    }, [location.state, openDrawerForPayload]);
+
+    useEffect(() => {
+        const handleOpenDrawerEvent = (e: Event) => {
+            const customEvt = e as CustomEvent;
+            if (customEvt.detail) {
+                openDrawerForPayload(customEvt.detail);
+            }
+        };
+        window.addEventListener('open-parade-remark-drawer', handleOpenDrawerEvent);
+        return () => window.removeEventListener('open-parade-remark-drawer', handleOpenDrawerEvent);
+    }, [openDrawerForPayload]);
 
     // Sync local search input if URL param changes externally
     useEffect(() => {
@@ -313,6 +414,47 @@ export const SubmissionHistory: React.FC = () => {
 
     return (
         <div className="space-y-6">
+            {/* ── Action Required Alert Strip for Pending Commandant Remarks ── */}
+            {pendingRemarksList.length > 0 && (
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-4 md:p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0">
+                            <AlertTriangle size={20} />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-950 text-[10px] font-black uppercase tracking-wider">
+                                    Action Required
+                                </span>
+                                <h4 className="text-sm font-black text-amber-950 uppercase tracking-tight">
+                                    {pendingRemarksList.length} Pending Commandant{' '}
+                                    {pendingRemarksList.length === 1 ? 'Remark Requires' : 'Remarks Require'} Justification
+                                </h4>
+                            </div>
+                            <p className="text-xs text-amber-800/90 mt-1 font-medium">
+                                "{pendingRemarksList[0].remarkText}" — Click "Respond to Remark" on the flagged submission below to submit your official response.
+                            </p>
+                        </div>
+                    </div>
+                    {(() => {
+                        const targetSub = displayedRecords.find(
+                            r => String(r.id) === String(pendingRemarksList[0].submissionId)
+                        );
+                        if (!targetSub) return null;
+                        return (
+                            <button
+                                type="button"
+                                onClick={() => setRemarkDrawerRecord(targetSub)}
+                                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 shadow-xs transition-all flex items-center gap-1.5 self-start sm:self-center"
+                            >
+                                <Flag size={14} />
+                                <span>Respond Now</span>
+                            </button>
+                        );
+                    })()}
+                </div>
+            )}
+
             <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-visible">
                 {/* ── Header & Filter Toolbar ─────────────────────────────────────── */}
                 <div className="p-5 md:p-8 border-b border-slate-100 space-y-5">
@@ -530,88 +672,186 @@ export const SubmissionHistory: React.FC = () => {
                                 <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase">Susp.</th>
                                 <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase">YTR</th>
                                 <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase">Total</th>
-                                <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase text-center w-24">Actions</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Command Status</th>
+                                <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase text-center w-36">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {displayedRecords.map(r => (
-                                <tr key={r.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-8 py-5 font-bold text-slate-800">
-                                        {new Date(r.date).toLocaleDateString()}
-                                    </td>
-                                    <td className="px-8 py-5">
-                                        <span className="flex items-center gap-2 text-slate-600 font-medium capitalize">
-                                            <FileText size={16} /> {r.paradeType}
-                                        </span>
-                                    </td>
-                                    <td className="px-8 py-5 text-emerald-600 font-bold">{r.presentCount}</td>
-                                    <td className="px-8 py-5 text-rose-600 font-bold">{r.absentCount}</td>
-                                    <td className="px-8 py-5 text-indigo-600 font-bold">{r.detentionCount}</td>
-                                    <td className="px-8 py-5 text-purple-600 font-bold">{r.passCount || 0}</td>
-                                    <td className="px-8 py-5 text-slate-500 font-bold">{r.suspensionCount || 0}</td>
-                                    <td className="px-8 py-5 text-cyan-600 font-bold">{r.yetToReportCount || 0}</td>
-                                    <td className="px-8 py-5 font-bold">{r.grandTotal}</td>
-                                    <td className="px-8 py-5 text-center">
-                                        <button
-                                            onClick={() => setSelectedRecord(r)}
-                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-                                            title="View Details"
-                                        >
-                                            <Eye size={18} />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
+                            {displayedRecords.map(r => {
+                                const recRemarks = getRecordRemarks(r.id);
+                                const hasPending = recRemarks.some(rm => rm.status === 'pending' && !rm.officerResponse);
+                                const hasAddressed = recRemarks.some(
+                                    rm => rm.status === 'addressed' || (rm.status === 'pending' && Boolean(rm.officerResponse))
+                                );
+                                const hasResolved = recRemarks.length > 0 && !hasPending && !hasAddressed;
+
+                                return (
+                                    <tr
+                                        key={r.id}
+                                        className={`hover:bg-slate-50 transition-colors ${
+                                            hasPending ? 'bg-amber-50/30' : ''
+                                        }`}
+                                    >
+                                        <td className="px-8 py-5 font-bold text-slate-800">
+                                            {new Date(r.date).toLocaleDateString()}
+                                        </td>
+                                        <td className="px-8 py-5">
+                                            <span className="flex items-center gap-2 text-slate-600 font-medium capitalize">
+                                                <FileText size={16} /> {r.paradeType}
+                                            </span>
+                                        </td>
+                                        <td className="px-8 py-5 text-emerald-600 font-bold">{r.presentCount}</td>
+                                        <td className="px-8 py-5 text-rose-600 font-bold">{r.absentCount}</td>
+                                        <td className="px-8 py-5 text-indigo-600 font-bold">{r.detentionCount}</td>
+                                        <td className="px-8 py-5 text-purple-600 font-bold">{r.passCount || 0}</td>
+                                        <td className="px-8 py-5 text-slate-500 font-bold">{r.suspensionCount || 0}</td>
+                                        <td className="px-8 py-5 text-cyan-600 font-bold">{r.yetToReportCount || 0}</td>
+                                        <td className="px-8 py-5 font-bold">{r.grandTotal}</td>
+                                        <td className="px-6 py-5">
+                                            {hasPending ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRemarkDrawerRecord(r)}
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-black uppercase tracking-wider transition-colors"
+                                                >
+                                                    <AlertTriangle size={12} />
+                                                    <span>Action Required</span>
+                                                </button>
+                                            ) : hasAddressed ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRemarkDrawerRecord(r)}
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-200 text-[10px] font-black uppercase tracking-wider transition-colors"
+                                                >
+                                                    <Clock size={12} />
+                                                    <span>Response Filed</span>
+                                                </button>
+                                            ) : hasResolved ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRemarkDrawerRecord(r)}
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-200 text-[10px] font-black uppercase tracking-wider transition-colors"
+                                                >
+                                                    <CheckCheck size={12} />
+                                                    <span>Resolved</span>
+                                                </button>
+                                            ) : (
+                                                <span className="text-[11px] font-semibold text-slate-400">Clear</span>
+                                            )}
+                                        </td>
+                                        <td className="px-8 py-5 text-center">
+                                            <div className="inline-flex items-center justify-center gap-1.5">
+                                                {recRemarks.length > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setRemarkDrawerRecord(r)}
+                                                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-colors border ${
+                                                            hasPending
+                                                                ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-600'
+                                                                : 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-200'
+                                                        }`}
+                                                        title="View Commandant Remark & Reply"
+                                                    >
+                                                        <MessageSquare size={13} />
+                                                        <span>{hasPending ? 'Reply' : 'Remarks'}</span>
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => setSelectedRecord(r)}
+                                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                                                    title="View Details"
+                                                >
+                                                    <Eye size={18} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
 
                     {/* Mobile Card View */}
                     <div className="md:hidden divide-y divide-slate-100 border-t border-slate-100">
-                        {displayedRecords.map(r => (
-                            <div key={r.id} className="p-4 space-y-4 hover:bg-slate-50 transition-colors">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2 text-slate-800 font-bold text-sm capitalize">
-                                        <FileText size={16} className="text-blue-600" />
-                                        <span>{r.paradeType}</span>
-                                    </div>
-                                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
-                                        {new Date(r.date).toLocaleDateString()}
-                                    </span>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
-                                        <span className="text-[10px] font-black uppercase text-slate-400">Present</span>
-                                        <span className="text-sm font-bold text-emerald-600">{r.presentCount}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
-                                        <span className="text-[10px] font-black uppercase text-slate-400">Absent</span>
-                                        <span className="text-sm font-bold text-rose-600">{r.absentCount}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
-                                        <span className="text-[10px] font-black uppercase text-slate-400">Detention</span>
-                                        <span className="text-sm font-bold text-indigo-600">{r.detentionCount}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
-                                        <span className="text-[10px] font-black uppercase text-slate-400">P/S/Y</span>
-                                        <span className="text-xs font-bold text-slate-600 tracking-wider">
-                                            {r.passCount || 0}/{r.suspensionCount || 0}/{r.yetToReportCount || 0}
+                        {displayedRecords.map(r => {
+                            const recRemarks = getRecordRemarks(r.id);
+                            const hasPending = recRemarks.some(rm => rm.status === 'pending' && !rm.officerResponse);
+                            const hasAddressed = recRemarks.some(
+                                rm => rm.status === 'addressed' || (rm.status === 'pending' && Boolean(rm.officerResponse))
+                            );
+
+                            return (
+                                <div key={r.id} className={`p-4 space-y-4 hover:bg-slate-50 transition-colors ${hasPending ? 'bg-amber-50/30' : ''}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-slate-800 font-bold text-sm capitalize">
+                                            <FileText size={16} className="text-blue-600" />
+                                            <span>{r.paradeType}</span>
+                                            {hasPending && (
+                                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-black uppercase">
+                                                    Commandant's Remark
+                                                </span>
+                                            )}
+                                            {!hasPending && hasAddressed && (
+                                                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 text-[9px] font-black uppercase">
+                                                    Response Filed
+                                                </span>
+                                            )}
+                                        </div>
+                                        <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
+                                            {new Date(r.date).toLocaleDateString()}
                                         </span>
                                     </div>
+                                    <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                        <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
+                                            <span className="text-[10px] font-black uppercase text-slate-400">Present</span>
+                                            <span className="text-sm font-bold text-emerald-600">{r.presentCount}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
+                                            <span className="text-[10px] font-black uppercase text-slate-400">Absent</span>
+                                            <span className="text-sm font-bold text-rose-600">{r.absentCount}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
+                                            <span className="text-[10px] font-black uppercase text-slate-400">Detention</span>
+                                            <span className="text-sm font-bold text-indigo-600">{r.detentionCount}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-slate-100">
+                                            <span className="text-[10px] font-black uppercase text-slate-400">P/S/Y</span>
+                                            <span className="text-xs font-bold text-slate-600 tracking-wider">
+                                                {r.passCount || 0}/{r.suspensionCount || 0}/{r.yetToReportCount || 0}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            Grand Total
+                                        </span>
+                                        <span className="text-sm font-black text-slate-800">{r.grandTotal}</span>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        {recRemarks.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setRemarkDrawerRecord(r)}
+                                                className={`w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-sm ${
+                                                    hasPending
+                                                        ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                                                        : 'bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200'
+                                                }`}
+                                            >
+                                                <MessageSquare size={16} />
+                                                <span>{hasPending ? 'Respond to Commandant Remark' : 'View Commandant Remarks'}</span>
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => setSelectedRecord(r)}
+                                            className="w-full py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:border-slate-300 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                                        >
+                                            <Eye size={16} /> Look at Details
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="flex items-center justify-between pt-1">
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                        Grand Total
-                                    </span>
-                                    <span className="text-sm font-black text-slate-800">{r.grandTotal}</span>
-                                </div>
-                                <button
-                                    onClick={() => setSelectedRecord(r)}
-                                    className="w-full mt-2 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:border-slate-300 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 shadow-sm"
-                                >
-                                    <Eye size={16} /> Look at Details
-                                </button>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
 
                     {/* Polished Empty State Card */}
@@ -673,6 +913,16 @@ export const SubmissionHistory: React.FC = () => {
             <SubmissionPreviewModal
                 record={selectedRecord}
                 onClose={() => setSelectedRecord(null)}
+            />
+
+            <ParadeRemarkDrawer
+                submission={remarkDrawerRecord}
+                isOpen={Boolean(remarkDrawerRecord)}
+                onClose={() => {
+                    setRemarkDrawerRecord(null);
+                    setFocusRemarkLog(false);
+                }}
+                focusLog={focusRemarkLog}
             />
         </div>
     );

@@ -154,6 +154,44 @@ export const AuditPayloadRenderer: React.FC<AuditPayloadRendererProps> = ({ log 
                         </p>
                     );
                 }
+                case 'COMMANDANT_REMARK_ISSUED': {
+                    const course = payload.course_number;
+                    const officer = payload.course_officer_name;
+                    const paradeType = String(payload.parade_type || 'PARADE').toUpperCase();
+                    const remarkText = payload.remark_text || '';
+                    return (
+                        <div className="space-y-1.5">
+                            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                                {renderName(actorName || 'Commandant')} issued a parade remark on {renderRC(course)} ({paradeType}) submitted by {renderName(officer)}:
+                            </p>
+                            <p className="text-xs italic text-amber-900 bg-amber-50 border border-amber-200/80 px-3 py-2 rounded-lg font-medium">
+                                "{remarkText}"
+                            </p>
+                        </div>
+                    );
+                }
+                case 'COMMANDANT_REMARK_RESPONDED': {
+                    const course = payload.course_number;
+                    const responseText = payload.officer_response || '';
+                    return (
+                        <div className="space-y-1.5">
+                            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                                Course Officer {renderName(actorName)} submitted an official justification for {renderRC(course)}:
+                            </p>
+                            <p className="text-xs italic text-blue-900 bg-blue-50 border border-blue-200/80 px-3 py-2 rounded-lg font-medium">
+                                "{responseText}"
+                            </p>
+                        </div>
+                    );
+                }
+                case 'COMMANDANT_REMARK_RESOLVED': {
+                    const course = payload.course_number;
+                    return (
+                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                            {renderName(actorName || 'Commandant')} acknowledged and resolved the parade remark inquiry for {renderRC(course)}.
+                        </p>
+                    );
+                }
                 case 'SETTINGS_CHANGED': {
                     const diffs = payload.diff || [];
                     if (diffs.length === 0) {

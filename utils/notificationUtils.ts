@@ -2,9 +2,12 @@ import { Notification } from '../types';
 
 export const inferSeverity = (n: Notification): 'critical' | 'info' | 'system' => {
     const type = n.type?.toLowerCase() || '';
+    const title = n.title?.toLowerCase() || '';
     const content = n.content?.toLowerCase() || '';
 
     if (type === 'settings_change' || type === 'profile_update') return 'system';
+    if (type === 'remark_resolved' || title.includes('parade inquiry resolved')) return 'info';
+    if (type === 'commandant_remark' || type === 'remark_response') return 'critical';
 
     // Actionable Intel Elevation
     if (content.includes('absent') && content.includes('high')) return 'critical';
@@ -68,6 +71,25 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
     const title = n.title?.toLowerCase() || '';
     const content = n.content?.toLowerCase() || '';
     const courseNumber = n.courseNumber || n.metadata?.courseNumber || (n.yearGroup && n.yearGroup > 0 ? n.yearGroup : undefined);
+
+    // 0. Commandant Parade Remarks & Officer Responses
+    if (type === 'commandant_remark' || type === 'remark_resolved' || title.includes("commandant's parade remark") || title.includes('parade inquiry resolved')) {
+        return {
+            category: 'parade',
+            route: '/officer/history',
+            courseNumber,
+            actionLabel: type === 'commandant_remark' ? 'Respond in Submission History' : 'View in Submission History'
+        };
+    }
+
+    if (type === 'remark_response' || title.includes('officer justification filed')) {
+        return {
+            category: 'parade',
+            route: '/commandant',
+            courseNumber,
+            actionLabel: 'Review Officer Response'
+        };
+    }
 
     // 1. Parade Submissions & State Audit
     if (type.includes('parade') || title.includes('parade') || content.includes('parade')) {

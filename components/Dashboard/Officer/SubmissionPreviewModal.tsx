@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, FileText, CheckCircle2, Loader2 } from 'lucide-react';
-import { ParadeRecordMetadata, CadetStatus, CadetDetail } from '../../../types';
+import { X, Calendar, FileText, CheckCircle2, Loader2, Flag, Send, CheckCheck, Clock, AlertTriangle } from 'lucide-react';
+import { ParadeRecordMetadata, CadetStatus, CadetDetail, CommandantRemark } from '../../../types';
 import { dbService } from '../../../services/dbService';
+import { useParade } from '../../../context/ParadeContext';
+import { useAuth } from '../../../context/AuthContext';
 import { getStatusFullLabel, getStatusBadgeStyles } from '../../../utils/statusHelpers';
+import { toast } from 'react-hot-toast';
 
 interface SubmissionPreviewModalProps {
     record: ParadeRecordMetadata | null;
@@ -10,8 +13,41 @@ interface SubmissionPreviewModalProps {
 }
 
 export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ record, onClose }) => {
+    const { currentUser } = useAuth();
+    const { remarks, refreshRemarks } = useParade();
     const [cadets, setCadets] = useState<CadetDetail[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
+    const [submittingId, setSubmittingId] = useState<string | null>(null);
+
+    const recordRemarks = React.useMemo(() => {
+        if (!record) return [];
+        return remarks.filter(rm => String(rm.submissionId) === String(record.id));
+    }, [remarks, record]);
+
+    const handleSendReply = async (remark: CommandantRemark) => {
+        const text = (replyTexts[remark.id] || '').trim();
+        if (!text) {
+            toast.error('Please enter a justification response.');
+            return;
+        }
+        setSubmittingId(remark.id);
+        try {
+            await dbService.respondToCommandantRemark({
+                remarkId: remark.id,
+                officerResponse: text,
+                officerName: currentUser?.fullName || record?.officerName || 'Course Officer',
+                officerId: currentUser?.id
+            });
+            setReplyTexts(prev => ({ ...prev, [remark.id]: '' }));
+            await refreshRemarks();
+            toast.success('Official response submitted.');
+        } catch (err) {
+            toast.error('Failed to submit response.');
+        } finally {
+            setSubmittingId(null);
+        }
+    };
 
     useEffect(() => {
         if (!record) {
@@ -59,7 +95,92 @@ export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ 
                 </div>
 
                 {/* Content */}
-                <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
+                <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-5">
+                    {recordRemarks.length > 0 && (
+                        <div className="space-y-3">
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                                <Flag size={13} className="text-amber-600" />
+                                Commandant Remarks ({recordRemarks.length})
+                            </p>
+                            {recordRemarks.map(rm => {
+                                const isResolved = rm.status === 'resolved';
+                                const hasReply = Boolean(rm.officerResponse);
+                                return (
+                                    <div
+                                        key={rm.id}
+                                        className={`p-4 rounded-2xl border bg-white space-y-2.5 shadow-2xs ${
+                                            isResolved
+                                                ? 'border-emerald-200'
+                                                : hasReply
+                                                ? 'border-blue-200'
+                                                : 'border-amber-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            {isResolved ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800">
+                                                    <CheckCheck size={11} /> Resolved
+                                                </span>
+                                            ) : hasReply ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800">
+                                                    <Clock size={11} /> Response Filed
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-900">
+                                                    <AlertTriangle size={11} /> Pending Review
+                                                </span>
+                                            )}
+                                            <span className="text-[10px] font-mono text-slate-400">
+                                                {new Date(rm.createdAt).toLocaleDateString()}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                            "{rm.remarkText}"
+                                        </p>
+                                        {hasReply ? (
+                                            <div className="text-xs text-blue-900 bg-blue-50/70 p-2.5 rounded-xl border border-blue-100">
+                                                <span className="block text-[9px] font-black uppercase text-blue-700 mb-0.5">
+                                                    Your Response:
+                                                </span>
+                                                "{rm.officerResponse}"
+                                            </div>
+                                        ) : (
+                                            !isResolved && (
+                                                <div className="space-y-2 pt-1">
+                                                    <textarea
+                                                        rows={2}
+                                                        value={replyTexts[rm.id] || ''}
+                                                        onChange={e =>
+                                                            setReplyTexts(prev => ({
+                                                                ...prev,
+                                                                [rm.id]: e.target.value
+                                                            }))
+                                                        }
+                                                        placeholder="Submit justification for absentees..."
+                                                        className="w-full p-2.5 bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl text-xs outline-none resize-none"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        disabled={submittingId === rm.id || !(replyTexts[rm.id] || '').trim()}
+                                                        onClick={() => handleSendReply(rm)}
+                                                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5"
+                                                    >
+                                                        {submittingId === rm.id ? (
+                                                            <Loader2 size={13} className="animate-spin" />
+                                                        ) : (
+                                                            <Send size={13} />
+                                                        )}
+                                                        <span>Submit Response</span>
+                                                    </button>
+                                                </div>
+                                            )
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     {isLoading ? (
                         <div className="py-12 flex flex-col items-center justify-center text-center">
                             <Loader2 size={32} className="animate-spin text-blue-500 mb-4" />
