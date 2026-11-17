@@ -370,7 +370,7 @@ export const AdminDashboard: React.FC = () => {
                     onProfileClick={() => navigate('/admin/settings')}
                 />
 
-                <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8 md:pb-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <Routes>
@@ -417,7 +417,7 @@ export const CommandantDashboard: React.FC = () => {
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header title={getTitle()} />
 
-                <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8 md:pb-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <Routes>

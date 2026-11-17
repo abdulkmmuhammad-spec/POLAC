@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
     LayoutDashboard,
     FileText,
@@ -25,9 +26,27 @@ interface BottomNavItem {
     badgeTone?: 'amber' | 'rose' | 'blue';
 }
 
+const useIsIOS = (): boolean => {
+    const [isIOS, setIsIOS] = useState(false);
+
+    useEffect(() => {
+        const detect = () => {
+            if (typeof navigator === 'undefined') return false;
+            return (
+                /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+            );
+        };
+        setIsIOS(detect());
+    }, []);
+
+    return isIOS;
+};
+
 export const BottomNav: React.FC = () => {
     const { currentUser } = useAuth();
     const { remarks } = useParade();
+    const isIOS = useIsIOS();
 
     // Count remarks needing review for Commandant / Senior Officers
     const commandantNeedsReviewCount = useMemo(() => {
@@ -140,7 +159,11 @@ export const BottomNav: React.FC = () => {
     return (
         <nav
             aria-label="Mobile Primary Navigation"
-            className="fixed bottom-0 inset-x-0 z-40 md:hidden bg-blue-900/95 backdrop-blur-xl border-t border-white/10 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]"
+            className={
+                isIOS
+                    ? 'fixed inset-x-3 bottom-[max(0.65rem,env(safe-area-inset-bottom))] z-40 md:hidden rounded-full ios-liquid-glass px-2 py-1.5'
+                    : 'fixed bottom-0 inset-x-0 z-40 md:hidden bg-blue-900/95 backdrop-blur-xl border-t border-white/10 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]'
+            }
         >
             <div className="flex items-stretch justify-around w-full max-w-lg mx-auto px-1">
                 {navItems.map(item => {
@@ -151,24 +174,35 @@ export const BottomNav: React.FC = () => {
                             to={item.path}
                             end={item.end}
                             className={({ isActive }) =>
-                                `relative flex-1 min-w-[48px] min-h-[56px] py-1.5 px-1 flex flex-col items-center justify-center gap-1 select-none active:scale-95 transition-all duration-150 ${
+                                `relative flex-1 min-w-[48px] ${
+                                    isIOS ? 'min-h-[50px] py-1 px-1 rounded-full' : 'min-h-[56px] py-1.5 px-1'
+                                } flex flex-col items-center justify-center gap-1 select-none active:scale-95 transition-all duration-150 ${
                                     isActive
-                                        ? 'text-white'
+                                        ? 'text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]'
+                                        : isIOS
+                                        ? 'text-white/75 hover:text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]'
                                         : 'text-blue-200/60 hover:text-white'
                                 }`
                             }
                         >
                             {({ isActive }) => (
                                 <>
-                                    {/* Top Active Pill Indicator */}
-                                    {isActive && (
-                                        <span className="absolute top-0 inset-x-3 mx-auto w-8 h-1 rounded-b-full bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.7)] animate-in fade-in duration-150" />
-                                    )}
+                                    {/* iOS Liquid Glass Spring Pill vs Standard Top Bar Indicator */}
+                                    {isActive &&
+                                        (isIOS ? (
+                                            <motion.div
+                                                layoutId="ios-liquid-pill"
+                                                transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                                                className="absolute inset-0 rounded-full bg-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] pointer-events-none"
+                                            />
+                                        ) : (
+                                            <span className="absolute top-0 inset-x-3 mx-auto w-8 h-1 rounded-b-full bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.7)] animate-in fade-in duration-150" />
+                                        ))}
 
                                     {/* Icon Container with Optional Unread/Count Badge */}
                                     <div
-                                        className={`relative flex items-center justify-center px-3.5 py-0.5 rounded-full transition-colors ${
-                                            isActive
+                                        className={`relative z-10 flex items-center justify-center px-3.5 py-0.5 rounded-full transition-colors ${
+                                            isActive && !isIOS
                                                 ? 'bg-white/15 border border-white/10 shadow-[0_0_15px_rgba(255,255,255,0.06)]'
                                                 : ''
                                         }`}
@@ -195,8 +229,12 @@ export const BottomNav: React.FC = () => {
 
                                     {/* Single-Line Concise Label */}
                                     <span
-                                        className={`text-[10px] leading-none uppercase tracking-wider truncate max-w-full ${
-                                            isActive ? 'font-black text-white' : 'font-bold text-blue-200/60'
+                                        className={`relative z-10 text-[10px] leading-none uppercase tracking-wider truncate max-w-full ${
+                                            isActive
+                                                ? 'font-black text-white'
+                                                : isIOS
+                                                ? 'font-bold text-white/75'
+                                                : 'font-bold text-blue-200/60'
                                         }`}
                                     >
                                         {item.label}

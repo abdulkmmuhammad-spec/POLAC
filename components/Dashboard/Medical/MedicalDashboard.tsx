@@ -68,7 +68,7 @@ export const MedicalDashboard: React.FC = () => {
       <div className="flex-1 flex flex-col min-h-screen md:min-h-0">
         <Header title={headerTitle} />
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto pb-28 md:pb-6">
           <Routes>
             <Route index element={<SickbayTriageBoard />} />
             <Route path="remarks" element={<MedicalRemarksCenter />} />

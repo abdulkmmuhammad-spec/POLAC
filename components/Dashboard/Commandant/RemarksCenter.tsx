@@ -1267,7 +1267,7 @@ export const RemarksCenter: React.FC = () => {
                     type="button"
                     onClick={() => setIsNewDirectiveOpen(true)}
                     aria-label="Issue New Directive"
-                    className="fixed bottom-20 right-4 md:bottom-8 md:right-8 z-30 w-14 h-14 rounded-full bg-blue-900 hover:bg-blue-800 active:scale-95 text-white shadow-lg flex items-center justify-center transition-all"
+                    className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-4 md:bottom-8 md:right-8 z-30 w-14 h-14 rounded-full bg-blue-900 hover:bg-blue-800 active:scale-95 text-white shadow-lg flex items-center justify-center transition-all"
                 >
                     <MessageSquarePlus size={22} />
                 </button>
