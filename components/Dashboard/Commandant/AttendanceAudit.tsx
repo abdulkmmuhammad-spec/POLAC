@@ -1,16 +1,40 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Download, FileText, Calendar, RotateCcw, Search, ChevronDown, ChevronUp, Flag, MessageSquarePlus } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import {
+    Download,
+    FileText,
+    Calendar,
+    RotateCcw,
+    Search,
+    ChevronDown,
+    CheckCircle2,
+    UserX,
+    HeartPulse,
+    ShieldAlert,
+    MessageSquare,
+    X,
+    Eye,
+    Clock,
+    UserCheck,
+    Check,
+    ChevronRight,
+    ArrowUpRight
+} from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useParade } from '../../../context/ParadeContext';
-import { CadetStatus } from '../../../types';
+import { useAuth } from '../../../context/AuthContext';
+import { CadetStatus, UserRole, SickbayVerification } from '../../../types';
 import { reportService } from '../../../services/reportService';
 import { dbService, supabase } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import { ParadeRemarkDrawer, ParadeRemarkTarget } from './ParadeRemarkDrawer';
 import * as XLSX from 'xlsx';
 
+type DatePreset = 'today' | 'this_week' | 'last_7_days' | 'this_month' | 'custom';
+
 export const AttendanceAudit: React.FC = () => {
     const location = useLocation();
+    const { currentUser } = useAuth();
+    const isAdmin = currentUser?.role === UserRole.ADMIN;
     const {
         records,
         remarks,
@@ -19,8 +43,6 @@ export const AttendanceAudit: React.FC = () => {
         loadMoreRecords,
         hasMoreRecords,
         isDataLoading,
-        currentPage,
-        totalPages,
         auditStatusFilter,
         setAuditStatusFilter,
         auditCourseFilter,
@@ -29,86 +51,109 @@ export const AttendanceAudit: React.FC = () => {
         setAuditSearchTerm
     } = useParade();
 
-    const [dateRange, setDateRange] = useState({ start: '', end: '' });
-    const [isDefaultView, setIsDefaultView] = useState(true);
-    const [expandedRCs, setExpandedRCs] = useState<Record<number, boolean>>({});
-    const [expandedEvents, setExpandedEvents] = useState<Record<string, boolean>>({});
-    
-    // New RPC States
+    // Date Presets & Custom Range
+    const [datePreset, setDatePreset] = useState<DatePreset>('this_week');
+    const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
+
+    // Export dropdown state
+    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+    const exportMenuRef = useRef<HTMLDivElement>(null);
+
+    // RPC & Session State
     const [historicalData, setHistoricalData] = useState<any[]>([]);
+    const [sickbayVerifications, setSickbayVerifications] = useState<SickbayVerification[]>([]);
     const [isHistoricalLoading, setIsHistoricalLoading] = useState(false);
     const [activeRemarkTarget, setActiveRemarkTarget] = useState<ParadeRemarkTarget | null>(null);
+    const [expandedSessions, setExpandedSessions] = useState<Record<string, boolean>>({});
 
-    const openEventRemarkDrawer = (firstItem: any, items: any[], rc: number) => {
-        const rec = firstItem?.r || {};
-        const matchedRecord = records.find(r => String(r.id) === String(rec.id));
-        if (matchedRecord) {
-            setActiveRemarkTarget(matchedRecord);
-            return;
-        }
-        const absentCount = items.filter(i => String(i.status).toLowerCase() === 'absent').length;
-        const sickCount = items.filter(i => String(i.status).toLowerCase() === 'sick').length;
-        const detentionCount = items.filter(i => String(i.status).toLowerCase() === 'detention').length;
-        setActiveRemarkTarget({
-            id: rec.id || `${rc}-${rec.date}-${rec.paradeType}`,
-            officerName: rec.officerName || `${formatRC(rc)} Course Officer`,
-            courseNumber: rc || rec.courseNumber,
-            yearGroup: rec.yearGroup || calculateCurrentLevel(rc, activeRC),
-            date: rec.date || new Date().toISOString().split('T')[0],
-            paradeType: rec.paradeType || 'muster',
-            presentCount: rec.presentCount ?? 0,
-            absentCount: rec.absentCount ?? absentCount,
-            sickCount: rec.sickCount ?? sickCount,
-            detentionCount: rec.detentionCount ?? detentionCount,
-            grandTotal: rec.grandTotal ?? items.length
-        });
-    };
-
-    // Toggle accordion for an RC
-    const toggleRC = (rc: number) => {
-        setExpandedRCs(prev => ({ ...prev, [rc]: !prev[rc] }));
-    };
-
-    // Toggle event cadet truncation
-    const toggleEvent = (eventId: string) => {
-        setExpandedEvents(prev => ({ ...prev, [eventId]: !prev[eventId] }));
-    };
-
-    // Get unique course numbers for the filter dropdown
+    // Cohorts from RPC
     const [availableCourses, setAvailableCourses] = useState<number[]>([]);
 
-    React.useEffect(() => {
+    // PDF Preview Modal State
+    const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+    const [initialPreviewMode, setInitialPreviewMode] = useState(false);
+
+    // Compute standard date presets
+    const computePresetDates = (preset: DatePreset): { start: string; end: string } => {
+        const now = new Date();
+        const toISODate = (d: Date) => d.toISOString().split('T')[0];
+
+        if (preset === 'today') {
+            const todayStr = toISODate(now);
+            return { start: todayStr, end: todayStr };
+        }
+
+        if (preset === 'this_week') {
+            const day = now.getDay();
+            const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
+            const monday = new Date(now.getFullYear(), now.getMonth(), diff);
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            return { start: toISODate(monday), end: toISODate(sunday) };
+        }
+
+        if (preset === 'last_7_days') {
+            const end = new Date(now);
+            const start = new Date(now);
+            start.setDate(now.getDate() - 6);
+            return { start: toISODate(start), end: toISODate(end) };
+        }
+
+        if (preset === 'this_month') {
+            const start = new Date(now.getFullYear(), now.getMonth(), 1);
+            const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            return { start: toISODate(start), end: toISODate(end) };
+        }
+
+        return dateRange;
+    };
+
+    // Initialize preset on mount
+    useEffect(() => {
+        if (datePreset !== 'custom') {
+            const calculated = computePresetDates(datePreset);
+            setDateRange(calculated);
+        }
+    }, [datePreset]);
+
+    // Close export dropdown on click outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+                setIsExportMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Fetch active cohorts for course filter
+    useEffect(() => {
         const fetchActiveCourses = async () => {
             try {
-                // Highly performant RPC call that natively handles DISTINCT extraction 
-                // and bypasses the 1,000-row pagination limit
                 const { data, error } = await supabase.rpc('get_active_cohorts');
-                
-                if (error) {
-                    throw error;
-                }
-                
+                if (error) throw error;
                 if (data) {
-                    // The RPC already returns distinct integers ordered DESC, so we can map directly
                     setAvailableCourses(data.map((row: any) => row.course_number));
                 }
             } catch (err) {
-                console.error("Failed to fetch active courses", err);
+                console.error('Failed to fetch active courses', err);
             }
         };
         fetchActiveCourses();
     }, []);
 
-    const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
-    const [initialPreviewMode, setInitialPreviewMode] = useState(false);
-
-    // Consume incoming navigation state from Notification Intelligence Deep-Links
+    // Consume navigation state from deep-links
     useEffect(() => {
-        const state = location.state as { courseNumber?: number; searchTerm?: string; paradeType?: string, previewMode?: boolean } | null;
+        const state = location.state as {
+            courseNumber?: number;
+            searchTerm?: string;
+            paradeType?: string;
+            previewMode?: boolean;
+        } | null;
         if (state) {
             if (state.courseNumber) {
                 setAuditCourseFilter(state.courseNumber.toString());
-                setExpandedRCs(prev => ({ ...prev, [state.courseNumber!]: true }));
             }
             if (state.searchTerm) {
                 setAuditSearchTerm(state.searchTerm);
@@ -120,509 +165,874 @@ export const AttendanceAudit: React.FC = () => {
         }
     }, [location.state, setAuditCourseFilter, setAuditSearchTerm]);
 
-    // Generate preview once data is loaded
+    // Handle initial PDF preview once data loads
     useEffect(() => {
         const generatePreview = async () => {
             if (initialPreviewMode && !isHistoricalLoading && historicalData.length > 0) {
                 setInitialPreviewMode(false);
                 const url = await reportService.generateAuditReport({
                     filteredRecords: historicalData,
-                    title: "OFFICIAL AUDIT REPORT",
-                    officerName: "COMMANDANT",
+                    title: 'OFFICIAL AUDIT REPORT',
+                    officerName: currentUser?.fullName || 'COMMANDANT',
                     previewOnly: true
                 });
                 setPreviewPdfUrl(url as string);
             }
         };
         generatePreview();
-    }, [initialPreviewMode, isHistoricalLoading, historicalData]);
+    }, [initialPreviewMode, isHistoricalLoading, historicalData, currentUser?.fullName]);
 
-    // Default to Current Week (Monday to Sunday)
-    const currentWeekRange = useMemo(() => {
-        const now = new Date();
-        const day = now.getDay();
-        const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Sunday (0)
+    // Debounced query execution
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            handleHistoricalSearch();
+        }, 250);
 
-        const monday = new Date(now.setDate(diff));
-        monday.setHours(0, 0, 0, 0);
-
-        const sunday = new Date(monday);
-        sunday.setDate(monday.getDate() + 6);
-        sunday.setHours(23, 59, 59, 999);
-
-        return { monday, sunday };
-    }, []);
+        return () => clearTimeout(timer);
+    }, [dateRange.start, dateRange.end, auditStatusFilter, auditCourseFilter, auditSearchTerm]);
 
     const handleHistoricalSearch = async () => {
         setIsHistoricalLoading(true);
         try {
-            let start, end;
-            if (isDefaultView) {
-                // Ensure dates are strings for the RPC
-                start = currentWeekRange.monday.toISOString().split('T')[0];
-                end = currentWeekRange.sunday.toISOString().split('T')[0];
-            } else {
-                start = dateRange.start || undefined;
-                end = dateRange.end || undefined;
-            }
-
-            const { data } = await dbService.fetchHistoricalTrace({
-                startDate: start,
-                endDate: end,
-                courseNumber: auditCourseFilter !== 'all' ? parseInt(auditCourseFilter) : undefined,
-                status: auditStatusFilter,
-                searchTerm: auditSearchTerm
-            });
+            const parsedCourse = auditCourseFilter !== 'all' ? parseInt(auditCourseFilter) : undefined;
+            const [{ data }, verifications] = await Promise.all([
+                dbService.fetchHistoricalTrace({
+                    startDate: dateRange.start || undefined,
+                    endDate: dateRange.end || undefined,
+                    courseNumber: parsedCourse,
+                    status: auditStatusFilter,
+                    searchTerm: auditSearchTerm.trim() || undefined
+                }),
+                dbService.fetchSickbayVerifications({
+                    startDate: dateRange.start || undefined,
+                    endDate: dateRange.end || undefined,
+                    courseNumber: parsedCourse
+                })
+            ]);
             setHistoricalData(data || []);
+            setSickbayVerifications(verifications || []);
         } catch (err) {
-            console.error("Historical search failed", err);
+            console.error('Historical search failed', err);
         } finally {
             setIsHistoricalLoading(false);
         }
     };
 
-    // Auto-fetch data when view or filters change
-    React.useEffect(() => {
-        handleHistoricalSearch();
-    }, [isDefaultView, auditStatusFilter, auditCourseFilter, auditSearchTerm, currentWeekRange, dateRange.start, dateRange.end]);
-
-    const filteredRecords = useMemo(() => {
-        return historicalData;
-    }, [historicalData]);
-
-    // Grouping logic for Accordion: Group by RC, then sub-group by Parade Event ID
-    const groupedRecords = useMemo(() => {
-        const groups: Record<number, Record<string, any[]>> = {};
-        filteredRecords.forEach(item => {
-            const rc = item.r?.courseNumber || 0;
-            const eventId = item.r?.id || `${item.r?.date}-${item.r?.paradeType}`;
-            if (!groups[rc]) groups[rc] = {};
-            if (!groups[rc][eventId]) groups[rc][eventId] = [];
-            groups[rc][eventId].push(item);
-        });
-        return groups;
-    }, [filteredRecords]);
-
-    const handleUpdateDetail = async (cadetDetailId: any, updates: any) => {
-        try {
-            await dbService.updateCadetDetail(cadetDetailId, updates);
-            await dbService.addNotification({
-                title: 'Status Override',
-                content: `Attendance record updated via Audit deep-dive.`,
-                type: 'system',
-                officerName: 'COMMANDANT'
-            } as any);
-            await refreshData();
-        } catch (error) {
-            console.error("Failed to update detail:", error);
+    const sickbayMap = useMemo(() => {
+        const map = new Map<string, SickbayVerification>();
+        for (const v of sickbayVerifications) {
+            const nameKey = (v.cadetName || '').trim().toLowerCase();
+            if (v.paradeRecordId) {
+                map.set(`${v.paradeRecordId}::${nameKey}`, v);
+            }
+            if (v.paradeDate && v.courseNumber) {
+                map.set(`${v.paradeDate}::${v.courseNumber}::${nameKey}`, v);
+            }
         }
+        return map;
+    }, [sickbayVerifications]);
+
+    // Toggle session cadet expansion
+    const toggleSessionExpand = (sessionId: string) => {
+        setExpandedSessions(prev => ({ ...prev, [sessionId]: !prev[sessionId] }));
     };
 
+    // Reset all filters
     const handleReset = () => {
-        setIsDefaultView(true);
-        setDateRange({ start: '', end: '' });
+        setDatePreset('this_week');
         setAuditStatusFilter('all');
         setAuditCourseFilter('all');
         setAuditSearchTerm('');
-        setHistoricalData([]);
     };
 
-    const handleExport = () => {
-        const data = filteredRecords.map(item => ({
+    // Export Excel
+    const handleExportExcel = () => {
+        setIsExportMenuOpen(false);
+        const rows = historicalData.map(item => ({
             'Date': item.r?.date,
             'Cadet Name': item.name,
             'Squad': item.squad,
-            'Status': item.status,
+            'Status': (item.status || '').toUpperCase(),
             'Course': item.r?.courseNumber ? formatRC(item.r.courseNumber) : 'Legacy',
-            'Year Level': item.r?.courseNumber ? calculateCurrentLevel(item.r.courseNumber, activeRC) : item.r?.yearGroup,
-            'Officer': item.r?.officerName
+            'Year Level': item.r?.courseNumber ? `Level ${calculateCurrentLevel(item.r.courseNumber, activeRC)}` : item.r?.yearGroup,
+            'Parade Event': item.r?.paradeType ? String(item.r.paradeType).toUpperCase() : 'MUSTER',
+            'Reporting Officer': item.r?.officerName || 'Course Officer'
         }));
-        const ws = XLSX.utils.json_to_sheet(data);
+
+        const ws = XLSX.utils.json_to_sheet(rows);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "AttendanceAudit");
-        XLSX.writeFile(wb, `Attendance_Audit_${new Date().toISOString().split('T')[0]}.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, 'AttendanceAudit');
+        XLSX.writeFile(wb, `POLAC_Attendance_Audit_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
+    // Export Official PDF
+    const handleExportPdf = async () => {
+        setIsExportMenuOpen(false);
+        await reportService.generateAuditReport({
+            filteredRecords: historicalData,
+            title: 'POLICE ACADEMY ATTENDANCE & EXCEPTION AUDIT',
+            officerName: currentUser?.fullName || 'COMMANDANT'
+        });
+    };
+
+    // Open PDF Preview Modal
+    const handlePreviewPdf = async () => {
+        setIsExportMenuOpen(false);
+        const url = await reportService.generateAuditReport({
+            filteredRecords: historicalData,
+            title: 'POLICE ACADEMY ATTENDANCE & EXCEPTION AUDIT',
+            officerName: currentUser?.fullName || 'COMMANDANT',
+            previewOnly: true
+        });
+        setPreviewPdfUrl(url as string);
+    };
+
+    // Open Remarks Drawer
+    const handleOpenRemarkDrawer = (session: {
+        id?: string | number;
+        courseNumber?: number;
+        yearGroup?: number;
+        date: string;
+        paradeType: string;
+        officerName: string;
+        presentCount?: number;
+        absentCount?: number;
+        sickCount?: number;
+        detentionCount?: number;
+        grandTotal?: number;
+    }) => {
+        const matched = records.find(r => String(r.id) === String(session.id));
+        if (matched) {
+            setActiveRemarkTarget(matched);
+            return;
+        }
+
+        setActiveRemarkTarget({
+            id: session.id || `${session.courseNumber}-${session.date}-${session.paradeType}`,
+            officerName: session.officerName || `${formatRC(session.courseNumber || 0)} Course Officer`,
+            courseNumber: session.courseNumber,
+            yearGroup: session.yearGroup || calculateCurrentLevel(session.courseNumber || 0, activeRC),
+            date: session.date || new Date().toISOString().split('T')[0],
+            paradeType: session.paradeType || 'muster',
+            presentCount: session.presentCount ?? 0,
+            absentCount: session.absentCount ?? 0,
+            sickCount: session.sickCount ?? 0,
+            detentionCount: session.detentionCount ?? 0,
+            grandTotal: session.grandTotal ?? 0
+        });
+    };
+
+    // ─── Chronological Ledger Synthesis ─────────────────────────────────────────
+    // Build unified session list combining:
+    // 1. Exception sessions from historicalData
+    // 2. 100% Turnout Zero-Exception sessions from context records (when in range and course filter)
+    const { chronologicalFeed, kpiStats } = useMemo(() => {
+        // Map sessions with exceptions from historicalData
+        const exceptionSessionsMap: Record<string, {
+            id: string | number;
+            date: string;
+            courseNumber: number;
+            yearGroup?: number;
+            paradeType: string;
+            officerName: string;
+            presentCount: number;
+            absentCount: number;
+            sickCount: number;
+            detentionCount: number;
+            grandTotal: number;
+            items: any[];
+            isZeroException: boolean;
+        }> = {};
+
+        historicalData.forEach(item => {
+            const rec = item.r || {};
+            const courseNum = rec.courseNumber || 0;
+            const dateStr = rec.date || '';
+            const type = rec.paradeType || 'muster';
+            const sessionId = rec.id ? String(rec.id) : `${courseNum}-${dateStr}-${type}`;
+
+            if (!exceptionSessionsMap[sessionId]) {
+                exceptionSessionsMap[sessionId] = {
+                    id: rec.id || sessionId,
+                    date: dateStr,
+                    courseNumber: courseNum,
+                    yearGroup: rec.yearGroup || calculateCurrentLevel(courseNum, activeRC),
+                    paradeType: type,
+                    officerName: rec.officerName || 'Course Officer',
+                    presentCount: rec.presentCount ?? 0,
+                    absentCount: rec.absentCount ?? 0,
+                    sickCount: rec.sickCount ?? 0,
+                    detentionCount: rec.detentionCount ?? 0,
+                    grandTotal: rec.grandTotal ?? 0,
+                    items: [],
+                    isZeroException: false
+                };
+            }
+
+            exceptionSessionsMap[sessionId].items.push(item);
+        });
+
+        // If status filter is 'all' and no cadet search term, include zero-exception sessions from context records
+        if (auditStatusFilter === 'all' && !auditSearchTerm.trim()) {
+            records.forEach(rec => {
+                const dateStr = rec.date || '';
+                const courseNum = rec.courseNumber || 0;
+                const type = rec.paradeType || 'muster';
+                const sessionId = String(rec.id);
+
+                // Date range check
+                if (dateRange.start && dateStr < dateRange.start) return;
+                if (dateRange.end && dateStr > dateRange.end) return;
+
+                // Course filter check
+                if (auditCourseFilter !== 'all' && String(courseNum) !== auditCourseFilter) return;
+
+                // Zero exception check
+                const isZero = (rec.absentCount === 0 && rec.sickCount === 0 && rec.detentionCount === 0) ||
+                               (rec.presentCount === rec.grandTotal && rec.grandTotal > 0);
+
+                if (isZero && !exceptionSessionsMap[sessionId]) {
+                    exceptionSessionsMap[sessionId] = {
+                        id: rec.id,
+                        date: dateStr,
+                        courseNumber: courseNum,
+                        yearGroup: rec.yearGroup || calculateCurrentLevel(courseNum, activeRC),
+                        paradeType: type,
+                        officerName: rec.officerName || 'Course Officer',
+                        presentCount: rec.presentCount,
+                        absentCount: 0,
+                        sickCount: 0,
+                        detentionCount: 0,
+                        grandTotal: rec.grandTotal,
+                        items: [],
+                        isZeroException: true
+                    };
+                }
+            });
+        }
+
+        const allSessions = Object.values(exceptionSessionsMap);
+
+        // Compute KPIs
+        let totalAbsent = 0;
+        let totalSick = 0;
+        let totalDetention = 0;
+
+        allSessions.forEach(s => {
+            totalAbsent += s.absentCount || 0;
+            totalSick += s.sickCount || 0;
+            totalDetention += s.detentionCount || 0;
+        });
+
+        // Group sessions chronologically by date
+        const groupedByDate: Record<string, typeof allSessions> = {};
+        allSessions.forEach(session => {
+            const dateKey = session.date || 'Undated';
+            if (!groupedByDate[dateKey]) {
+                groupedByDate[dateKey] = [];
+            }
+            groupedByDate[dateKey].push(session);
+        });
+
+        // Sort dates descending (newest first)
+        const sortedDates = Object.keys(groupedByDate).sort((a, b) => {
+            return new Date(b).getTime() - new Date(a).getTime();
+        });
+
+        const feed = sortedDates.map(dateKey => ({
+            date: dateKey,
+            sessions: groupedByDate[dateKey].sort((a, b) => b.courseNumber - a.courseNumber)
+        }));
+
+        return {
+            chronologicalFeed: feed,
+            kpiStats: {
+                totalSessions: allSessions.length,
+                totalAbsent,
+                totalSick,
+                totalDetention
+            }
+        };
+    }, [historicalData, records, auditStatusFilter, auditSearchTerm, auditCourseFilter, dateRange.start, dateRange.end, activeRC]);
+
+    // Format date headers: "Today • Mon, Nov 16", "Yesterday • Sun, Nov 15", or "Sat, Nov 14, 2026"
+    const formatDateHeader = (dateStr: string): string => {
+        if (!dateStr || dateStr === 'Undated') return 'Undated Sessions';
+        const [year, month, day] = dateStr.split('-').map(Number);
+        if (!year || !month || !day) return dateStr;
+
+        const dateObj = new Date(year, month - 1, day);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const yesterday = new Date(today);
+        yesterday.setDate(today.getDate() - 1);
+
+        const target = new Date(dateObj);
+        target.setHours(0, 0, 0, 0);
+
+        const options: Intl.DateTimeFormatOptions = {
+            weekday: 'long',
+            month: 'short',
+            day: 'numeric',
+            year: dateObj.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+        };
+        const formatted = dateObj.toLocaleDateString('en-US', options);
+
+        if (target.getTime() === today.getTime()) {
+            return `Today • ${formatted}`;
+        }
+        if (target.getTime() === yesterday.getTime()) {
+            return `Yesterday • ${formatted}`;
+        }
+        return formatted;
     };
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Tactical Control Panel */}
-            <div className="bg-white/80 backdrop-blur-md p-4 md:p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full sm:w-auto">
-                        <div className="flex bg-slate-100 p-1 rounded-md shrink-0 border border-slate-200 w-full sm:w-auto">
-                            <button
-                                onClick={() => setIsDefaultView(true)}
-                                className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2.5 rounded text-xs sm:text-sm font-black uppercase tracking-widest transition-all ${isDefaultView ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Current Week
-                            </button>
-                            <button
-                                onClick={() => setIsDefaultView(false)}
-                                className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2.5 rounded text-xs sm:text-sm font-black uppercase tracking-widest transition-all ${!isDefaultView ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Historical Trace
-                            </button>
-                        </div>
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {/* Header & Title */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                        Attendance & Exception Audit
+                        {isHistoricalLoading && (
+                            <span className="inline-block w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                        )}
+                    </h1>
+                    <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
+                        Authoritative ledger of parade muster records, discrepancies, and cadet turnout.
+                    </p>
+                </div>
 
-                        {!isDefaultView && (
-                            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 animate-in fade-in slide-in-from-left-2 w-full sm:w-auto">
-                                <input
-                                    type="date"
-                                    className="flex-1 sm:flex-initial px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-bold uppercase outline-none focus:ring-1 focus:ring-blue-900"
-                                    value={dateRange.start}
-                                    onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                                />
-                                <span className="text-slate-400 font-black text-[10px]">TO</span>
-                                <input
-                                    type="date"
-                                    className="flex-1 sm:flex-initial px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-bold uppercase outline-none focus:ring-1 focus:ring-blue-900"
-                                    value={dateRange.end}
-                                    onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                                />
+                {/* Quick actions: Reset & Export */}
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <button
+                        onClick={handleReset}
+                        className="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Reset all search parameters"
+                    >
+                        <RotateCcw size={13} />
+                        <span>Reset Filters</span>
+                    </button>
+
+                    {/* Unified Export Dropdown */}
+                    <div className="relative" ref={exportMenuRef}>
+                        <button
+                            onClick={() => setIsExportMenuOpen(prev => !prev)}
+                            className="px-3.5 py-2 text-xs font-bold text-white bg-blue-900 hover:bg-blue-800 rounded-lg shadow-sm transition-all flex items-center gap-1.5 active:scale-[0.98]"
+                        >
+                            <Download size={14} />
+                            <span>Export</span>
+                            <ChevronDown size={13} className={`transition-transform duration-200 ${isExportMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {isExportMenuOpen && (
+                            <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in slide-in-from-top-1">
                                 <button
-                                    onClick={handleHistoricalSearch}
-                                    disabled={isHistoricalLoading}
-                                    className="w-full sm:w-auto justify-center px-4 py-2.5 bg-blue-900 text-white rounded-md text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                                    onClick={handleExportExcel}
+                                    className="w-full px-3.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
                                 >
-                                    {isHistoricalLoading ? 'SEARCHING...' : 'SEARCH DATABASE'}
+                                    <Download size={14} className="text-emerald-600" />
+                                    <span>Download Excel (.xlsx)</span>
+                                </button>
+                                <button
+                                    onClick={handleExportPdf}
+                                    className="w-full px-3.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                >
+                                    <FileText size={14} className="text-blue-700" />
+                                    <span>Download Official PDF</span>
+                                </button>
+                                <div className="my-1 border-t border-slate-100" />
+                                <button
+                                    onClick={handlePreviewPdf}
+                                    className="w-full px-3.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                >
+                                    <Eye size={14} className="text-slate-500" />
+                                    <span>Preview PDF Ledger</span>
                                 </button>
                             </div>
                         )}
                     </div>
-
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <button
-                            onClick={handleExport}
-                            className="flex-1 sm:flex-initial justify-center flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-2.5 bg-emerald-600 text-white rounded-md text-xs sm:text-sm font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
-                        >
-                            <Download size={16} />
-                            EXPORT XLS
-                        </button>
-                        <button
-                            onClick={() => reportService.generateAuditReport({ filteredRecords, title: "OFFICIAL AUDIT REPORT", officerName: "COMMANDANT" })}
-                            className="flex-1 sm:flex-initial justify-center flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-2.5 bg-blue-900 text-white rounded-md text-xs sm:text-sm font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-sm"
-                        >
-                            <FileText size={16} />
-                            GENERATE PDF
-                        </button>
-                    </div>
-                </div>
-
-                <div className="flex flex-col lg:flex-row items-center gap-4 pt-4 border-t border-slate-100">
-                    <div className="relative flex-1 w-full">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                        <input
-                            placeholder="COMMAND SEARCH: ENTER CADET NAME OR SQUAD PARAMETER..."
-                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-md outline-none focus:ring-1 focus:ring-blue-900 text-sm font-black uppercase tracking-wider focus:bg-white transition-all animate-in slide-in-from-left-4"
-                            style={{ boxShadow: auditSearchTerm ? '0 0 0 1px rgba(30, 58, 138, 0.1), 0 0 15px rgba(30, 58, 138, 0.05)' : 'none' }}
-                            value={auditSearchTerm}
-                            onChange={(e) => setAuditSearchTerm(e.target.value)}
-                        />
-                        {auditSearchTerm && (
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-blue-900 animate-pulse shadow-[0_0_8px_rgba(30,58,138,0.5)]" />
-                        )}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-                        <div className="flex overflow-x-auto max-w-full bg-slate-100 p-1 rounded-md border border-slate-200 w-full sm:w-auto">
-                            {[
-                                { id: 'all', label: 'ALL' },
-                                { id: CadetStatus.ABSENT, label: 'ABSENTEES ONLY' },
-                                { id: CadetStatus.SICK, label: 'MEDICAL/SICK' },
-                                { id: CadetStatus.DETENTION, label: 'DETENTION' }
-                            ].map(filter => (
-                                <button
-                                    key={filter.id}
-                                    onClick={() => setAuditStatusFilter(filter.id)}
-                                    className={`shrink-0 px-3 sm:px-4 py-2 rounded text-[11px] font-black uppercase tracking-tight transition-all ${auditStatusFilter === filter.id ? 'bg-white text-blue-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    {filter.label}
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <select
-                                className="flex-1 sm:flex-initial px-4 sm:px-5 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-xs sm:text-sm font-black uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-900 appearance-none min-w-[140px] sm:min-w-[180px]"
-                                value={auditCourseFilter}
-                                onChange={(e) => setAuditCourseFilter(e.target.value)}
-                            >
-                                <option value="all">RC: ALL MODULES</option>
-                                {availableCourses.map(cn => (
-                                    <option key={cn} value={cn}>{formatRC(cn)}</option>
-                                ))}
-                            </select>
-
-                            <button
-                                onClick={handleReset}
-                                className="p-2.5 text-slate-400 hover:text-blue-900 hover:bg-slate-50 rounded-md transition-all border border-slate-200 shrink-0"
-                                title="Purge Parameters"
-                            >
-                                <RotateCcw size={14} />
-                            </button>
-                        </div>
-                    </div>
                 </div>
             </div>
 
-            {/* Tactical Audit Table - High-Density Event-Based Layout */}
-            <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
-                <div className="overflow-x-auto relative">
-                    {/* Desktop Table Header - STICKY */}
-                    <table className="w-full text-left hidden md:table border-collapse">
-                        <thead className="bg-blue-900 text-white border-b border-blue-800 sticky top-0 z-20">
-                            <tr>
-                                <th className="px-8 py-5 text-sm font-black uppercase tracking-wider w-[240px]">Parade Event Details</th>
-                                <th className="px-6 py-5 text-sm font-black uppercase tracking-wider text-center w-[120px]">Entries</th>
-                                <th className="px-6 py-5 text-sm font-black uppercase tracking-wider">Identified Cadets (Compact Chips)</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {Object.entries(groupedRecords)
-                                .sort(([rcA], [rcB]) => parseInt(rcB) - parseInt(rcA)) // Sort RC descending
-                                .map(([rcStr, eventsMap]) => {
-                                    const rc = parseInt(rcStr);
-                                    const isExpanded = expandedRCs[rc] !== false; // Default to expanded
-                                    const totalEntriesInRC = Object.values(eventsMap).reduce((acc, curr) => acc + curr.length, 0);
-                                    
+            {/* Reactive Toolbar (Stripe/Linear-Style Flat Bar) */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3.5">
+                {/* Search Bar */}
+                <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input
+                        type="text"
+                        value={auditSearchTerm}
+                        onChange={(e) => setAuditSearchTerm(e.target.value)}
+                        placeholder="Search cadet, squad, course, or officer..."
+                        className="w-full pl-10 pr-9 py-2.5 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-900/20 focus:border-blue-900 transition-all"
+                    />
+                    {auditSearchTerm && (
+                        <button
+                            onClick={() => setAuditSearchTerm('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-md"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+
+                {/* Filter Controls Row */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                    {/* Date Presets */}
+                    <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                        {(
+                            [
+                                { id: 'today', label: 'Today' },
+                                { id: 'this_week', label: 'This Week' },
+                                { id: 'last_7_days', label: 'Last 7 Days' },
+                                { id: 'this_month', label: 'This Month' },
+                                { id: 'custom', label: 'Custom' }
+                            ] as { id: DatePreset; label: string }[]
+                        ).map(preset => (
+                            <button
+                                key={preset.id}
+                                onClick={() => setDatePreset(preset.id)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    datePreset === preset.id
+                                        ? 'bg-white text-blue-900 shadow-sm font-bold border border-slate-200/60'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                {preset.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Course / Cohort Selector */}
+                    <div className="flex items-center gap-2">
+                        <select
+                            value={auditCourseFilter}
+                            onChange={(e) => setAuditCourseFilter(e.target.value)}
+                            className="px-3.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-900/20 focus:border-blue-900 transition-all appearance-none cursor-pointer pr-8 bg-[radial-gradient(#64748b_1px,transparent_1px)]"
+                            style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                                backgroundRepeat: 'no-repeat',
+                                backgroundPosition: 'right 0.65rem center',
+                                backgroundSize: '1rem'
+                            }}
+                        >
+                            <option value="all">All Regular Courses</option>
+                            {availableCourses.map(cn => (
+                                <option key={cn} value={cn}>
+                                    {formatRC(cn)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                {/* Inline Custom Date Range (when Custom preset is selected) */}
+                {datePreset === 'custom' && (
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 animate-in fade-in slide-in-from-top-1">
+                        <span className="text-xs font-semibold text-slate-500">Date Range:</span>
+                        <input
+                            type="date"
+                            value={dateRange.start}
+                            onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                            className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-900/20 focus:border-blue-900"
+                        />
+                        <span className="text-xs text-slate-400 font-bold">to</span>
+                        <input
+                            type="date"
+                            value={dateRange.end}
+                            onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                            className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-900/20 focus:border-blue-900"
+                        />
+                    </div>
+                )}
+            </div>
+
+            {/* Interactive 4-Card KPI Strip */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* 1. Parades Audited */}
+                <button
+                    type="button"
+                    onClick={() => setAuditStatusFilter('all')}
+                    className={`p-4 rounded-2xl border text-left transition-all ${
+                        auditStatusFilter === 'all'
+                            ? 'bg-blue-900/5 border-blue-900 shadow-sm ring-2 ring-blue-900/20'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                    }`}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500">Parades Audited</span>
+                        <Calendar size={16} className={auditStatusFilter === 'all' ? 'text-blue-900' : 'text-slate-400'} />
+                    </div>
+                    <p className="text-2xl font-black text-slate-900 mt-2">{kpiStats.totalSessions}</p>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Total sessions in range</p>
+                </button>
+
+                {/* 2. Absent */}
+                <button
+                    type="button"
+                    onClick={() => setAuditStatusFilter(auditStatusFilter === CadetStatus.ABSENT ? 'all' : CadetStatus.ABSENT)}
+                    className={`p-4 rounded-2xl border text-left transition-all ${
+                        auditStatusFilter === CadetStatus.ABSENT
+                            ? 'bg-rose-50 border-rose-500 shadow-sm ring-2 ring-rose-500/20'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                    }`}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500">Absent</span>
+                        <UserX size={16} className={auditStatusFilter === CadetStatus.ABSENT ? 'text-rose-600' : 'text-slate-400'} />
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-2">
+                        <p className="text-2xl font-black text-rose-600">{kpiStats.totalAbsent}</p>
+                        {kpiStats.totalAbsent > 0 && (
+                            <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 text-[10px] font-bold rounded">Action</span>
+                        )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Unauthorized / AWOL</p>
+                </button>
+
+                {/* 3. Medical / Sick */}
+                <button
+                    type="button"
+                    onClick={() => setAuditStatusFilter(auditStatusFilter === CadetStatus.SICK ? 'all' : CadetStatus.SICK)}
+                    className={`p-4 rounded-2xl border text-left transition-all ${
+                        auditStatusFilter === CadetStatus.SICK
+                            ? 'bg-amber-50 border-amber-500 shadow-sm ring-2 ring-amber-500/20'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                    }`}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500">Medical / Sick</span>
+                        <HeartPulse size={16} className={auditStatusFilter === CadetStatus.SICK ? 'text-amber-600' : 'text-slate-400'} />
+                    </div>
+                    <p className="text-2xl font-black text-amber-600 mt-2">{kpiStats.totalSick}</p>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Hospitalized / Sickbay</p>
+                </button>
+
+                {/* 4. Detention */}
+                <button
+                    type="button"
+                    onClick={() => setAuditStatusFilter(auditStatusFilter === CadetStatus.DETENTION ? 'all' : CadetStatus.DETENTION)}
+                    className={`p-4 rounded-2xl border text-left transition-all ${
+                        auditStatusFilter === CadetStatus.DETENTION
+                            ? 'bg-indigo-50 border-indigo-500 shadow-sm ring-2 ring-indigo-500/20'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                    }`}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500">Detention</span>
+                        <ShieldAlert size={16} className={auditStatusFilter === CadetStatus.DETENTION ? 'text-indigo-600' : 'text-slate-400'} />
+                    </div>
+                    <p className="text-2xl font-black text-indigo-600 mt-2">{kpiStats.totalDetention}</p>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Orderly Room / Guard</p>
+                </button>
+            </div>
+
+            {/* Flattened Chronological Ledger */}
+            <div className="space-y-6">
+                {chronologicalFeed.map(dateGroup => (
+                    <div key={dateGroup.date} className="space-y-3">
+                        {/* Date Header Separator */}
+                        <div className="flex items-center justify-between px-1">
+                            <div className="flex items-center gap-2">
+                                <Calendar size={15} className="text-slate-400" />
+                                <h2 className="text-xs sm:text-sm font-bold text-slate-800 tracking-tight">
+                                    {formatDateHeader(dateGroup.date)}
+                                </h2>
+                            </div>
+                            <span className="text-xs font-medium text-slate-400">
+                                {dateGroup.sessions.length} {dateGroup.sessions.length === 1 ? 'parade' : 'parades'}
+                            </span>
+                        </div>
+
+                        {/* Sessions List */}
+                        <div className="space-y-2.5">
+                            {dateGroup.sessions.map(session => {
+                                const sessionId = String(session.id);
+                                const isExpanded = expandedSessions[sessionId] === true;
+                                const sessionRemarks = remarks.filter(rm => String(rm.submissionId) === sessionId);
+                                const level = calculateCurrentLevel(session.courseNumber, activeRC);
+                                const total = session.grandTotal || (session.presentCount + session.absentCount + session.sickCount + session.detentionCount);
+                                const turnoutPct = total > 0 ? ((session.presentCount / total) * 100).toFixed(1) : '100.0';
+
+                                // A. Zero-Exception Sessions (100% Present Turnout)
+                                if (session.isZeroException) {
                                     return (
-                                        <React.Fragment key={rc}>
-                                            {/* RC Group Header */}
-                                            <tr
-                                                className="bg-slate-50 border-y border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors"
-                                                onClick={() => toggleRC(rc)}
-                                            >
-                                                <td colSpan={3} className="px-8 py-4">
-                                                    <div className="flex items-center gap-4">
-                                                        {isExpanded ? <ChevronDown size={18} className="text-blue-900" /> : <ChevronUp size={18} className="text-slate-400" />}
-                                                        <span className="text-sm font-black text-blue-900 uppercase tracking-widest">
-                                                            {rc === 0 ? 'LEGACY ARCHIVE' : `${formatRC(rc)} • LEVEL ${calculateCurrentLevel(rc, activeRC)}`}
-                                                        </span>
-                                                        <span className="text-[11px] font-bold text-slate-400 uppercase ml-auto tracking-wider">
-                                                            {totalEntriesInRC} TOTAL IDENTIFIED
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-
-                                            {isExpanded && Object.entries(eventsMap)
-                                                .sort(([, itemsA], [, itemsB]) => new Date(itemsB[0].r.date).getTime() - new Date(itemsA[0].r.date).getTime())
-                                                .map(([eventId, items]) => {
-                                                    const firstItem = items[0];
-                                                    const isEventExpanded = expandedEvents[eventId] === true;
-                                                    const visibleItems = isEventExpanded ? items : items.slice(0, 8);
-                                                    return (
-                                                        <tr key={eventId} className="even:bg-slate-50/50 hover:bg-blue-50/30 transition-colors group">
-                                                            <td className="px-8 py-6">
-                                                                <div className="flex items-center gap-3 text-slate-900 mb-1">
-                                                                    <Calendar size={14} className="text-blue-900" />
-                                                                    <span className="text-sm font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
-                                                                </div>
-                                                                <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest italic mb-2.5">{firstItem.r.paradeType}</p>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => openEventRemarkDrawer(firstItem, items, rc)}
-                                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-black uppercase tracking-wider transition-all"
-                                                                >
-                                                                    <Flag size={11} />
-                                                                    <span>
-                                                                        Flag / Remark
-                                                                        {remarks.filter(rm => String(rm.submissionId) === String(firstItem.r.id)).length > 0 &&
-                                                                            ` (${remarks.filter(rm => String(rm.submissionId) === String(firstItem.r.id)).length})`}
-                                                                    </span>
-                                                                </button>
-                                                            </td>
-                                                            <td className="px-6 py-6 text-center">
-                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 text-slate-900 text-xs font-black border border-slate-200 shadow-sm">
-                                                                    {items.length}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-6">
-                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                    {visibleItems.map((cadet, cIdx) => (
-                                                                        <div 
-                                                                            key={cIdx} 
-                                                                            className="group/chip flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-md border border-slate-200 shadow-sm hover:border-blue-900/30 transition-all"
-                                                                        >
-                                                                            <div className={`w-2 h-2 rounded-full ${
-                                                                                cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.3)]' :
-                                                                                cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.3)]' :
-                                                                                'bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.3)]'
-                                                                            }`} />
-                                                                            <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight">
-                                                                                {cadet.name.split(' ').slice(0, 2).join(' ')}
-                                                                            </span>
-                                                                            <span className="text-[9px] text-slate-400 font-mono font-bold border-l pl-2 ml-1">
-                                                                                {cadet.squad}
-                                                                            </span>
-                                                                        </div>
-                                                                    ))}
-                                                                    {!isEventExpanded && items.length > 8 && (
-                                                                        <button
-                                                                            onClick={() => toggleEvent(eventId)}
-                                                                            className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all shadow-sm active:scale-95"
-                                                                        >
-                                                                            +{items.length - 8} MORE CADETS
-                                                                        </button>
-                                                                    )}
-                                                                    {isEventExpanded && items.length > 8 && (
-                                                                        <button
-                                                                            onClick={() => toggleEvent(eventId)}
-                                                                            className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all shadow-sm active:scale-95"
-                                                                        >
-                                                                            COLLAPSE LIST
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                        </React.Fragment>
-                                    );
-                                })}
-                        </tbody>
-                    </table>
-
-                    {/* Mobile View - Tactical Event Cards */}
-                    <div className="md:hidden space-y-4 p-4 bg-slate-50/50">
-                        {Object.entries(groupedRecords)
-                            .sort(([rcA], [rcB]) => parseInt(rcB) - parseInt(rcA))
-                            .flatMap(([rcStr, eventsMap]) => 
-                            Object.entries(eventsMap)
-                                .sort(([, itemsA], [, itemsB]) => new Date(itemsB[0].r.date).getTime() - new Date(itemsA[0].r.date).getTime())
-                                .map(([eventId, items]) => {
-                                const firstItem = items[0];
-                                const rc = parseInt(rcStr);
-                                const isEventExpanded = expandedEvents[eventId] === true;
-                                const visibleMobileItems = isEventExpanded ? items : items.slice(0, 4);
-                                return (
-                                    <div key={eventId} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                                        <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                                            <div>
-                                                <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">
-                                                    {rc === 0 ? 'LEGACY' : formatRC(rc)}
-                                                </p>
-                                                <div className="flex items-center gap-2 text-slate-800">
-                                                    <Calendar size={14} className="text-slate-400" />
-                                                    <span className="text-xs font-mono font-black">{new Date(firstItem.r.date).toLocaleDateString()}</span>
+                                        <div
+                                            key={sessionId}
+                                            className="group flex items-center justify-between gap-3 px-4 py-3 bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200/80 rounded-xl transition-all"
+                                        >
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-md shrink-0">
+                                                        {formatRC(session.courseNumber)}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wide truncate">
+                                                        {String(session.paradeType || 'MUSTER').toUpperCase()}
+                                                    </span>
                                                 </div>
                                             </div>
-                                            <div className="text-right">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter italic mb-1">{firstItem.r.paradeType}</p>
-                                                <div className="flex items-center gap-1.5 justify-end">
-                                                    <span className="text-[10px] font-black text-slate-900 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
-                                                        {items.length} CADETS
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => openEventRemarkDrawer(firstItem, items, rc)}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-black uppercase"
-                                                    >
-                                                        <MessageSquarePlus size={11} />
-                                                        <span>Remark</span>
-                                                    </button>
-                                                </div>
+
+                                            <div className="flex items-center gap-2.5 shrink-0">
+                                                <span className="text-xs font-bold text-emerald-700 hidden sm:inline">
+                                                    {session.presentCount}/{session.grandTotal || session.presentCount} Present (100%)
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenRemarkDrawer(session)}
+                                                    className="px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:text-emerald-900 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-all flex items-center gap-1"
+                                                >
+                                                    <MessageSquare size={12} />
+                                                    <span>{isAdmin ? 'View' : 'Remark'}</span>
+                                                </button>
                                             </div>
                                         </div>
-                                        <div className="p-4 bg-slate-50/30">
-                                            <div className="flex flex-col gap-3">
-                                                {visibleMobileItems.map((cadet, cIdx) => (
-                                                    <div key={cIdx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm transition-all hover:border-blue-200">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                                                                cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' :
-                                                                cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' :
-                                                                'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.4)]'
-                                                            }`} />
-                                                            <div>
-                                                                <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">{cadet.name}</span>
-                                                                {cadet.squad && (
-                                                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mt-0.5">SQUAD {cadet.squad}</span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="shrink-0">
-                                                            <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded border ${
-                                                                cadet.status?.toLowerCase() === 'absent' ? 'bg-rose-50 text-rose-700 border-rose-100' :
-                                                                cadet.status?.toLowerCase() === 'sick' ? 'bg-amber-50 text-amber-700 border-amber-100' :
-                                                                'bg-indigo-50 text-indigo-700 border-indigo-100'
-                                                            }`}>
-                                                                {cadet.status}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                    );
+                                }
+
+                                // B. Exception-First Parade Session Card
+                                const visibleCadets = isExpanded ? session.items : session.items.slice(0, 6);
+                                const hasMoreCadets = session.items.length > 6;
+
+                                return (
+                                    <div
+                                        key={sessionId}
+                                        className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all hover:border-slate-300"
+                                    >
+                                        {/* Session Card Header */}
+                                        <div className="px-3.5 py-3 sm:px-5 sm:py-3.5 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between gap-2 sm:gap-4">
+                                            {/* Course & Parade Information */}
+                                            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                                                <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 bg-blue-900 text-white rounded-lg text-[11px] sm:text-xs font-black tracking-wide shrink-0">
+                                                    {formatRC(session.courseNumber)}
+                                                </span>
+                                                <h3 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide truncate">
+                                                    {String(session.paradeType || 'MUSTER').toUpperCase()}
+                                                </h3>
                                             </div>
-                                            {items.length > 4 && (
+
+                                            {/* Turnout Progress Meter & Deep-Link Action */}
+                                            <div className="flex items-center justify-end gap-2 sm:gap-4 shrink-0">
+                                                {/* Turnout Stats & Progress Bar - Visible on desktop (lg:), hidden on mobile/tablet */}
+                                                <div className="hidden lg:block text-right">
+                                                    <div className="flex items-baseline justify-end gap-1.5">
+                                                        <span className="text-xs font-bold text-slate-800">
+                                                            {session.presentCount}/{total} Present
+                                                        </span>
+                                                        <span className="text-xs font-extrabold text-blue-900">
+                                                            ({turnoutPct}%)
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Two-Tone Turnout Progress Bar */}
+                                                    <div className="w-36 h-2 bg-slate-200 rounded-full overflow-hidden flex mt-1">
+                                                        <div
+                                                            className="bg-emerald-500 h-full transition-all"
+                                                            style={{ width: `${Math.min(100, Math.max(0, (session.presentCount / (total || 1)) * 100))}%` }}
+                                                        />
+                                                        <div
+                                                            className="bg-rose-500 h-full transition-all"
+                                                            style={{ width: `${Math.min(100, Math.max(0, (session.absentCount / (total || 1)) * 100))}%` }}
+                                                        />
+                                                        <div
+                                                            className="bg-amber-500 h-full transition-all"
+                                                            style={{ width: `${Math.min(100, Math.max(0, (session.sickCount / (total || 1)) * 100))}%` }}
+                                                        />
+                                                        <div
+                                                            className="bg-indigo-500 h-full transition-all"
+                                                            style={{ width: `${Math.min(100, Math.max(0, (session.detentionCount / (total || 1)) * 100))}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                {/* Deep-link to Remarks & Directives */}
                                                 <button
-                                                    onClick={() => toggleEvent(eventId)}
-                                                    className="mt-3 w-full py-2 bg-slate-100 hover:bg-slate-200 text-blue-900 rounded-lg text-[10px] font-black uppercase tracking-widest border border-slate-200 transition-colors flex items-center justify-center gap-1 active:scale-[0.98]"
+                                                    type="button"
+                                                    onClick={() => handleOpenRemarkDrawer(session)}
+                                                    className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95"
                                                 >
-                                                    {isEventExpanded ? 'COLLAPSE LIST' : `SHOW ALL ${items.length} CADETS (+${items.length - 4} MORE)`}
+                                                    <MessageSquare size={13} className="shrink-0" />
+                                                    <span className="hidden md:inline">{isAdmin ? 'View Directives' : 'Remarks & Directives'}</span>
+                                                    <span className="md:hidden">{isAdmin ? 'Directives' : 'Remarks'}</span>
+                                                    {sessionRemarks.length > 0 && (
+                                                        <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-black shrink-0">
+                                                            {sessionRemarks.length}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Exception Items List */}
+                                        <div className="p-4 sm:p-5">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                                {visibleCadets.map((cadet, cIdx) => {
+                                                    const statusLower = (cadet.status || '').toLowerCase();
+                                                    const isAbsent = statusLower === 'absent';
+                                                    const isSick = statusLower === 'sick';
+                                                    const isDetention = statusLower === 'detention';
+
+                                                    const badgeStyle = isAbsent
+                                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                                        : isSick
+                                                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                        : 'bg-indigo-50 text-indigo-700 border-indigo-200';
+
+                                                    const cadetNameKey = (cadet.name || '').trim().toLowerCase();
+                                                    const verification = isSick
+                                                        ? sickbayMap.get(`${session.id}::${cadetNameKey}`) ||
+                                                          sickbayMap.get(`${session.date}::${session.courseNumber}::${cadetNameKey}`)
+                                                        : undefined;
+
+                                                    return (
+                                                        <div
+                                                            key={cIdx}
+                                                            className="flex flex-col gap-1.5 px-3 py-2.5 bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-xl transition-all"
+                                                        >
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="text-xs font-bold text-slate-800 truncate">
+                                                                        {cadet.name}
+                                                                    </p>
+                                                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium mt-0.5">
+                                                                        {cadet.squad && <span>Squad {cadet.squad}</span>}
+                                                                        {cadet.reason && (
+                                                                            <>
+                                                                                <span className="text-slate-300">•</span>
+                                                                                <span className="truncate italic text-slate-600">{cadet.reason}</span>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                <span className={`px-2 py-0.5 text-[10px] font-extrabold uppercase rounded-md border shrink-0 ${badgeStyle}`}>
+                                                                    {cadet.status}
+                                                                </span>
+                                                            </div>
+
+                                                            {isSick && (
+                                                                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-200/60">
+                                                                    {!verification || verification.status === 'pending_verification' ? (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                                                            <Clock size={10} />
+                                                                            Pending Sickbay Check
+                                                                        </span>
+                                                                    ) : verification.status === 'admitted' ? (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                                            <CheckCircle2 size={10} />
+                                                                            Admitted
+                                                                        </span>
+                                                                    ) : (
+                                                                        <>
+                                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                                                                <ShieldAlert size={10} />
+                                                                                Not Admitted
+                                                                            </span>
+                                                                            {verification.clinicalNote && (
+                                                                                <span className="text-[10px] text-rose-700 italic truncate max-w-full">
+                                                                                    "{verification.clinicalNote}"
+                                                                                </span>
+                                                                            )}
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {/* Expand / Collapse Cadets Toggle */}
+                                            {hasMoreCadets && (
+                                                <button
+                                                    onClick={() => toggleSessionExpand(sessionId)}
+                                                    className="mt-3.5 w-full py-2 bg-slate-50 hover:bg-slate-100 text-blue-900 rounded-xl text-xs font-bold border border-slate-200 transition-all flex items-center justify-center gap-1 active:scale-[0.99]"
+                                                >
+                                                    {isExpanded
+                                                        ? 'Collapse cadet exception list'
+                                                        : `Show all ${session.items.length} cadet exceptions (+${session.items.length - 6} more)`}
                                                 </button>
                                             )}
                                         </div>
                                     </div>
                                 );
-                            })
-                        )}
-                    </div>
-                    {filteredRecords.length === 0 && (
-                        <div className="p-24 text-center flex flex-col items-center">
-                            <div className="w-16 h-16 bg-slate-50 rounded-lg flex items-center justify-center text-slate-200 mb-6 border border-dashed border-slate-300">
-                                <Search size={32} />
-                            </div>
-                            <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em] italic mb-2">No cadets identified in search range</p>
-                            <p className="text-[9px] text-slate-300 font-bold uppercase tracking-widest max-w-[250px] mx-auto leading-relaxed">Adjust filters or purge search parameters to re-scan the registry ledger.</p>
-                            <button
-                                onClick={handleReset}
-                                className="mt-8 text-blue-900 text-[10px] font-black uppercase tracking-[0.3em] border-b border-blue-900 hover:text-blue-700 hover:border-blue-700 transition-all"
-                            >
-                                Purge All Trace Parameters
-                            </button>
+                            })}
                         </div>
-                    )}
-                </div>
+                    </div>
+                ))}
+
+                {/* Empty State */}
+                {chronologicalFeed.length === 0 && !isHistoricalLoading && (
+                    <div className="p-16 text-center bg-white rounded-2xl border border-dashed border-slate-200">
+                        <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
+                            <Search size={22} />
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-800">No parade sessions or exceptions found</h3>
+                        <p className="text-xs text-slate-500 font-medium mt-1 max-w-sm mx-auto">
+                            No parade records match your current date range, status, or search query. Try broadening your parameters.
+                        </p>
+                        <button
+                            onClick={handleReset}
+                            className="mt-4 px-4 py-2 text-xs font-bold text-blue-900 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                        >
+                            Reset All Filters
+                        </button>
+                    </div>
+                )}
             </div>
 
+            {/* Load More Pagination */}
             {hasMoreRecords && (
-                <div className="flex justify-center pt-4">
+                <div className="flex justify-center pt-2">
                     <button
                         onClick={loadMoreRecords}
                         disabled={isDataLoading}
-                        className="flex items-center gap-2 px-8 py-3 bg-blue-900 text-white border border-blue-800 rounded-md text-[10px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-md disabled:opacity-50"
+                        className="px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
                     >
                         {isDataLoading ? (
-                            <span className="flex items-center gap-2">
-                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                SCANNING RECORDS...
-                            </span>
+                            <>
+                                <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
+                                <span>Loading records...</span>
+                            </>
                         ) : (
-                            'Load Extended Ledger'
+                            'Load Extended History'
                         )}
                     </button>
                 </div>
             )}
-            {/* Preview Modal */}
+
+            {/* PDF Preview Modal */}
             {previewPdfUrl && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-xl animate-in fade-in duration-300">
-                    <div className="bg-white w-full max-w-6xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
-                        <div className="bg-[#0f172a] text-white px-8 py-6 relative overflow-hidden shrink-0 flex justify-between items-center">
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+                        <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
                             <div>
-                                <h2 className="text-lg font-black tracking-tight uppercase">Audit Ledger Preview</h2>
-                                <p className="text-[9px] font-bold text-slate-400 tracking-[0.3em] uppercase opacity-60">Authoritative Administrative View</p>
+                                <h2 className="text-base font-bold">Audit Ledger Preview</h2>
+                                <p className="text-[11px] text-slate-400">Authoritative Administrative View</p>
                             </div>
-                            <button onClick={() => setPreviewPdfUrl(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
-                                <span className="font-bold text-sm uppercase">Close</span>
+                            <button
+                                onClick={() => setPreviewPdfUrl(null)}
+                                className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X size={18} />
                             </button>
                         </div>
                         <div className="flex-1 flex flex-col min-h-0 bg-slate-100">
                             <iframe src={previewPdfUrl} className="w-full flex-1 min-h-[60vh] border-0" title="PDF Preview" />
-                            <div className="p-4 bg-white border-t flex justify-end gap-3 shrink-0">
-                                <button onClick={() => setPreviewPdfUrl(null)} className="px-6 py-3 rounded-xl text-[11px] font-black uppercase text-slate-600 hover:bg-slate-100 border border-slate-200">Back</button>
-                                <button onClick={() => reportService.generateAuditReport({ filteredRecords, title: "OFFICIAL AUDIT REPORT", officerName: "COMMANDANT" })} className="px-6 py-3 rounded-xl text-[11px] font-black uppercase bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 shadow-sm">
-                                    <Download size={16}/> Download PDF
+                            <div className="p-4 bg-white border-t border-slate-200 flex justify-end gap-2.5 shrink-0">
+                                <button
+                                    onClick={() => setPreviewPdfUrl(null)}
+                                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 border border-slate-200"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    onClick={handleExportPdf}
+                                    className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-900 text-white hover:bg-blue-800 flex items-center gap-1.5 shadow-sm"
+                                >
+                                    <Download size={14} /> Download PDF
                                 </button>
                             </div>
                         </div>
@@ -630,6 +1040,7 @@ export const AttendanceAudit: React.FC = () => {
                 </div>
             )}
 
+            {/* Interactive Parade Remark Drawer */}
             <ParadeRemarkDrawer
                 submission={activeRemarkTarget}
                 isOpen={Boolean(activeRemarkTarget)}

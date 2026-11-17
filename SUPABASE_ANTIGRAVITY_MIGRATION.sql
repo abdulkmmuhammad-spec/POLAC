@@ -34,10 +34,16 @@ BEGIN
     END IF;
 END $$;
 
--- Enable RLS and add basic policies (Optional, adjust based on your security setup)
+-- Enable RLS and add policies for both anon and authenticated clients
 ALTER TABLE public.cadet_alerts ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cadet_alerts TO anon, authenticated;
 DROP POLICY IF EXISTS "Allow authenticated read/write access" ON public.cadet_alerts;
-CREATE POLICY "Allow authenticated read/write access" ON public.cadet_alerts FOR ALL TO authenticated USING (true);
+CREATE POLICY "Allow authenticated read/write access"
+  ON public.cadet_alerts
+  FOR ALL
+  TO anon, authenticated
+  USING (true)
+  WITH CHECK (true);
 
 -- 2. Create the Trigger Function
 CREATE OR REPLACE FUNCTION check_parade_absences() 
@@ -48,69 +54,62 @@ AS $$
 DECLARE
     v_absence_count INT;
     v_course_number INT;
+    v_parade_date DATE;
     v_alert_level TEXT;
     v_existing_alert_id UUID;
     v_existing_alert_level TEXT;
 BEGIN
     -- Only process if the cadet was marked 'absent'
-    IF NEW.status != 'absent' THEN
+    IF LOWER(TRIM(NEW.status)) != 'absent' THEN
         RETURN NEW;
     END IF;
 
-    -- Calculate rolling 5-day absences
-    -- We join cadet_details with parade_records to enforce the time window
-    SELECT COUNT(*) INTO v_absence_count
-    FROM cadet_details cd
-    JOIN parade_records pr ON cd.record_id = pr.id
-    WHERE cd.name = NEW.name
-      AND cd.squad = NEW.squad
-      AND cd.status = 'absent'
-      AND pr.date::date >= (CURRENT_DATE - INTERVAL '5 days')
-      AND pr.id != NEW.record_id; -- exclude current if we want, but since it's after insert, it's included. Wait...
+    -- Fetch the date and course_number of the submitted parade record
+    SELECT COALESCE(date::date, CURRENT_DATE), COALESCE(course_number::int, year_group::int)
+    INTO v_parade_date, v_course_number
+    FROM public.parade_records
+    WHERE id = NEW.record_id
+    LIMIT 1;
 
-    -- Let's re-calculate cleanly including the NEW record (assuming AFTER INSERT trigger)
-    SELECT COUNT(*) INTO v_absence_count
-    FROM cadet_details cd
-    JOIN parade_records pr ON cd.record_id = pr.id
-    WHERE cd.name = NEW.name
-      AND cd.squad = NEW.squad
-      AND cd.status = 'absent'
-      AND pr.date::date >= (CURRENT_DATE - INTERVAL '5 days');
+    v_parade_date := COALESCE(v_parade_date, CURRENT_DATE);
 
-    -- Note: If this is an AFTER INSERT trigger, the newest sequence is already in cadet_details.
-    -- v_absence_count will represent the true count including this one.
+    -- Count all 'absent' activities for this cadet within the 5-day rolling window of the parade date
+    -- (Includes 3 activities in 1 single day: Muster + Tattoo + Special)
+    SELECT COUNT(*) INTO v_absence_count
+    FROM public.cadet_details cd
+    JOIN public.parade_records pr ON cd.record_id = pr.id
+    WHERE LOWER(TRIM(cd.name)) = LOWER(TRIM(NEW.name))
+      AND LOWER(TRIM(cd.squad)) = LOWER(TRIM(NEW.squad))
+      AND LOWER(TRIM(cd.status)) = 'absent'
+      AND pr.date::date >= (v_parade_date - INTERVAL '5 days')
+      AND pr.date::date <= (v_parade_date + INTERVAL '1 day');
 
     IF v_absence_count >= 3 THEN
-        -- Determine Alert Level
         IF v_absence_count >= 4 THEN
             v_alert_level := 'FLAGRANT';
         ELSE
             v_alert_level := 'CRITICAL';
         END IF;
 
-        -- Extract course number from parade_records for context
-        SELECT course_number::int INTO v_course_number
-        FROM parade_records WHERE id = NEW.record_id LIMIT 1;
-
         -- Check if there's an ACTIVE alert already
         SELECT id, alert_level INTO v_existing_alert_id, v_existing_alert_level
         FROM public.cadet_alerts
-        WHERE cadet_name = NEW.name AND squad = NEW.squad AND status = 'ACTIVE'
+        WHERE LOWER(TRIM(cadet_name)) = LOWER(TRIM(NEW.name))
+          AND LOWER(TRIM(squad)) = LOWER(TRIM(NEW.squad))
+          AND status = 'ACTIVE'
         LIMIT 1;
 
         IF v_existing_alert_id IS NOT NULL THEN
-            -- Update existing alert (upgrade level if necessary, update count)
             UPDATE public.cadet_alerts
             SET trigger_count = v_absence_count,
                 alert_level = CASE WHEN v_absence_count >= 4 THEN 'FLAGRANT' ELSE alert_level END,
                 updated_at = timezone('utc'::text, now())
             WHERE id = v_existing_alert_id;
         ELSE
-            -- Insert a brand new active alert
             INSERT INTO public.cadet_alerts (
                 cadet_name, squad, course_number, alert_level, status, trigger_count
             ) VALUES (
-                NEW.name, NEW.squad, v_course_number, v_alert_level, 'ACTIVE', v_absence_count
+                TRIM(NEW.name), TRIM(NEW.squad), v_course_number, v_alert_level, 'ACTIVE', v_absence_count
             );
         END IF;
     END IF;

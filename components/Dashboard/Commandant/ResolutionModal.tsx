@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, AlertOctagon, FileText, User, CheckCircle } from 'lucide-react';
+import { X, Send, AlertOctagon, FileText, User, CheckCircle, MessageSquareWarning, ArrowUpRight, ShieldAlert } from 'lucide-react';
 import React, { useState } from 'react';
 import { CadetAlert } from './AtRiskCadetsWidget';
 
@@ -10,9 +10,20 @@ export interface ResolutionModalProps {
   onAction: (notes: string) => void;
   isSubmitting: boolean;
   userRole: string;
+  onOpenInRemarksLog?: () => void;
+  issuerDesignation?: string;
 }
 
-export default function ResolutionModal({ isOpen, onClose, alert, onAction, isSubmitting, userRole }: ResolutionModalProps) {
+export default function ResolutionModal({
+  isOpen,
+  onClose,
+  alert,
+  onAction,
+  isSubmitting,
+  userRole,
+  onOpenInRemarksLog,
+  issuerDesignation
+}: ResolutionModalProps) {
   const [notes, setNotes] = useState('');
 
   const handleSubmit = () => {
@@ -22,6 +33,8 @@ export default function ResolutionModal({ isOpen, onClose, alert, onAction, isSu
 
   const isFlagrant = alert.alert_level === 'FLAGRANT';
   const isCommandant = userRole === 'commandant';
+  const isAdmin = userRole === 'admin';
+  const effectiveIssuerTitle = issuerDesignation || 'Commandant';
 
   return (
     <AnimatePresence>
@@ -89,64 +102,113 @@ export default function ResolutionModal({ isOpen, onClose, alert, onAction, isSu
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="mt-8 md:mt-4 space-y-6 h-full flex flex-col">
-                {/* Condition: Show Commandant's Directive to Course Officers if it exists */}
-                {!isCommandant && alert.commandant_directive && (
-                  <div className="bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-xl p-4 shadow-inner">
-                    <h5 className="text-[#D4AF37] text-[10px] font-black uppercase tracking-widest mb-1">Official Commandant Directive</h5>
+              <div className="mt-8 md:mt-4 space-y-5 h-full flex flex-col">
+                {/* Condition: Show Senior Officer / Commandant's Directive if it exists */}
+                {alert.commandant_directive && (
+                  <div className="bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-xl p-4 shadow-inner space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h5 className="text-[#D4AF37] text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5">
+                        <MessageSquareWarning className="w-3.5 h-3.5" />
+                        Official Senior Officer Directive
+                      </h5>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        Action Required
+                      </span>
+                    </div>
                     <p className="text-sm text-white italic font-medium leading-relaxed">
                       "{alert.commandant_directive}"
                     </p>
+                    {!isCommandant && !isAdmin && onOpenInRemarksLog && (
+                      <button
+                        type="button"
+                        onClick={onOpenInRemarksLog}
+                        className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37]/30 border border-[#D4AF37]/40 text-[#F3E5AB] text-xs font-black uppercase tracking-wider transition-all group"
+                      >
+                        <span className="flex items-center gap-2">
+                          <MessageSquareWarning className="w-3.5 h-3.5 text-[#D4AF37]" />
+                          Reply in Unified Remarks Log
+                        </span>
+                        <ArrowUpRight className="w-4 h-4 text-[#D4AF37] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                      </button>
+                    )}
                   </div>
                 )}
 
-                <div className="flex-1 flex flex-col">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileText className={`w-5 h-5 ${isCommandant ? 'text-[#D4AF37]' : 'text-gray-400'}`} />
-                    <h4 className="text-lg font-medium text-white">
-                      {isCommandant ? "Add Commandant official Directive (Optional)" : "Resolution Log"}
+                {isAdmin ? (
+                  <div className="flex-1 flex flex-col justify-center items-center text-center p-6 rounded-xl bg-white/5 border border-white/10 space-y-3">
+                    <ShieldAlert className="w-8 h-8 text-amber-400" />
+                    <h4 className="text-sm font-bold text-white uppercase tracking-wider">
+                      Read-Only Audit Mode
                     </h4>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      System Administrators have view-only access to disciplinary misconduct records. Only the Commandant or Senior Officers may issue directives, and only the responsible Course Officer may file disciplinary resolutions.
+                    </p>
+                    {onOpenInRemarksLog && (
+                      <button
+                        type="button"
+                        onClick={onOpenInRemarksLog}
+                        className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white border border-white/15 transition-all"
+                      >
+                        View Conversation in Remarks Log
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                  
-                  <p className="mb-4 text-xs text-gray-400">
-                    {isCommandant 
-                      ? "Attach instructions for the responsible Course Officer. This does not resolve the alert."
-                      : "Document the administrative or disciplinary action taken to permanently resolve this flag."}
-                  </p>
-                  
-                  <textarea 
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder={
-                      isCommandant 
-                        ? "e.g., 'Do not accept medical excuses. Bring this cadet to my office'..."
-                        : "e.g., 'Issued formal query', 'Remanded to guardroom'..."
-                    }
-                    className="w-full flex-1 min-h-[100px] p-4 text-sm text-white placeholder-gray-600 transition-colors border rounded-xl bg-black/20 border-white/10 focus:outline-none focus:border-[#D4AF37]/50 focus:ring-1 focus:ring-[#D4AF37]/50 resize-none shadow-inner"
-                  />
-                </div>
+                ) : (
+                  <>
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <FileText className={`w-5 h-5 ${isCommandant ? 'text-[#D4AF37]' : 'text-blue-400'}`} />
+                        <h4 className="text-base font-bold text-white">
+                          {isCommandant
+                            ? `Issue ${effectiveIssuerTitle} Directive`
+                            : alert.commandant_directive
+                            ? 'Reply & Document Disciplinary Action'
+                            : 'Resolution Log'}
+                        </h4>
+                      </div>
+                      
+                      <p className="mb-3 text-xs text-gray-400 leading-relaxed">
+                        {isCommandant 
+                          ? "Attaching a directive starts an official Misconduct Conversation in the Course Officer's Remarks & Resolution Log so they can reply directly."
+                          : "Submit your disciplinary response here or inside the Remarks & Resolution Log. Both interfaces stay automatically synchronized."}
+                      </p>
+                      
+                      <textarea 
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder={
+                          isCommandant 
+                            ? "e.g., 'Do not accept medical excuses. Order this cadet to report to the Orderly Room immediately'..."
+                            : "e.g., 'Formal query issued; cadet marched to Orderly Room per directive'..."
+                        }
+                        className="w-full flex-1 min-h-[100px] p-4 text-sm text-white placeholder-gray-500 transition-colors border rounded-xl bg-black/30 border-white/10 focus:outline-none focus:border-[#D4AF37]/50 focus:ring-1 focus:ring-[#D4AF37]/50 resize-none shadow-inner"
+                      />
+                    </div>
 
-                <button 
-                  onClick={handleSubmit}
-                  disabled={isSubmitting || notes.trim() === ''}
-                  className={`flex items-center justify-center w-full gap-2 px-4 py-3 mt-4 text-sm font-semibold transition-all rounded-xl hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed shadow-lg ${
-                    isCommandant 
-                      ? "bg-gradient-to-r from-[#D4AF37] to-[#F3E5AB] text-[#0A1128] shadow-[#D4AF37]/20" 
-                      : "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20"
-                  }`}
-                >
-                  {isCommandant ? (
-                    <>
-                      <Send className="w-4 h-4" />
-                      {isSubmitting ? 'Attaching Directive...' : 'Submit Directive'}
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      {isSubmitting ? 'Resolving...' : 'Acknowledge & Close'}
-                    </>
-                  )}
-                </button>
+                    <button 
+                      onClick={handleSubmit}
+                      disabled={isSubmitting || notes.trim() === ''}
+                      className={`flex items-center justify-center w-full gap-2 px-4 py-3 mt-2 text-sm font-semibold transition-all rounded-xl hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed shadow-lg ${
+                        isCommandant 
+                          ? "bg-gradient-to-r from-[#D4AF37] to-[#F3E5AB] text-[#0A1128] shadow-[#D4AF37]/20" 
+                          : "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20"
+                      }`}
+                    >
+                      {isCommandant ? (
+                        <>
+                          <Send className="w-4 h-4" />
+                          {isSubmitting ? 'Dispatching Directive...' : 'Dispatch Directive to Remarks Log'}
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-4 h-4" />
+                          {isSubmitting ? 'Submitting Reply & Resolving...' : 'Submit Reply & Resolve Alert'}
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>

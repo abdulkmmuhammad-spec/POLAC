@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Bell, AlertTriangle, Settings, User, ArrowRight,
     Activity, Clock, CheckCheck, Shield, MessageSquare,
-    CornerDownRight, Send, RotateCcw
+    CornerDownRight, Send, RotateCcw, AlertOctagon
 } from 'lucide-react';
 import { Notification, UserRole, CommandantRemark } from '../../types';
-import { inferSeverity, getSeverityStyles, parseNotificationTarget } from '../../utils/notificationUtils';
+import { inferSeverity, getSeverityStyles, parseNotificationTarget, parseMisconductRemark } from '../../utils/notificationUtils';
 import { formatRC } from '../../utils/rcHelpers';
 import { useParade } from '../../context/ParadeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -39,6 +39,20 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
     const { currentUser } = useAuth();
     const { remarks, refreshRemarks } = useParade();
     const isCommandant = currentUser?.role === UserRole.COMMANDANT;
+    const isCourseOfficer = currentUser?.role === UserRole.COURSE_OFFICER;
+    const isAdmin = currentUser?.role === UserRole.ADMIN;
+    const currentOfficerDesignation = (currentUser?.designation || 'Commandant').trim();
+
+    const isRemarkOwner = (remark: CommandantRemark): boolean => {
+        if (!currentUser || currentUser.role !== UserRole.COMMANDANT) return false;
+        if (remark.commandantId !== null && remark.commandantId !== undefined && String(remark.commandantId).trim() !== '') {
+            return String(remark.commandantId) === String(currentUser.id);
+        }
+        return (
+            (remark.commandantName || '').trim().toLowerCase() ===
+            (currentUser.fullName || '').trim().toLowerCase()
+        );
+    };
 
     const [followUpOpenId, setFollowUpOpenId] = useState<string | null>(null);
     const [followUpText, setFollowUpText] = useState<string>('');
@@ -54,6 +68,8 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
             notification.type === 'remark_resolved' ||
             lowerTitle.includes("commandant's parade remark") ||
             lowerTitle.includes('commandant parade remark') ||
+            lowerTitle.includes('parade remark') ||
+            lowerTitle.includes('misconduct directive') ||
             lowerTitle.includes('officer justification') ||
             lowerTitle.includes('parade inquiry')
         );
@@ -112,7 +128,7 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
 
     const severity = inferSeverity(notification);
     const styles = getSeverityStyles(severity);
-    const target = parseNotificationTarget(notification);
+    const target = parseNotificationTarget(notification, currentUser?.role);
     const counts = notification.metadata?.counts || target.counts;
     const courseNum =
         notification.courseNumber ||
@@ -132,8 +148,9 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
             await dbService.followUpCommandantRemark({
                 remark,
                 followUpText: followUpText.trim(),
-                commandantName: currentUser?.fullName || 'COMMANDANT',
-                commandantId: currentUser?.id
+                commandantName: currentUser?.fullName || currentOfficerDesignation.toUpperCase(),
+                commandantId: currentUser?.id,
+                issuerRoleTitle: currentOfficerDesignation
             });
             toast.success('Follow-up inquiry dispatched to the Course Officer.');
             setFollowUpText('');
@@ -152,8 +169,9 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
         try {
             await dbService.resolveCommandantRemark({
                 remarkId: remark.id,
-                commandantName: currentUser?.fullName || 'COMMANDANT',
-                commandantId: currentUser?.id
+                commandantName: currentUser?.fullName || currentOfficerDesignation.toUpperCase(),
+                commandantId: currentUser?.id,
+                issuerRoleTitle: currentOfficerDesignation
             });
             toast.success('Parade inquiry marked as Addressed / Resolved.');
             onAcknowledge(notification.id);
@@ -194,7 +212,11 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
         onClose();
 
         if (isParadeRemarkNotification) {
-            const destinationRoute = isCommandant ? '/commandant' : '/officer/history';
+            const destinationRoute = isAdmin
+                ? '/admin'
+                : isCommandant
+                ? '/commandant'
+                : '/officer/history';
             const navState = {
                 courseNumber: courseNum || target.courseNumber,
                 paradeType: primaryRemark?.paradeType || target.paradeType,
@@ -328,7 +350,10 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
 
                             {/* Content Description */}
                             <div className="text-slate-700 text-sm leading-relaxed px-1 font-medium">
-                                {notification.content}
+                                {(notification.content || '').replace(
+                                    /\[MISCONDUCT:[^|]+\|CADET:([^|]+)\|SQUAD:([^|]+)\|ABSENCES:([^|]+)\|ALERT_ID:[^\]]+\]\s*/i,
+                                    'Regarding Cadet $1 (Squad $2 — $3 unexcused absences): '
+                                )}
                             </div>
 
                             {/* ── Commandant's Remark & Course Officer's Reply (Standard Log Format) ── */}
@@ -350,12 +375,16 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                             remark.status === 'addressed' ||
                                             (remark.status === 'pending' && Boolean(remark.officerResponse));
                                         const isFollowUpOpen = followUpOpenId === remark.id;
+                                        const parsedNotifRm = parseMisconductRemark(remark.remarkText);
+                                        const issuerLabel = remark.issuerRoleTitle || 'Commandant';
 
                                         return (
                                             <div
                                                 key={remark.id}
                                                 className={`rounded-2xl border p-4 space-y-3 transition-all ${
-                                                    isResolved
+                                                    parsedNotifRm.isMisconduct
+                                                        ? 'bg-rose-50/40 border-rose-300'
+                                                        : isResolved
                                                         ? 'bg-emerald-50/40 border-emerald-200'
                                                         : isAddressed
                                                         ? 'bg-blue-50/40 border-blue-200'
@@ -365,12 +394,20 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                 {/* Status & Timestamp Header */}
                                                 <div className="flex items-center justify-between gap-2 flex-wrap">
                                                     <div className="flex items-center gap-2">
-                                                        <span className="w-6 h-6 rounded-lg bg-slate-900 text-white flex items-center justify-center">
-                                                            <Shield size={12} />
+                                                        <span
+                                                            className={`w-6 h-6 rounded-lg text-white flex items-center justify-center ${
+                                                                parsedNotifRm.isMisconduct ? 'bg-rose-600' : 'bg-slate-900'
+                                                            }`}
+                                                        >
+                                                            {parsedNotifRm.isMisconduct ? (
+                                                                <AlertOctagon size={12} />
+                                                            ) : (
+                                                                <Shield size={12} />
+                                                            )}
                                                         </span>
                                                         <div>
                                                             <p className="text-xs font-black text-slate-900">
-                                                                {remark.commandantName}
+                                                                {remark.commandantName} ({issuerLabel})
                                                             </p>
                                                             <p className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
                                                                 <Clock size={10} />
@@ -397,6 +434,19 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                     )}
                                                 </div>
 
+                                                {parsedNotifRm.isMisconduct && parsedNotifRm.cadetName && (
+                                                    <div className="px-3 py-2 rounded-xl bg-slate-900 text-white flex items-center justify-between gap-2 text-xs">
+                                                        <span className="font-bold text-rose-200">
+                                                            Subject Cadet: <strong className="text-white">{parsedNotifRm.cadetName}</strong> (SQD {parsedNotifRm.squad})
+                                                        </span>
+                                                        {parsedNotifRm.absences !== null && (
+                                                            <span className="font-mono text-[10px] font-black text-rose-300 uppercase">
+                                                                {parsedNotifRm.absences} Absences
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
+
                                                 {/* Prior Exchange Thread History (if Commandant followed up previously) */}
                                                 {remark.thread && remark.thread.length > 0 && (
                                                     <div className="space-y-2 pl-2.5 border-l-2 border-slate-200">
@@ -421,7 +471,7 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                                         }`}
                                                                     >
                                                                         {msg.senderRole === 'commandant'
-                                                                            ? `Commandant (${msg.senderName})`
+                                                                            ? `${msg.senderTitle || issuerLabel} (${msg.senderName})`
                                                                             : `Course Officer (${msg.senderName})`}
                                                                     </span>
                                                                     <span className="text-[9px] text-slate-400 font-semibold">
@@ -429,7 +479,7 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                                     </span>
                                                                 </div>
                                                                 <p className="text-xs leading-relaxed font-medium">
-                                                                    {msg.message}
+                                                                    {parseMisconductRemark(msg.message).cleanText}
                                                                 </p>
                                                             </div>
                                                         ))}
@@ -439,10 +489,12 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                 {/* Commandant's Remark Box */}
                                                 <div className="bg-white/95 rounded-xl p-3 border border-slate-200/80">
                                                     <p className="text-[10px] font-black uppercase tracking-wider text-blue-900 mb-1">
-                                                        Commandant's Remark
+                                                        {parsedNotifRm.isMisconduct
+                                                            ? `${issuerLabel}'s Misconduct Directive`
+                                                            : `${issuerLabel}'s Remark`}
                                                     </p>
                                                     <p className="text-xs text-slate-800 font-medium leading-relaxed">
-                                                        {remark.remarkText}
+                                                        {parsedNotifRm.cleanText}
                                                     </p>
                                                 </div>
 
@@ -472,8 +524,8 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                     </div>
                                                 )}
 
-                                                {/* Course Officer Inline Reply Form (if not Commandant and awaiting reply) */}
-                                                {!isCommandant && !isResolved && !remark.officerResponse && (
+                                                {/* Course Officer Inline Reply Form (strictly for COURSE_OFFICER) */}
+                                                {isCourseOfficer && !isResolved && !remark.officerResponse && (
                                                     <div className="pt-1 space-y-2">
                                                         <textarea
                                                             rows={2}
@@ -496,8 +548,8 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                                                     </div>
                                                 )}
 
-                                                {/* Commandant Follow-Up & Resolution Actions */}
-                                                {isCommandant && (
+                                                {/* Commandant / Senior Officer Follow-Up & Resolution Actions (Strict Thread Ownership) */}
+                                                {isCommandant && isRemarkOwner(remark) && (
                                                     <div className="pt-1 space-y-2.5">
                                                         <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2">
                                                             <button

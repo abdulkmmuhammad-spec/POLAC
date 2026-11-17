@@ -1,13 +1,16 @@
 import { test, expect } from '@playwright/test';
 
-// Session payload for pseudo-auth bypass
+// Session payload for pseudo-auth bypass (Admin Portal)
 const mockSession = {
-  id: 'b6f9d2d0-6db2-4e4b-9721-6b2db39d226a',
-  fullName: 'COMMANDANT GENERAL',
-  username: 'commandant',
-  role: 'commandant',
-  email: 'commandant@polac.edu.ng',
-  courseName: 'Academy HQ'
+  id: 'a0000000-0000-4000-8000-000000000001',
+  fullName: 'SYSTEM ADMINISTRATOR',
+  username: 'admin',
+  role: 'admin',
+  designation: 'System Administrator',
+  email: 'admin@gmail.com',
+  courseName: 'Academy HQ',
+  isActive: true,
+  sessionVersion: 1
 };
 
 test.beforeEach(async ({ page }) => {
@@ -47,10 +50,10 @@ test.beforeEach(async ({ page }) => {
   }, mockSession);
 });
 
-test.describe('Commandant Dashboard E2E Tests', () => {
+test.describe('Admin & Commandant Role Separation E2E Tests', () => {
   
-  test('should load Commandant dashboard settings page and switch tabs', async ({ page }) => {
-    await page.goto('/commandant/settings');
+  test('should load Admin dashboard settings page and switch tabs', async ({ page }) => {
+    await page.goto('/admin/settings');
 
     // Verify header title
     await expect(page.getByRole('heading', { name: 'System Settings & Forensics' })).toBeVisible();
@@ -99,7 +102,7 @@ test.describe('Commandant Dashboard E2E Tests', () => {
       });
     });
 
-    await page.goto('/commandant/settings');
+    await page.goto('/admin/settings');
     await page.getByRole('button', { name: 'Forensic Archive' }).click();
 
     // Verify pagination readout string matches responsive limits
@@ -118,18 +121,18 @@ test.describe('Commandant Dashboard E2E Tests', () => {
     // Test responsiveness logic
     const isMobile = viewport && viewport.width < 768;
 
-    await page.goto('/commandant/settings');
+    await page.goto('/admin/settings');
     await page.getByRole('button', { name: 'Tactical Access Control' }).click();
 
     if (isMobile) {
       // Mobile view card expectations
       await expect(page.locator('table')).toBeHidden();
-      await expect(page.locator('text=Cmdt')).toBeVisible();
+      await expect(page.locator('text=Admin')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Security Override' }).first()).toBeVisible();
     } else {
       // Desktop view table expectations
       await expect(page.locator('table')).toBeVisible();
-      await expect(page.locator('text=Commandant')).toBeVisible();
+      await expect(page.locator('text=System Admin')).toBeVisible();
     }
   });
 });

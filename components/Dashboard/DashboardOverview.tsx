@@ -4,8 +4,9 @@ import { Users, CheckCircle, AlertCircle, Activity, Calendar, FileText, Zap, His
 import { StatCard } from '../StatCard';
 import { AttendanceBarChart } from '../Charts';
 import { useParade, CourseSummaryEntry } from '../../context/ParadeContext';
+import { useAuth } from '../../context/AuthContext';
 import { formatRC } from '../../utils/rcHelpers';
-import { ParadeType } from '../../types';
+import { ParadeType, UserRole } from '../../types';
 import AtRiskCadetsWidget from './Commandant/AtRiskCadetsWidget';
 import { ParadeRemarkDrawer, ParadeRemarkTarget } from './Commandant/ParadeRemarkDrawer';
 
@@ -36,6 +37,8 @@ const NetworkErrorFallback: React.FC<{ error: any, onRetry: () => void }> = ({ e
 
 export const DashboardOverview: React.FC = () => {
     const location = useLocation();
+    const { currentUser } = useAuth();
+    const isAdmin = currentUser?.role === UserRole.ADMIN;
     const { records, remarks, stats, courseSummary, yesterdaySummary, activeDate, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
     const [showYesterday, setShowYesterday] = React.useState(false);
     const [activeRemarkTarget, setActiveRemarkTarget] = React.useState<ParadeRemarkTarget | null>(null);
@@ -335,7 +338,13 @@ export const DashboardOverview: React.FC = () => {
                                                     }`}
                                                 >
                                                     {c.absent > 0 ? <Flag size={12} /> : <MessageSquarePlus size={12} />}
-                                                    <span>{c.absent > 0 ? 'Flag Absence' : 'Add Remark'}</span>
+                                                    <span>
+                                                        {isAdmin
+                                                            ? 'View Remarks'
+                                                            : c.absent > 0
+                                                            ? 'Flag Absence'
+                                                            : 'Add Remark'}
+                                                    </span>
                                                 </button>
                                             </div>
                                         </td>
@@ -459,7 +468,13 @@ export const DashboardOverview: React.FC = () => {
                                             }`}
                                         >
                                             {item.absent > 0 ? <Flag size={12} /> : <MessageSquarePlus size={12} />}
-                                            <span>{item.absent > 0 ? 'Flag Absence' : 'Add Remark'}</span>
+                                            <span>
+                                                {isAdmin
+                                                    ? 'View Remarks'
+                                                    : item.absent > 0
+                                                    ? 'Flag Absence'
+                                                    : 'Add Remark'}
+                                            </span>
                                         </button>
                                     </div>
                                 </div>
@@ -551,7 +566,7 @@ export const DashboardOverview: React.FC = () => {
                                             title="Add Remark or Flag Absence"
                                         >
                                             <MessageSquarePlus size={12} />
-                                            <span>Remark</span>
+                                            <span>{isAdmin ? 'View Remarks' : 'Remark'}</span>
                                         </button>
                                     </div>
                                 </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, FileText, CheckCircle2, Loader2, Flag, Send, CheckCheck, Clock, AlertTriangle } from 'lucide-react';
-import { ParadeRecordMetadata, CadetStatus, CadetDetail, CommandantRemark } from '../../../types';
+import { ParadeRecordMetadata, CadetStatus, CadetDetail, CommandantRemark, SickbayVerification } from '../../../types';
 import { dbService } from '../../../services/dbService';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -16,6 +16,7 @@ export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ 
     const { currentUser } = useAuth();
     const { remarks, refreshRemarks } = useParade();
     const [cadets, setCadets] = useState<CadetDetail[]>([]);
+    const [sickbayVerifications, setSickbayVerifications] = useState<SickbayVerification[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
     const [submittingId, setSubmittingId] = useState<string | null>(null);
@@ -52,13 +53,21 @@ export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ 
     useEffect(() => {
         if (!record) {
             setCadets([]);
+            setSickbayVerifications([]);
             return;
         }
 
         const fetchDetails = async () => {
             setIsLoading(true);
-            const { data } = await dbService.getParadeDetails(record.id);
+            const [{ data }, verifications] = await Promise.all([
+                dbService.getParadeDetails(record.id),
+                dbService.fetchSickbayVerifications({
+                    date: record.date,
+                    courseNumber: record.courseNumber
+                })
+            ]);
             setCadets(data || []);
+            setSickbayVerifications(verifications || []);
             setIsLoading(false);
         };
         fetchDetails();
@@ -196,17 +205,59 @@ export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ 
 
                             {nonPresentCadets.length > 0 ? (
                                 <div className="space-y-3">
-                                    {nonPresentCadets.map((cadet, idx) => (
-                                        <div key={idx} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-colors">
-                                            <div>
-                                                <p className="font-bold text-slate-800 text-sm group-hover:text-blue-700 transition-colors">{cadet.name}</p>
-                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">{cadet.squad}</p>
+                                    {nonPresentCadets.map((cadet, idx) => {
+                                        const isSick = String(cadet.status).toLowerCase() === 'sick';
+                                        const verification = isSick
+                                            ? sickbayVerifications.find(
+                                                  v =>
+                                                      (v.paradeRecordId && String(v.paradeRecordId) === String(record.id) &&
+                                                          v.cadetName.trim().toLowerCase() === cadet.name.trim().toLowerCase()) ||
+                                                      v.cadetName.trim().toLowerCase() === cadet.name.trim().toLowerCase()
+                                              )
+                                            : undefined;
+
+                                        return (
+                                            <div key={idx} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col gap-2 group hover:border-blue-200 transition-colors">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <p className="font-bold text-slate-800 text-sm group-hover:text-blue-700 transition-colors">{cadet.name}</p>
+                                                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">{cadet.squad}</p>
+                                                    </div>
+                                                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-tight shrink-0 border shadow-sm ${getStatusBadgeStyles(cadet.status)}`}>
+                                                        {getStatusFullLabel(cadet.status)}
+                                                    </span>
+                                                </div>
+
+                                                {isSick && (
+                                                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+                                                        {!verification || verification.status === 'pending_verification' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                                                <Clock size={10} />
+                                                                Pending Sickbay Check
+                                                            </span>
+                                                        ) : verification.status === 'admitted' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                                <CheckCircle2 size={10} />
+                                                                Admitted
+                                                            </span>
+                                                        ) : (
+                                                            <>
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                                                    <AlertTriangle size={10} />
+                                                                    Not Admitted
+                                                                </span>
+                                                                {verification.clinicalNote && (
+                                                                    <span className="text-[11px] text-rose-700 italic">
+                                                                        "{verification.clinicalNote}"
+                                                                    </span>
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
-                                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-tight shrink-0 border shadow-sm ${getStatusBadgeStyles(cadet.status)}`}>
-                                                {getStatusFullLabel(cadet.status)}
-                                            </span>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             ) : (
                                 <div className="py-12 flex flex-col items-center justify-center text-center">

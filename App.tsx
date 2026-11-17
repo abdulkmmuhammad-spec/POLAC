@@ -4,10 +4,12 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ParadeProvider } from './context/ParadeContext';
 import { UserRole } from './types';
 import { LoginScreen } from './components/Auth/LoginScreen';
-import { CommandantDashboard } from './components/Dashboard/Commandant/CommandantDashboard';
+import { AdminDashboard, CommandantDashboard } from './components/Dashboard/Commandant/CommandantDashboard';
 import { OfficerDashboard } from './components/Dashboard/Officer/OfficerDashboard';
+import { MedicalDashboard } from './components/Dashboard/Medical/MedicalDashboard';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/Layout/ErrorBoundary';
+import { SwipePageNavigator } from './components/Layout/SwipePageNavigator';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const queryClient = new QueryClient({
@@ -51,6 +53,13 @@ const ProtectedRoute: React.FC<{ allowedRoles: UserRole[] }> = ({ allowedRoles }
   return <Outlet />;
 };
 
+const getRoleHomeRoute = (role: UserRole): string => {
+  if (role === UserRole.ADMIN) return '/admin';
+  if (role === UserRole.COMMANDANT) return '/commandant';
+  if (role === UserRole.MEDICAL_OFFICER) return '/medical';
+  return '/officer';
+};
+
 // ─── Public Route ───────────────────────────────────────────────
 // Redirects already-authenticated users away from /login.
 const PublicRoute: React.FC = () => {
@@ -62,10 +71,7 @@ const PublicRoute: React.FC = () => {
 
   if (authState.status === 'authenticated') {
     // Already logged in — redirect to appropriate dashboard
-    const destination = authState.user.role === UserRole.COMMANDANT
-      ? '/commandant'
-      : '/officer';
-    return <Navigate to={destination} replace />;
+    return <Navigate to={getRoleHomeRoute(authState.user.role)} replace />;
   }
 
   return <Outlet />;
@@ -86,7 +92,7 @@ const RootRoute: React.FC = () => {
 
   // Authenticated — send to role-appropriate dashboard
   return <Navigate
-    to={authState.user.role === UserRole.COMMANDANT ? '/commandant' : '/officer'}
+    to={getRoleHomeRoute(authState.user.role)}
     replace
   />;
 };
@@ -103,12 +109,18 @@ const AppContent: React.FC = () => {
           zIndex: 99999,
         }}
       />
+      <SwipePageNavigator />
       <Routes>
         <Route element={<PublicRoute />}>
           <Route path="/login" element={<LoginScreen />} />
         </Route>
 
-        {/* Protected commandant routes */}
+        {/* Protected system administrator routes */}
+        <Route element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]} />}>
+          <Route path="/admin/*" element={<AdminDashboard />} />
+        </Route>
+
+        {/* Protected commandant & senior officers routes (Parade States, Remarks & Audit ONLY) */}
         <Route element={<ProtectedRoute allowedRoles={[UserRole.COMMANDANT]} />}>
           <Route path="/commandant/*" element={<CommandantDashboard />} />
         </Route>
@@ -116,6 +128,11 @@ const AppContent: React.FC = () => {
         {/* Protected officer routes */}
         <Route element={<ProtectedRoute allowedRoles={[UserRole.COURSE_OFFICER]} />}>
           <Route path="/officer/*" element={<OfficerDashboard />} />
+        </Route>
+
+        {/* Protected medical officer routes */}
+        <Route element={<ProtectedRoute allowedRoles={[UserRole.MEDICAL_OFFICER]} />}>
+          <Route path="/medical/*" element={<MedicalDashboard />} />
         </Route>
 
         {/* Root — smart redirect */}

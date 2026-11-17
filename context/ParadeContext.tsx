@@ -200,12 +200,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                pass_count, suspension_count, yet_to_report_count, grand_total, created_at`;
 
             let queryBuilder;
+            const isGlobalViewer = currentUser.role === UserRole.COMMANDANT || currentUser.role === UserRole.ADMIN;
 
-            // Commandant: go through the RPC to respect RLS policies.
-            // Direct table access may be blocked for the commandant role.
-            if (currentUser.role === UserRole.COMMANDANT) {
+            if (isGlobalViewer) {
                 queryBuilder = supabase
-                    .rpc('get_commandant_parade_overview', { p_viewer_id: String(currentUser.id) })
+                    .from('parade_records')
                     .select(selectFields)
                     .gte('created_at', windowStart)
                     .order('created_at', { ascending: false })
@@ -223,7 +222,17 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             // Append dummy query param to break aggressive Safari mobile caching
             queryBuilder = queryBuilder.neq('id', '00000000-0000-0000-0000-000000000000');
 
-            const { data, error } = await queryBuilder;
+            let { data, error } = await queryBuilder;
+            if (error && isGlobalViewer) {
+                const rpcFallback = await supabase
+                    .rpc('get_commandant_parade_overview', { p_viewer_id: String(currentUser.id) })
+                    .select(selectFields)
+                    .gte('created_at', windowStart)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+                data = rpcFallback.data;
+                error = rpcFallback.error;
+            }
             if (error) throw error;
 
             const formatted: ParadeRecordMetadata[] = (data || []).map((r: any) => ({
@@ -256,8 +265,10 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const refreshRemarks = useCallback(async () => {
         try {
+            const isGlobalViewer =
+                currentUser?.role === UserRole.COMMANDANT || currentUser?.role === UserRole.ADMIN;
             const data = await dbService.getCommandantRemarks(
-                currentUser?.role === UserRole.COMMANDANT
+                isGlobalViewer
                     ? undefined
                     : {
                         courseOfficerId: currentUser?.id,
@@ -274,14 +285,16 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setIsRefreshing(true);
         try {
             try {
+                const isGlobalViewer =
+                    currentUser?.role === UserRole.COMMANDANT || currentUser?.role === UserRole.ADMIN;
                 const effectiveOfficer =
                     officerNameFilter ??
-                    (currentUser?.role === UserRole.COMMANDANT ? undefined : currentUser?.fullName);
+                    (isGlobalViewer ? undefined : currentUser?.fullName);
                 const effectiveCourse =
-                    currentUser?.role === UserRole.COMMANDANT ? undefined : currentUser?.courseNumber;
+                    isGlobalViewer ? undefined : currentUser?.courseNumber;
 
                 const [notifsRes, rcRes, settingsRes, count] = await Promise.all([
-                    dbService.getNotifications(effectiveOfficer, effectiveCourse),
+                    dbService.getNotifications(effectiveOfficer, effectiveCourse, currentUser?.role),
                     dbService.getActiveRC(),
                     dbService.getSubmissionSettings(),
                     dbService.getTotalRecordsCount()
@@ -442,9 +455,15 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         const fetchInitial = async () => {
             try {
-                const officerNameFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.fullName;
-                const courseFilter = currentUser.role === UserRole.COMMANDANT ? undefined : currentUser.courseNumber;
-                const notifsRes = await dbService.getNotifications(officerNameFilter, courseFilter);
+                const isGlobalViewer =
+                    currentUser.role === UserRole.COMMANDANT || currentUser.role === UserRole.ADMIN;
+                const officerNameFilter = isGlobalViewer ? undefined : currentUser.fullName;
+                const courseFilter = isGlobalViewer ? undefined : currentUser.courseNumber;
+                const notifsRes = await dbService.getNotifications(
+                    officerNameFilter,
+                    courseFilter,
+                    currentUser.role
+                );
                 setNotifications(notifsRes.data);
             } catch (err) {
                 console.error('Initial notification fetch error:', err);
@@ -472,6 +491,32 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                         archivedAt: raw.archived_at
                     };
 
+                    // Source-Level Filtering per Role:
+                    // 1. ADMIN never receives remark notifications (only views remarks in drawer)
+                    if (
+                        currentUser.role === UserRole.ADMIN &&
+                        (newNotif.type === 'commandant_remark' ||
+                            newNotif.type === 'remark_response' ||
+                            newNotif.type === 'remark_resolved')
+                    ) {
+                        refreshRemarks();
+                        return;
+                    }
+
+                    // 2. COMMANDANT & Senior Officers only receive parade submission/update and remark notifications
+                    if (
+                        currentUser.role === UserRole.COMMANDANT &&
+                        ![
+                            'parade_submission',
+                            'parade_update',
+                            'commandant_remark',
+                            'remark_response',
+                            'remark_resolved'
+                        ].includes(newNotif.type)
+                    ) {
+                        return;
+                    }
+
                     const matchesCourseOfficer =
                         (newNotif.officerName &&
                             currentUser.fullName &&
@@ -480,7 +525,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                             newNotif.courseNumber &&
                             Number(newNotif.courseNumber) === Number(currentUser.courseNumber));
 
-                    if (currentUser.role === UserRole.COMMANDANT || matchesCourseOfficer) {
+                    if (
+                        currentUser.role === UserRole.COMMANDANT ||
+                        currentUser.role === UserRole.ADMIN ||
+                        matchesCourseOfficer
+                    ) {
                         const isCommandantSelfOutbound =
                             currentUser.role === UserRole.COMMANDANT &&
                             (newNotif.type === 'commandant_remark' || newNotif.type === 'remark_resolved');
@@ -588,7 +637,7 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                                 onClick={() => {
                                     toast.dismiss(t.id);
                                     if (
-                                        currentUser.role !== UserRole.COMMANDANT &&
+                                        currentUser.role === UserRole.COURSE_OFFICER &&
                                         (newNotif.type === 'commandant_remark' || newNotif.type === 'remark_resolved')
                                     ) {
                                         window.dispatchEvent(
@@ -713,9 +762,10 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         // Use todayRecords — the complete, non-paginated snapshot of recent activity.
         const todayByType = todayRecords.filter(r => r.date === activeDate && r.paradeType === selectedParadeType);
 
-        const activeStrength = currentUser?.role === UserRole.COMMANDANT
-            ? todayByType.reduce((sum, r) => sum + r.grandTotal, 0)
-            : (currentUser?.totalCadets || 0);
+        const activeStrength =
+            currentUser?.role === UserRole.COMMANDANT || currentUser?.role === UserRole.ADMIN
+                ? todayByType.reduce((sum, r) => sum + r.grandTotal, 0)
+                : (currentUser?.totalCadets || 0);
 
         const presentCount = todayByType.reduce((sum, r) => sum + r.presentCount, 0);
 

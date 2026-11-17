@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { RefreshCcw, LogOut, Bell, Menu, Volume2, VolumeX, Radio, CheckCircle2 } from 'lucide-react';
+import { RefreshCcw, LogOut, Bell, Volume2, VolumeX, Radio, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -18,7 +18,7 @@ interface HeaderProps {
     onMenuClick?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onProfileClick, onMenuClick }) => {
+export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onProfileClick }) => {
     const navigate = useNavigate();
     const { currentUser, logout } = useAuth();
     const { isDataLoading, refreshData, notifications, markNotificationRead, markAllAsRead } = useParade();
@@ -42,18 +42,37 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [showSystemStatus]);
 
-    // Determine if user is commandant (sees all) or course officer (sees only own)
-    const isCommandant = currentUser?.role === UserRole.COMMANDANT;
-    const officerNameFilter = !isCommandant ? currentUser?.fullName : undefined;
+    // Determine if user is commandant/admin (sees global) or course officer (sees only own)
+    const isGlobalViewer =
+        currentUser?.role === UserRole.COMMANDANT || currentUser?.role === UserRole.ADMIN;
+    const officerNameFilter = !isGlobalViewer ? currentUser?.fullName : undefined;
 
-    // Filter notifications for display - course officers see notifications matching their name or assigned course
-    const displayNotifications = isCommandant
-        ? notifications
-        : notifications.filter(n =>
-            n.officerName?.toLowerCase() === currentUser?.fullName?.toLowerCase() ||
-            (currentUser?.courseNumber && n.courseNumber && Number(n.courseNumber) === Number(currentUser.courseNumber)) ||
-            !n.officerName
-        );
+    // Filter notifications for display
+    const displayNotifications = isGlobalViewer
+        ? notifications.filter(n => {
+              if (currentUser?.role === UserRole.ADMIN) {
+                  return !['commandant_remark', 'remark_response', 'remark_resolved'].includes(n.type);
+              }
+              if (currentUser?.role === UserRole.COMMANDANT) {
+                  return [
+                      'parade_submission',
+                      'parade_update',
+                      'commandant_remark',
+                      'remark_response',
+                      'remark_resolved',
+                      'sickbay_verification'
+                  ].includes(n.type);
+              }
+              return true;
+          })
+        : notifications.filter(
+              n =>
+                  n.officerName?.toLowerCase() === currentUser?.fullName?.toLowerCase() ||
+                  (currentUser?.courseNumber &&
+                      n.courseNumber &&
+                      Number(n.courseNumber) === Number(currentUser.courseNumber)) ||
+                  !n.officerName
+          );
 
     const unreadCount = displayNotifications.filter(n => !n.read).length;
 
@@ -90,23 +109,15 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
     };
 
     return (
-        <header className="bg-blue-900 border-b border-white/10 h-20 flex items-center justify-between px-4 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-            <div className="flex items-center gap-2 md:gap-4 min-w-0">
-                {onMenuClick && (
-                    <button
-                        onClick={onMenuClick}
-                        className="p-2 md:hidden text-blue-200 hover:bg-white/5 rounded-md transition-colors shrink-0 border border-transparent hover:border-white/5"
-                    >
-                        <Menu size={24} />
-                    </button>
-                )}
-                <div className="flex items-center gap-3 min-w-0">
+        <header className="bg-blue-900 border-b border-white/10 h-16 md:h-20 flex items-center justify-between px-3.5 sm:px-5 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+            <div className="flex items-center gap-2.5 md:gap-4 min-w-0">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                     <div className="flex w-8 h-8 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 items-center justify-center shrink-0 shadow-sm overflow-hidden">
                         <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
                     <div className="flex flex-col min-w-0">
-                        <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-1">Command Control</p>
-                        <h2 className="text-sm sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight truncate">{title}</h2>
+                        <p className="text-[9px] sm:text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-0.5 sm:mb-1">Command Control</p>
+                        <h2 className="text-xs sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight truncate">{title}</h2>
                     </div>
                 </div>
             </div>
@@ -233,13 +244,13 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 {showRefresh && (
                     <button
                         onClick={() => refreshData(officerNameFilter)}
-                        className={`p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 ${isDataLoading ? 'animate-spin' : ''}`}
+                        className={`hidden sm:inline-flex p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 ${isDataLoading ? 'animate-spin' : ''}`}
                     >
                         <RefreshCcw size={18} />
                     </button>
                 )}
 
-                <div className="h-10 w-[1px] bg-white/10 mx-1 md:mx-2"></div>
+                <div className="h-8 md:h-10 w-[1px] bg-white/10 mx-0.5 md:mx-2"></div>
 
                 <div
                     onClick={onProfileClick}
@@ -247,14 +258,28 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 >
                     <div className="text-right hidden md:block">
                         <p className="text-[11px] font-black text-white uppercase tracking-wider group-hover:text-blue-400 transition-colors">{currentUser?.fullName}</p>
-                        <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest leading-none mt-0.5">{currentUser?.role === 'commandant' ? 'Commandant' : 'Course Officer'}</p>
+                        <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest leading-none mt-0.5">
+                            {currentUser?.designation ||
+                                (currentUser?.role === UserRole.ADMIN
+                                    ? 'System Administrator'
+                                    : currentUser?.role === UserRole.COMMANDANT
+                                    ? 'Commandant'
+                                    : currentUser?.role === UserRole.MEDICAL_OFFICER
+                                    ? 'Medical Officer'
+                                    : 'Course Officer')}
+                        </p>
                     </div>
-                    <div className="w-9 h-9 shrink-0 bg-blue-600/20 rounded-xl border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_15px_rgba(59,130,246,0.1)] text-sm">
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 bg-blue-600/20 rounded-xl border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_15px_rgba(59,130,246,0.1)] text-xs sm:text-sm">
                         {(currentUser?.fullName || 'U').charAt(0)}
                     </div>
                 </div>
-                <button onClick={logout} className="hidden md:block p-2 text-white/20 hover:text-rose-400 transition-colors" title="Sign Out">
-                    <LogOut size={18} />
+                <button
+                    onClick={logout}
+                    className="p-2 text-blue-200/60 hover:text-rose-400 transition-colors"
+                    title="Sign Out"
+                    aria-label="Sign Out"
+                >
+                    <LogOut size={17} />
                 </button>
             </div>
 

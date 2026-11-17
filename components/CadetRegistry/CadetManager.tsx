@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Trash2, Users, Search, Download, Upload, FileText, ChevronDown, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, Users, Search, Upload, Download, FileText, ShieldAlert } from 'lucide-react';
 import { dbService } from '../../services/dbService';
 import { useParade } from '../../context/ParadeContext';
 import { formatRC, calculateCurrentLevel } from '../../utils/rcHelpers';
@@ -11,11 +11,6 @@ import { CadetRecordModal } from './CadetRecordModal';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
 import { CadetUploadModal } from './CadetUploadModal';
 import { BulkCoursePurgeModal } from './BulkCoursePurgeModal';
-import {
-    downloadNPACSVTemplate,
-    downloadNPAExcelTemplate,
-    downloadLegacyExcelTemplate
-} from '../../services/cadetImportService';
 
 export const CadetManager: React.FC = () => {
     const location = useLocation();
@@ -37,19 +32,6 @@ export const CadetManager: React.FC = () => {
     // Upload & Ingress Modals
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [isBulkPurgeModalOpen, setIsBulkPurgeModalOpen] = useState(false);
-    const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-    const templateMenuRef = useRef<HTMLDivElement>(null);
-
-    // Close template menu when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (templateMenuRef.current && !templateMenuRef.current.contains(event.target as Node)) {
-                setShowTemplateMenu(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
 
     const PAGE_SIZE = 50;
 
@@ -277,11 +259,6 @@ export const CadetManager: React.FC = () => {
         }
     };
 
-    const handleDownloadTemplate = () => {
-        downloadNPACSVTemplate();
-    };
-
-
     const displayCadets = cadets.filter(c => {
         if (statusFilter === 'GRADUATED') return c.status === 'GRADUATED';
         if (statusFilter === 'RELEGATED') return c.status !== 'DISMISSED' && c.relegated_from_rc;
@@ -313,100 +290,6 @@ export const CadetManager: React.FC = () => {
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
-                            {/* GET TEMPLATE DROPDOWN */}
-                            <div className="relative" ref={templateMenuRef}>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowTemplateMenu(!showTemplateMenu)}
-                                    className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded text-[9px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
-                                >
-                                    <Download size={14} className="text-blue-900" />
-                                    <span>Get Template</span>
-                                    <ChevronDown size={12} className={`text-slate-400 transition-transform ${showTemplateMenu ? 'rotate-180' : ''}`} />
-                                </button>
-
-                                {showTemplateMenu && (
-                                    <div className="absolute right-0 sm:left-0 sm:right-auto mt-2 w-72 bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-30 animate-in fade-in zoom-in-95 duration-150">
-                                        <div className="px-3 py-1.5 border-b border-slate-100">
-                                            <p className="text-[8px] font-black uppercase tracking-widest text-blue-900">
-                                                Select Enrollment Template
-                                            </p>
-                                        </div>
-
-                                        {/* Option 1: New NPA Format (CSV) */}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                downloadNPACSVTemplate();
-                                                setShowTemplateMenu(false);
-                                            }}
-                                            className="w-full text-left px-3 py-2.5 hover:bg-emerald-50/70 transition-colors flex items-start gap-2.5 group"
-                                        >
-                                            <div className="w-7 h-7 rounded bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
-                                                <FileText size={14} />
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight group-hover:text-emerald-900">
-                                                        New NPA Format (CSV)
-                                                    </span>
-                                                    <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[8px] font-black rounded uppercase">
-                                                        Recommended
-                                                    </span>
-                                                </div>
-                                                <p className="text-[9px] text-slate-500 font-medium leading-tight mt-0.5">
-                                                    2 columns: <code className="text-slate-700 font-bold">NPA Number, Name</code>. Auto-derives RC & Squad.
-                                                </p>
-                                            </div>
-                                        </button>
-
-                                        {/* Option 2: New NPA Format (XLSX) */}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                downloadNPAExcelTemplate();
-                                                setShowTemplateMenu(false);
-                                            }}
-                                            className="w-full text-left px-3 py-2.5 hover:bg-blue-50/70 transition-colors flex items-start gap-2.5 group"
-                                        >
-                                            <div className="w-7 h-7 rounded bg-blue-100 text-blue-900 flex items-center justify-center shrink-0 mt-0.5">
-                                                <FileText size={14} />
-                                            </div>
-                                            <div>
-                                                <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight group-hover:text-blue-900">
-                                                    New NPA Format (Excel .xlsx)
-                                                </span>
-                                                <p className="text-[9px] text-slate-500 font-medium leading-tight mt-0.5">
-                                                    2 columns: <code className="text-slate-700 font-bold">NPA Number, Name</code>
-                                                </p>
-                                            </div>
-                                        </button>
-
-                                        {/* Option 3: Legacy Format (XLSX) */}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                downloadLegacyExcelTemplate();
-                                                setShowTemplateMenu(false);
-                                            }}
-                                            className="w-full text-left px-3 py-2.5 hover:bg-slate-50 transition-colors flex items-start gap-2.5 group border-t border-slate-100"
-                                        >
-                                            <div className="w-7 h-7 rounded bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 mt-0.5">
-                                                <FileText size={14} />
-                                            </div>
-                                            <div>
-                                                <span className="text-[10px] font-black text-slate-700 uppercase tracking-tight group-hover:text-slate-900">
-                                                    Legacy Template (Excel .xlsx)
-                                                </span>
-                                                <p className="text-[9px] text-slate-500 font-medium leading-tight mt-0.5">
-                                                    3 columns: <code className="text-slate-700 font-bold">Name, Squad, RC_Number</code>
-                                                </p>
-                                            </div>
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
                             {/* UPLOAD DATA BUTTON */}
                             <button
                                 type="button"

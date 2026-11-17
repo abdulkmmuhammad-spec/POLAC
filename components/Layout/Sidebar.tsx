@@ -4,13 +4,17 @@ import {
     Shield,
     LayoutDashboard,
     FileText,
+    MessageSquare,
     LogOut,
     Users,
     Activity,
     X,
-    ShieldAlert
+    Settings,
+    Stethoscope
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useParade } from '../../context/ParadeContext';
+import { UserRole } from '../../types';
 
 interface SidebarProps {
     isOpen?: boolean;
@@ -18,93 +22,137 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-const { logout } = useAuth();
+    const { currentUser, logout } = useAuth();
+    const { remarks } = useParade();
+    const isAdmin = currentUser?.role === UserRole.ADMIN;
+    const isMedical = currentUser?.role === UserRole.MEDICAL_OFFICER;
 
-    const navItems = [
-        { path: '/commandant', icon: LayoutDashboard, label: 'Overview', end: true },
-        { path: '/commandant/audit', icon: FileText, label: 'Attendance Audit' },
-        { path: '/commandant/cadet_registry', icon: Users, label: 'Cadet Registry' },
-        { path: '/commandant/analytics', icon: Activity, label: 'Command Analytics' },
-    ];
+    // Count remarks where Course Officer replied and awaits acknowledgment (or active unresolved remarks)
+    const needsReviewCount = React.useMemo(() => {
+        return remarks.filter(
+            r => r.status !== 'resolved' && (Boolean(r.officerResponse) || r.status === 'addressed')
+        ).length;
+    }, [remarks]);
+
+    const activeUnresolvedCount = React.useMemo(() => {
+        return remarks.filter(r => r.status !== 'resolved').length;
+    }, [remarks]);
+
+    const navItems: Array<{
+        path: string;
+        icon: any;
+        label: string;
+        end?: boolean;
+        badge?: number;
+        badgeTone?: 'amber' | 'blue';
+    }> = isAdmin
+        ? [
+              { path: '/admin', icon: LayoutDashboard, label: 'Overview', end: true },
+              {
+                  path: '/admin/remarks',
+                  icon: MessageSquare,
+                  label: 'Remarks Log',
+                  badge: activeUnresolvedCount > 0 ? activeUnresolvedCount : undefined,
+                  badgeTone: 'blue'
+              },
+              { path: '/admin/audit', icon: FileText, label: 'Attendance Audit' },
+              { path: '/admin/cadet_registry', icon: Users, label: 'Cadet Registry' },
+              { path: '/admin/analytics', icon: Activity, label: 'Command Analytics' },
+              { path: '/admin/settings', icon: Settings, label: 'System Settings' }
+          ]
+        : isMedical
+        ? [
+              { path: '/medical', icon: Stethoscope, label: 'Sickbay Triage', end: true },
+              { path: '/medical/remarks', icon: MessageSquare, label: 'Medical Remarks' }
+          ]
+        : [
+              { path: '/commandant', icon: LayoutDashboard, label: 'Parade States', end: true },
+              {
+                  path: '/commandant/remarks',
+                  icon: MessageSquare,
+                  label: 'Remarks & Directives',
+                  badge:
+                      needsReviewCount > 0
+                          ? needsReviewCount
+                          : activeUnresolvedCount > 0
+                          ? activeUnresolvedCount
+                          : undefined,
+                  badgeTone: needsReviewCount > 0 ? 'amber' : 'blue'
+              },
+              { path: '/commandant/audit', icon: FileText, label: 'Attendance Audit' }
+          ];
 
     return (
-        <>
-            {/* Mobile Overlay */}
-            {isOpen && (
-                <div
-                    className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-40 md:hidden transition-opacity animate-in fade-in"
-                    onClick={onClose}
-                />
-            )}
-
-            <div className={`
-                fixed inset-y-0 left-0 z-50 w-64 bg-blue-900/95 backdrop-blur-xl border-r border-white/10 flex flex-col h-full transform transition-transform duration-300 ease-in-out
-                ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-                md:relative md:translate-x-0
-            `}>
-                {/* Tactical Header */}
-                <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/10">
-                    <div className="flex items-center space-x-3">
-                        <div className="w-9 h-9 bg-blue-500/10 rounded-lg flex items-center justify-center border border-blue-400/20 shadow-[0_0_15px_rgba(59,130,246,0.1)] overflow-hidden shrink-0">
-                            <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
-                        </div>
-                        <h2 className="font-black text-white tracking-tighter text-lg uppercase">
-                            POLAC <span className="text-blue-400">CMD</span>
-                        </h2>
+        <aside className="hidden md:flex md:relative w-64 bg-blue-900/95 backdrop-blur-xl border-r border-white/10 flex-col h-full shrink-0">
+            {/* Tactical Header */}
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/10">
+                <div className="flex items-center space-x-3">
+                    <div className="w-9 h-9 bg-blue-500/10 rounded-lg flex items-center justify-center border border-blue-400/20 shadow-[0_0_15px_rgba(59,130,246,0.1)] overflow-hidden shrink-0">
+                        <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
-                    {onClose && (
-                        <button onClick={onClose} className="p-2 md:hidden text-white/40 hover:text-white">
-                            <X size={20} />
-                        </button>
-                    )}
-                </div>
-
-                {/* Navigation Links */}
-                <nav className="flex-1 p-4 space-y-1 overflow-y-auto mt-2">
-                    {navItems.map(item => (
-                        <NavLink
-                            key={item.path}
-                            to={item.path}
-                            end={item.end}
-                            onClick={onClose}
-                            className={({ isActive }) =>
-                                `w-full flex items-center space-x-3 px-4 py-3 rounded-md transition-all duration-200 border border-transparent ${isActive
-                                    ? 'bg-white/10 text-white border-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
-                                    : 'text-blue-100/60 hover:text-white hover:bg-white/5 hover:border-white/5'}`
-                            }
-                        >
-                            <item.icon size={18} className="shrink-0" />
-                            <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>
-                        </NavLink>
-                    ))}
-                </nav>
-
-                {/* System Status & Sign Out */}
-                <div className="mt-auto border-t border-white/5">
-                    <div className="p-4 bg-black/20 flex items-center justify-between border-b border-white/5">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                            <span className="text-[8px] font-mono font-bold text-emerald-500/80 uppercase tracking-widest">
-                                System: Active
-                            </span>
-                        </div>
-                        <span className="text-[8px] font-mono text-white/20">V2.4.0</span>
-                    </div>
-                    <div className="p-4">
-                        <button
-                            type="button"
-                            onClick={(e) => {
-                                e.preventDefault();
-                                logout();
-                            }}
-                            className="w-full flex items-center space-x-3 px-4 py-3 text-blue-100/40 hover:text-rose-400 hover:bg-rose-500/5 rounded-md transition-all group"
-                        >
-                            <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-                            <span className="text-[10px] font-black uppercase tracking-widest">Secure Sign Out</span>
-                        </button>
-                    </div>
+                    <h2 className="font-black text-white tracking-tighter text-lg uppercase">
+                        POLAC <span className={isMedical ? 'text-rose-400' : isAdmin ? 'text-blue-400' : 'text-blue-400'}>{isMedical ? 'MED' : isAdmin ? 'ADMIN' : 'CMD'}</span>
+                    </h2>
                 </div>
             </div>
-        </>
+
+            {/* Navigation Links */}
+            <nav className="flex-1 p-4 space-y-1 overflow-y-auto mt-2">
+                {navItems.map(item => (
+                    <NavLink
+                        key={item.path}
+                        to={item.path}
+                        end={item.end}
+                        className={({ isActive }) =>
+                            `w-full flex items-center justify-between px-4 py-3 rounded-md transition-all duration-200 border border-transparent ${isActive
+                                ? 'bg-white/10 text-white border-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
+                                : 'text-blue-100/60 hover:text-white hover:bg-white/5 hover:border-white/5'}`
+                        }
+                    >
+                        <div className="flex items-center space-x-3 min-w-0">
+                            <item.icon size={18} className="shrink-0" />
+                            <span className="text-[11px] font-black uppercase tracking-widest truncate">{item.label}</span>
+                        </div>
+                        {item.badge !== undefined && item.badge > 0 && (
+                            <span
+                                className={`ml-2 px-2 py-0.5 rounded-full text-[9px] font-mono font-black shrink-0 ${
+                                    item.badgeTone === 'amber'
+                                        ? 'bg-amber-400 text-slate-950 shadow-[0_0_10px_rgba(251,191,36,0.4)]'
+                                        : 'bg-blue-500/30 text-blue-200 border border-blue-400/30'
+                                }`}
+                            >
+                                {item.badge}
+                            </span>
+                        )}
+                    </NavLink>
+                ))}
+            </nav>
+
+            {/* System Status & Sign Out */}
+            <div className="mt-auto border-t border-white/5">
+                <div className="p-4 bg-black/20 flex items-center justify-between border-b border-white/5">
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                        <span className="text-[8px] font-mono font-bold text-emerald-500/80 uppercase tracking-widest">
+                            System: Active
+                        </span>
+                    </div>
+                    <span className="text-[8px] font-mono text-white/20">V2.4.0</span>
+                </div>
+                <div className="p-4">
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            logout();
+                        }}
+                        className="w-full flex items-center space-x-3 px-4 py-3 text-blue-100/40 hover:text-rose-400 hover:bg-rose-500/5 rounded-md transition-all group"
+                    >
+                        <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Secure Sign Out</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
     );
 };

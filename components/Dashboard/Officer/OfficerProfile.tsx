@@ -5,7 +5,6 @@ import { useParade } from '../../../context/ParadeContext';
 import { dbService } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
-import AtRiskCadetsWidget from '../Commandant/AtRiskCadetsWidget';
 import { PushNotificationManager } from '../../PushNotificationManager';
 import { User as UserType } from '../../../types';
 
@@ -84,8 +83,6 @@ export const OfficerProfile: React.FC = () => {
             </div>
 
             <PushNotificationManager />
-
-            <AtRiskCadetsWidget courseNumber={currentUser.courseNumber || undefined} />
 
             <div className="bg-white p-4 md:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center space-y-6 md:space-y-0 md:space-x-8">
                 <div className="w-32 h-32 bg-blue-100 rounded-3xl border-4 border-white shadow-xl flex items-center justify-center text-blue-600 text-4xl font-bold overflow-hidden relative group shrink-0">

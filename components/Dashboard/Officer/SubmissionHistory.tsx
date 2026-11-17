@@ -33,6 +33,7 @@ import {
     doesRecordMatchDateBounds,
     formatDisplayDate
 } from '../../../utils/dateFilterHelpers';
+import { parseMisconductRemark } from '../../../utils/notificationUtils';
 
 const VALID_PRESETS: DateFilterPreset[] = [
     'all',
@@ -414,46 +415,89 @@ export const SubmissionHistory: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            {/* ── Action Required Alert Strip for Pending Commandant Remarks ── */}
-            {pendingRemarksList.length > 0 && (
-                <div className="bg-amber-50 border-l-4 border-amber-500 p-4 md:p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0">
-                            <AlertTriangle size={20} />
-                        </div>
-                        <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <span className="px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-950 text-[10px] font-black uppercase tracking-wider">
-                                    Action Required
-                                </span>
-                                <h4 className="text-sm font-black text-amber-950 uppercase tracking-tight">
-                                    {pendingRemarksList.length} Pending Commandant{' '}
-                                    {pendingRemarksList.length === 1 ? 'Remark Requires' : 'Remarks Require'} Justification
-                                </h4>
-                            </div>
-                            <p className="text-xs text-amber-800/90 mt-1 font-medium">
-                                "{pendingRemarksList[0].remarkText}" — Click "Respond to Remark" on the flagged submission below to submit your official response.
-                            </p>
-                        </div>
-                    </div>
-                    {(() => {
-                        const targetSub = displayedRecords.find(
-                            r => String(r.id) === String(pendingRemarksList[0].submissionId)
-                        );
-                        if (!targetSub) return null;
-                        return (
-                            <button
-                                type="button"
-                                onClick={() => setRemarkDrawerRecord(targetSub)}
-                                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 shadow-xs transition-all flex items-center gap-1.5 self-start sm:self-center"
+            {/* ── Action Required Alert Strip for Pending Commandant / Senior Officer Remarks ── */}
+            {pendingRemarksList.length > 0 && (() => {
+                const topPending = pendingRemarksList[0];
+                const parsedStrip = parseMisconductRemark(topPending.remarkText);
+                const issuerTitle = topPending.issuerRoleTitle || 'Commandant';
+                return (
+                    <div
+                        className={`border-l-4 p-4 md:p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                            parsedStrip.isMisconduct
+                                ? 'bg-rose-50 border-rose-600'
+                                : 'bg-amber-50 border-amber-500'
+                        }`}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div
+                                className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                                    parsedStrip.isMisconduct
+                                        ? 'bg-rose-100 border-rose-300 text-rose-800'
+                                        : 'bg-amber-100 border-amber-300 text-amber-800'
+                                }`}
                             >
-                                <Flag size={14} />
-                                <span>Respond Now</span>
-                            </button>
-                        );
-                    })()}
-                </div>
-            )}
+                                <AlertTriangle size={20} />
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                            parsedStrip.isMisconduct
+                                                ? 'bg-rose-600 text-white'
+                                                : 'bg-amber-200/80 text-amber-950'
+                                        }`}
+                                    >
+                                        {parsedStrip.isMisconduct
+                                            ? `${parsedStrip.alertLevel || 'CRITICAL'} Misconduct Directive`
+                                            : 'Action Required'}
+                                    </span>
+                                    {parsedStrip.isMisconduct && parsedStrip.cadetName && (
+                                        <span className="px-2 py-0.5 rounded-md bg-slate-900 text-rose-200 text-[10px] font-mono font-bold uppercase">
+                                            Cadet: {parsedStrip.cadetName} (SQD {parsedStrip.squad})
+                                        </span>
+                                    )}
+                                    <h4
+                                        className={`text-sm font-black uppercase tracking-tight ${
+                                            parsedStrip.isMisconduct ? 'text-rose-950' : 'text-amber-950'
+                                        }`}
+                                    >
+                                        {pendingRemarksList.length} Pending {issuerTitle}{' '}
+                                        {pendingRemarksList.length === 1 ? 'Directive Requires' : 'Directives Require'} Reply
+                                    </h4>
+                                </div>
+                                <p
+                                    className={`text-xs mt-1 font-medium ${
+                                        parsedStrip.isMisconduct ? 'text-rose-900/90' : 'text-amber-800/90'
+                                    }`}
+                                >
+                                    "{parsedStrip.cleanText}" — Click "Respond Now" to open the Remarks & Resolution Log and submit your official response.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() =>
+                                openDrawerForPayload({
+                                    remark: topPending,
+                                    submissionId: topPending.submissionId,
+                                    remarkId: topPending.id,
+                                    courseNumber: topPending.courseNumber || undefined,
+                                    paradeType: topPending.paradeType || undefined,
+                                    focusLog: true
+                                })
+                            }
+                            className={`px-4 py-2.5 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 shadow-xs transition-all flex items-center gap-1.5 self-start sm:self-center ${
+                                parsedStrip.isMisconduct
+                                    ? 'bg-rose-600 hover:bg-rose-700'
+                                    : 'bg-amber-600 hover:bg-amber-700'
+                            }`}
+                        >
+                            <Flag size={14} />
+                            <span>Respond Now</span>
+                        </button>
+                    </div>
+                );
+            })()}
 
             <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-visible">
                 {/* ── Header & Filter Toolbar ─────────────────────────────────────── */}

@@ -101,7 +101,7 @@ export const LoginScreen: React.FC = () => {
             disabled={isLoading || !email || !password}
             className="w-full bg-white hover:bg-gray-200 text-black font-bold uppercase tracking-widest text-sm py-4 rounded-lg mt-6 shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? 'Processing...' : 'Acknowledge & Enter'}
+            {isLoading ? 'Processing...' : 'Login'}
           </button>
         </form>
       </div>

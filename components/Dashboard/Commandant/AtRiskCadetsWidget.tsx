@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, MessageSquare } from 'lucide-react';
 import FlagrantAlert3D from './FlagrantAlert3D';
 import ResolutionModal from './ResolutionModal';
-import { supabase } from '../../../services/dbService';
+import { dbService, supabase } from '../../../services/dbService';
 import { useAuth } from '../../../context/AuthContext';
+import { useParade } from '../../../context/ParadeContext';
 import { toast } from 'react-hot-toast';
 
 export interface CadetAlert {
@@ -23,69 +24,101 @@ export interface AtRiskCadetsWidgetProps {
 
 export default function AtRiskCadetsWidget({ courseNumber }: AtRiskCadetsWidgetProps) {
   const { currentUser } = useAuth();
+  const { records, remarks, refreshRemarks } = useParade();
   const [activeAlerts, setActiveAlerts] = useState<CadetAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<CadetAlert | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const userRole = currentUser?.role || 'course_officer';
+  const issuerDesignation = (currentUser?.designation || 'Commandant').trim();
 
-  // Fetch initial alerts
+  // Fetch & evaluate active misconduct alerts (including retroactive 5-day / same-day 3-activity scan)
   useEffect(() => {
+    let isCancelled = false;
+
+    const autoPopIfNeeded = (alertsList: CadetAlert[]) => {
+      if (typeof window === 'undefined' || alertsList.length === 0) return;
+      try {
+        const raw = sessionStorage.getItem('polac_autopopped_misconduct_alerts');
+        const poppedSet = new Set<string>(raw ? JSON.parse(raw) : []);
+
+        for (const alert of alertsList) {
+          const sig = `${alert.cadet_name.trim().toLowerCase()}::${alert.squad.trim().toLowerCase()}::${alert.alert_level}::${alert.trigger_count}::${Boolean(alert.commandant_directive)}`;
+          if (!poppedSet.has(sig)) {
+            poppedSet.add(sig);
+            sessionStorage.setItem(
+              'polac_autopopped_misconduct_alerts',
+              JSON.stringify(Array.from(poppedSet).slice(-100))
+            );
+            setSelectedAlert(alert);
+            toast.error(
+              `${alert.alert_level} MISCONDUCT: Cadet ${alert.cadet_name} (${alert.trigger_count} unexcused absences)`,
+              { duration: 6000 }
+            );
+            break;
+          }
+        }
+      } catch {}
+    };
+
     const fetchAlerts = async () => {
-      let query = supabase
-        .from('cadet_alerts')
-        .select('id, cadet_name, squad, course_number, alert_level, status, trigger_count, commandant_directive, created_at, updated_at, resolution_notes, acknowledged_by')
-        .eq('status', 'ACTIVE')
-        .order('created_at', { ascending: false });
+      try {
+        const evaluated = await dbService.syncAndGetCadetAlerts(courseNumber);
+        // Hide any alert that has already received a Commandant / Senior Officer directive
+        // (or already has an active Misconduct Directive thread in the Remarks Log)
+        const unhandledAlerts = (evaluated as CadetAlert[]).filter(a => {
+          if (a.commandant_directive && String(a.commandant_directive).trim() !== '') {
+            return false;
+          }
+          const hasRemarkThread = remarks.some(
+            r =>
+              r.remarkText.includes(`ALERT_ID:${a.id}`) ||
+              (r.remarkText.includes(`CADET:${a.cadet_name}`) &&
+                r.remarkText.includes(`SQUAD:${a.squad}`) &&
+                r.remarkText.includes(`ABSENCES:${a.trigger_count}`))
+          );
+          return !hasRemarkThread;
+        });
 
-      if (courseNumber) {
-        query = query.eq('course_number', courseNumber);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error('Error fetching cadet alerts:', error);
-      } else {
-        setActiveAlerts(data as CadetAlert[]);
+        if (!isCancelled) {
+          setActiveAlerts(unhandledAlerts);
+          autoPopIfNeeded(unhandledAlerts);
+        }
+      } catch (err) {
+        console.error('Error fetching cadet alerts:', err);
       }
     };
 
     fetchAlerts();
 
+    const handleAlertsUpdated = () => {
+      fetchAlerts();
+    };
+
+    window.addEventListener('cadet-alerts-updated', handleAlertsUpdated);
+
     // Setup Supabase Realtime Subscription
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel(`cadet-alerts-live-${courseNumber || 'all'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'cadet_alerts',
-          filter: 'status=eq.ACTIVE'
+          table: 'cadet_alerts'
         },
-        (payload) => {
-          const newAlert = payload.new as CadetAlert;
-          
-          if (payload.eventType === 'INSERT') {
-            if (courseNumber && newAlert.course_number !== courseNumber) return;
-            setActiveAlerts((prev) => [newAlert, ...prev]);
-            toast.error(`New ${newAlert.alert_level} alert for ${newAlert.cadet_name}`);
-          } else if (payload.eventType === 'UPDATE') {
-            setActiveAlerts((prev) =>
-              prev.map((alert) => (alert.id === payload.new.id ? (payload.new as CadetAlert) : alert))
-            );
-          } else if (payload.eventType === 'DELETE') {
-            setActiveAlerts((prev) => prev.filter((alert) => alert.id !== payload.old.id));
-          }
+        () => {
+          fetchAlerts();
         }
       )
       .subscribe();
 
     return () => {
+      isCancelled = true;
+      window.removeEventListener('cadet-alerts-updated', handleAlertsUpdated);
       supabase.removeChannel(channel);
     };
-  }, [courseNumber]);
+  }, [courseNumber, records.length, remarks.length]);
 
   const handleAction = async (notes: string) => {
     if (!selectedAlert) return;
@@ -93,37 +126,74 @@ export default function AtRiskCadetsWidget({ courseNumber }: AtRiskCadetsWidgetP
     
     try {
       if (userRole === 'commandant') {
-        const { error } = await supabase
-          .from('cadet_alerts')
-          .update({
-            commandant_directive: notes,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', selectedAlert.id);
+        await dbService.updateCadetAlertDirective(selectedAlert.id, notes.trim(), {
+          cadetName: selectedAlert.cadet_name,
+          squad: selectedAlert.squad,
+          triggerCount: selectedAlert.trigger_count
+        });
 
-        if (error) throw error;
-        
-        // Update UI optimistically, adding the directive. We DO NOT resolve the alert.
-        setActiveAlerts((prev) => 
-          prev.map((a) => a.id === selectedAlert.id ? { ...a, commandant_directive: notes } : a)
+        // Also dispatch as a structured Misconduct Directive into the unified Remarks & Resolution Log
+        // so the Course Officer can reply to it in the exact same interface as Parade Remarks.
+        const matchingCourseRecord = records.find(
+          r => Number(r.courseNumber) === Number(selectedAlert.course_number)
         );
-        toast.success('Directive attached to alert.');
-      } else {
-        // Course Officer resolution
-        const { error } = await supabase
-          .from('cadet_alerts')
-          .update({
-            status: 'RESOLVED',
-            resolution_notes: notes,
-            acknowledged_by: currentUser?.fullName || 'OFFICER',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', selectedAlert.id);
+        const todayStr = new Date().toISOString().split('T')[0];
+        const targetSubmissionId =
+          matchingCourseRecord?.id ||
+          `misconduct-${selectedAlert.course_number}-${todayStr}`;
 
-        if (error) throw error;
+        const structuredRemarkText = `[MISCONDUCT:${selectedAlert.alert_level}|CADET:${selectedAlert.cadet_name}|SQUAD:${selectedAlert.squad}|ABSENCES:${selectedAlert.trigger_count}|ALERT_ID:${selectedAlert.id}] ${notes.trim()}`;
+
+        await dbService.createCommandantRemark({
+          submissionId: targetSubmissionId,
+          commandantId: currentUser?.id || null,
+          commandantName: currentUser?.fullName || issuerDesignation.toUpperCase(),
+          issuerRoleTitle: issuerDesignation,
+          courseOfficerId: matchingCourseRecord?.officerId || null,
+          courseOfficerName:
+            matchingCourseRecord?.officerName || `RC ${selectedAlert.course_number} Course Officer`,
+          courseNumber: selectedAlert.course_number,
+          paradeType: matchingCourseRecord?.paradeType || 'muster',
+          paradeDate: matchingCourseRecord?.date || todayStr,
+          remarkText: structuredRemarkText
+        });
+
+        await refreshRemarks();
+        
+        // Remove the alert from the Attention Required widget immediately after the Commandant / Senior Officer replies
+        // so it does not clutter the Parade State page (conversation continues in the Remarks & Resolution Log).
+        setActiveAlerts((prev) => prev.filter((a) => a.id !== selectedAlert.id));
+        toast.success(`Misconduct directive dispatched to RC ${selectedAlert.course_number} Remarks Log.`);
+      } else if (userRole === 'course_officer') {
+        // Course Officer resolution — also sync response to any linked Misconduct Remark thread
+        await dbService.resolveCadetAlert({
+          alertId: selectedAlert.id,
+          resolutionNotes: notes.trim(),
+          acknowledgedBy: currentUser?.fullName || 'OFFICER',
+          cadetName: selectedAlert.cadet_name,
+          squad: selectedAlert.squad,
+          triggerCount: selectedAlert.trigger_count
+        });
+
+        const linkedRemark = remarks.find(
+          r =>
+            r.remarkText.includes(`ALERT_ID:${selectedAlert.id}`) ||
+            (Number(r.courseNumber) === Number(selectedAlert.course_number) &&
+              r.remarkText.includes(`CADET:${selectedAlert.cadet_name}`) &&
+              !r.officerResponse)
+        );
+        if (linkedRemark) {
+          await dbService.respondToCommandantRemark({
+            remarkId: linkedRemark.id,
+            officerResponse: notes.trim(),
+            officerName: currentUser?.fullName || 'Course Officer',
+            officerId: currentUser?.id
+          });
+          await refreshRemarks();
+        }
         
         setActiveAlerts((prev) => prev.filter((a) => a.id !== selectedAlert.id));
-        toast.success('Alert resolved and counter reset.');
+        toast.success('Misconduct response filed in Remarks Log & alert resolved.');
       }
       setSelectedAlert(null);
     } catch (err) {
@@ -132,6 +202,44 @@ export default function AtRiskCadetsWidget({ courseNumber }: AtRiskCadetsWidgetP
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleOpenInRemarksDrawer = (alert: CadetAlert) => {
+    setSelectedAlert(null);
+    const linkedRemark = remarks.find(
+      r =>
+        r.remarkText.includes(`ALERT_ID:${alert.id}`) ||
+        (Number(r.courseNumber) === Number(alert.course_number) &&
+          r.remarkText.includes(`CADET:${alert.cadet_name}`))
+    );
+    const matchingCourseRecord = records.find(
+      r => Number(r.courseNumber) === Number(alert.course_number)
+    );
+    const targetSubId =
+      linkedRemark?.submissionId ||
+      matchingCourseRecord?.id ||
+      `misconduct-${alert.course_number}-${new Date().toISOString().split('T')[0]}`;
+
+    window.dispatchEvent(
+      new CustomEvent('open-officer-remark-reply', {
+        detail: {
+          remarkId: linkedRemark?.id,
+          submissionId: targetSubId,
+          courseNumber: alert.course_number
+        }
+      })
+    );
+    window.dispatchEvent(
+      new CustomEvent('open-parade-remark-drawer', {
+        detail: {
+          submissionId: targetSubId,
+          remarkId: linkedRemark?.id,
+          courseNumber: alert.course_number,
+          remark: linkedRemark,
+          focusLog: true
+        }
+      })
+    );
   };
 
   if (activeAlerts.length === 0) {
@@ -175,8 +283,10 @@ export default function AtRiskCadetsWidget({ courseNumber }: AtRiskCadetsWidgetP
           onClose={() => setSelectedAlert(null)} 
           alert={selectedAlert}
           onAction={handleAction}
+          onOpenInRemarksLog={() => handleOpenInRemarksDrawer(selectedAlert)}
           isSubmitting={isSubmitting}
           userRole={userRole}
+          issuerDesignation={issuerDesignation}
         />
       )}
     </>

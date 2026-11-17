@@ -6,6 +6,19 @@ import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-hot-toast';
 import { SecurityOverrideModal } from './SecurityOverrideModal';
 
+const SENIOR_OFFICER_PRESETS = [
+    'Director Field Studies',
+    'Commandant',
+    'Deputy Commandant',
+    'Director Academic Planning'
+];
+
+const MEDICAL_OFFICER_PRESETS = [
+    'Regimental Medical Officer',
+    'Medical Officer on Duty',
+    'Sickbay Nursing Officer'
+];
+
 export const CredentialSettings: React.FC = () => {
     const { currentUser } = useAuth();
     const [users, setUsers] = useState<User[]>([]);
@@ -16,13 +29,29 @@ export const CredentialSettings: React.FC = () => {
     const [targetUser, setTargetUser] = useState<User | null>(null);
     const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
-    const [editPayload, setEditPayload] = useState({ email: '', password: '', confirmPassword: '', courseNumber: '' });
+    const [verifiedCurrentPassword, setVerifiedCurrentPassword] = useState('');
+    const [editPayload, setEditPayload] = useState({
+        email: '',
+        password: '',
+        confirmPassword: '',
+        courseNumber: '',
+        designation: '',
+        isActive: true
+    });
 
     // Split-View & Add Officer State
     const [searchQuery, setSearchQuery] = useState('');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isAdding, setIsAdding] = useState(false);
-    const [addPayload, setAddPayload] = useState({ fullName: '', username: '', email: '', password: '', role: UserRole.COURSE_OFFICER, courseName: '' });
+    const [addPayload, setAddPayload] = useState({
+        fullName: '',
+        username: '',
+        email: '',
+        password: '',
+        role: UserRole.COMMANDANT as UserRole,
+        designation: 'Director Field Studies',
+        courseNumber: ''
+    });
 
     const fetchUsers = async () => {
         setIsLoading(true);
@@ -61,11 +90,20 @@ export const CredentialSettings: React.FC = () => {
     const handleInitiateOverride = (user: User) => {
         if (!user) return;
         setTargetUser(user);
+        setVerifiedCurrentPassword('');
         setEditPayload({
             email: user.email || '',
             password: user.password || '',
-            confirmPassword: '',
-            courseNumber: user.courseNumber ? String(user.courseNumber) : ''
+            confirmPassword: user.password || '',
+            courseNumber: user.courseNumber ? String(user.courseNumber) : '',
+            designation:
+                user.designation ||
+                (user.role === UserRole.ADMIN
+                    ? 'System Administrator'
+                    : user.role === UserRole.COMMANDANT
+                    ? 'Commandant'
+                    : 'Course Officer'),
+            isActive: user.isActive !== false
         });
         setIsOverrideModalOpen(true);
     };
@@ -74,6 +112,7 @@ export const CredentialSettings: React.FC = () => {
         if (!currentUser) return;
         const isValid = await dbService.verifyCommandantAccess(currentUser.id, password);
         if (isValid) {
+            setVerifiedCurrentPassword(password);
             setIsOverrideModalOpen(false);
             setIsEditing(true);
             toast.success('Authority verified. Secure link established.');
@@ -82,12 +121,33 @@ export const CredentialSettings: React.FC = () => {
         }
     };
 
+    const activeAdminCount = users.filter(u => u.role === UserRole.ADMIN && u.isActive !== false).length;
+    const isTargetSoleActiveAdmin =
+        targetUser?.role === UserRole.ADMIN &&
+        targetUser?.isActive !== false &&
+        activeAdminCount <= 1;
+
     const handleSaveOverride = async () => {
         if (!targetUser) return;
-        
+
+        if (!verifiedCurrentPassword) {
+            toast.error('Current password verification is required before saving.');
+            return;
+        }
+
         const isSelfEdit = String(targetUser.id) === String(currentUser?.id);
         if (isSelfEdit && editPayload.password !== editPayload.confirmPassword) {
             toast.error('Passwords do not match. Override aborted to prevent lockout.');
+            return;
+        }
+
+        if (isSelfEdit && !editPayload.password.trim()) {
+            toast.error('Admin password cannot be empty.');
+            return;
+        }
+
+        if (isTargetSoleActiveAdmin && !editPayload.isActive) {
+            toast.error('Lockout Prevention: Cannot deactivate the sole active System Administrator account.');
             return;
         }
 
@@ -96,21 +156,28 @@ export const CredentialSettings: React.FC = () => {
                 adminId: String(currentUser?.id),
                 targetUserId: String(targetUser.id),
                 newEmail: editPayload.email,
-                newCourseAssignment: editPayload.courseNumber,
+                newCourseAssignment:
+                    targetUser.role === UserRole.COURSE_OFFICER ? editPayload.courseNumber : '',
+                newDesignation: editPayload.designation,
                 newPassword: editPayload.password,
-                auditDetails: "Sensitive credential modification via Commandant Control"
+                currentPassword: verifiedCurrentPassword,
+                isActive: editPayload.isActive,
+                auditDetails: 'Sensitive credential modification via System Administrator Control (Active sessions invalidated)'
             });
-            
-            toast.success(`Access protocols updated for ${targetUser.fullName}`);
+
+            toast.success(`Access protocols updated for ${targetUser.fullName}. Active sessions invalidated.`);
             setIsEditing(false);
             setTargetUser(null);
+            setVerifiedCurrentPassword('');
             fetchUsers();
         } catch (err: any) {
             const errMsg = err?.message || String(err);
             if (errMsg.includes('DUPLICATE_EMAIL') || errMsg.includes('users_email_key') || errMsg.includes('unique constraint')) {
                 toast.error(`Override aborted: Email '${editPayload.email}' is already assigned to another account.`);
+            } else if (errMsg.includes('ADMIN_LOCKOUT_PREVENTED')) {
+                toast.error('Lockout Prevention: Cannot deactivate the last active System Administrator.');
             } else {
-                toast.error('Override execution failed. Database rejected modification.');
+                toast.error(errMsg || 'Override execution failed. Database rejected modification.');
             }
         }
     };
@@ -118,17 +185,48 @@ export const CredentialSettings: React.FC = () => {
     const handleAddOfficer = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!currentUser) return;
+
+        if (addPayload.role === UserRole.COURSE_OFFICER && isCapReached) {
+            toast.error('Course Officer cap (5/5) reached. Use the Lifecycle Engine for Change of Command.');
+            return;
+        }
+
         setIsAdding(true);
         try {
             await dbService.registerOfficer(currentUser.id, {
                 email: addPayload.email,
                 password: addPayload.password,
                 username: addPayload.username,
-                role: addPayload.role
+                fullName: addPayload.fullName,
+                role: addPayload.role,
+                designation:
+                    addPayload.role === UserRole.COMMANDANT
+                        ? addPayload.designation || 'Director Field Studies'
+                        : addPayload.role === UserRole.MEDICAL_OFFICER
+                        ? addPayload.designation || 'Regimental Medical Officer'
+                        : 'Course Officer',
+                courseNumber:
+                    addPayload.role === UserRole.COURSE_OFFICER && addPayload.courseNumber
+                        ? Number(addPayload.courseNumber)
+                        : undefined
             });
-            toast.success('Course Officer successfully provisioned.');
+            toast.success(
+                addPayload.role === UserRole.COMMANDANT
+                    ? `Senior Officer (${addPayload.designation || 'Executive'}) provisioned.`
+                    : addPayload.role === UserRole.MEDICAL_OFFICER
+                    ? `Medical Officer (${addPayload.designation || 'RMO'}) provisioned.`
+                    : 'Course Officer successfully provisioned.'
+            );
             setIsAddModalOpen(false);
-            setAddPayload({ fullName: '', username: '', email: '', password: '', role: UserRole.COURSE_OFFICER, courseName: '' });
+            setAddPayload({
+                fullName: '',
+                username: '',
+                email: '',
+                password: '',
+                role: UserRole.COMMANDANT,
+                designation: 'Director Field Studies',
+                courseNumber: ''
+            });
             fetchUsers();
         } catch (err: any) {
             toast.error(err.message || 'Failed to register officer.');
@@ -140,16 +238,23 @@ export const CredentialSettings: React.FC = () => {
     // Filter Logic
     const filteredUsers = users.filter(u => {
         const query = searchQuery.toLowerCase();
-        return (u.fullName?.toLowerCase().includes(query) || 
-                u.username?.toLowerCase().includes(query) || 
-                u.courseName?.toLowerCase().includes(query) ||
-                u.role.toLowerCase().includes(query));
+        return (
+            u.fullName?.toLowerCase().includes(query) ||
+            u.username?.toLowerCase().includes(query) ||
+            u.courseName?.toLowerCase().includes(query) ||
+            u.designation?.toLowerCase().includes(query) ||
+            u.role.toLowerCase().includes(query)
+        );
     });
 
-    const activeRoster = filteredUsers.filter(u => u.role === UserRole.COMMANDANT || u.isActive);
-    const inactiveRegistry = filteredUsers.filter(u => u.role !== UserRole.COMMANDANT && !u.isActive);
+    const activeRoster = filteredUsers.filter(
+        u => u.role === UserRole.ADMIN || u.role === UserRole.COMMANDANT || u.role === UserRole.MEDICAL_OFFICER || u.isActive
+    );
+    const inactiveRegistry = filteredUsers.filter(
+        u => u.role === UserRole.COURSE_OFFICER && !u.isActive
+    );
 
-    const activeOfficerCount = activeRoster.filter(u => u.role !== UserRole.COMMANDANT).length;
+    const activeOfficerCount = activeRoster.filter(u => u.role === UserRole.COURSE_OFFICER).length;
     const isCapReached = activeOfficerCount >= 5;
 
     if (isLoading) return (
@@ -187,13 +292,25 @@ export const CredentialSettings: React.FC = () => {
                                 </td>
                                 <td className="p-6">
                                     <span className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest border ${
-                                        user.role === UserRole.COMMANDANT 
+                                        user.role === UserRole.ADMIN
+                                        ? 'bg-amber-900/20 text-amber-400 border-amber-500/30'
+                                        : user.role === UserRole.COMMANDANT 
                                         ? 'bg-blue-900/20 text-blue-400 border-blue-500/30' 
+                                        : user.role === UserRole.MEDICAL_OFFICER
+                                        ? 'bg-rose-900/20 text-rose-400 border-rose-500/30'
                                         : 'bg-emerald-900/20 text-emerald-400 border-emerald-500/30'
                                     }`}>
-                                        {user.role === UserRole.COMMANDANT ? 'Commandant' : 'Course Officer'}
+                                        {user.role === UserRole.ADMIN
+                                            ? 'System Admin'
+                                            : user.role === UserRole.COMMANDANT
+                                            ? user.designation || 'Commandant'
+                                            : user.role === UserRole.MEDICAL_OFFICER
+                                            ? user.designation || 'Medical Officer'
+                                            : 'Course Officer'}
                                     </span>
-                                    <p className="text-[10px] text-slate-500 font-bold mt-2 uppercase">{user.courseName || 'Academy HQ'}</p>
+                                    <p className="text-[10px] text-slate-500 font-bold mt-2 uppercase">
+                                        {user.courseName || 'Academy HQ'}
+                                    </p>
                                 </td>
                                 <td className="p-6">
                                     <div className="space-y-3">
@@ -252,17 +369,31 @@ export const CredentialSettings: React.FC = () => {
                                 </div>
                             </div>
                             <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border shrink-0 ${
-                                user.role === UserRole.COMMANDANT 
+                                user.role === UserRole.ADMIN
+                                ? 'bg-amber-900/20 text-amber-400 border-amber-500/30'
+                                : user.role === UserRole.COMMANDANT 
                                 ? 'bg-blue-900/20 text-blue-400 border-blue-500/30' 
+                                : user.role === UserRole.MEDICAL_OFFICER
+                                ? 'bg-rose-900/20 text-rose-400 border-rose-500/30'
                                 : 'bg-emerald-900/20 text-emerald-400 border-emerald-500/30'
                             }`}>
-                                {user.role === UserRole.COMMANDANT ? 'Cmdt' : 'Officer'}
+                                {user.role === UserRole.ADMIN
+                                    ? 'Admin'
+                                    : user.role === UserRole.COMMANDANT
+                                    ? user.designation || 'Cmdt'
+                                    : user.role === UserRole.MEDICAL_OFFICER
+                                    ? user.designation || 'Medical'
+                                    : 'Officer'}
                             </span>
                         </div>
                         <div className="space-y-2.5 text-xs">
                             <div className="flex justify-between items-center border-b border-white/5 pb-2">
                                 <span className="text-slate-500 text-[9px] font-black uppercase">Authority</span>
-                                <span className="text-slate-300 font-bold uppercase">{user.courseName || 'Academy HQ'}</span>
+                                <span className="text-slate-300 font-bold uppercase">
+                                    {user.designation
+                                        ? `${user.designation} • ${user.courseName || 'Academy HQ'}`
+                                        : user.courseName || 'Academy HQ'}
+                                </span>
                             </div>
                             <div className="flex justify-between items-center border-b border-white/5 pb-2 gap-2">
                                 <span className="text-slate-500 text-[9px] font-black uppercase shrink-0">Email</span>
@@ -308,33 +439,270 @@ export const CredentialSettings: React.FC = () => {
 
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-                    <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl p-6 shadow-2xl">
-                        <div className="flex items-center gap-3 mb-6 border-b border-white/5 pb-4">
-                            <UserPlus className="text-blue-500" size={24} />
-                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Provision Course Officer</h3>
+                    <div className="w-full max-w-lg bg-slate-900/95 border border-slate-800 backdrop-blur-xl rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between gap-3 mb-6 border-b border-white/5 pb-4">
+                            <div className="flex items-center gap-3">
+                                <UserPlus className="text-blue-500" size={24} />
+                                <div>
+                                    <h3 className="text-sm font-black text-white uppercase tracking-widest">
+                                        Provision Officer Login Profile
+                                    </h3>
+                                    <p className="text-[10px] text-slate-400 font-mono uppercase mt-0.5">
+                                        Senior Executive (Commandant Portal) or Course Officer
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsAddModalOpen(false)}
+                                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+                            >
+                                <X size={18} />
+                            </button>
                         </div>
+
                         <form onSubmit={handleAddOfficer} className="space-y-4">
+                            {/* Role Selector */}
                             <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">Full Name</label>
-                                <input required type="text" className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all" value={addPayload.fullName} onChange={e => setAddPayload({...addPayload, fullName: e.target.value})} placeholder="e.g. John Doe" />
+                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-2">
+                                    Portal Authority Role
+                                </label>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setAddPayload(prev => ({
+                                                ...prev,
+                                                role: UserRole.COMMANDANT,
+                                                designation: prev.designation || 'Director Field Studies',
+                                                courseNumber: ''
+                                            }))
+                                        }
+                                        className={`p-3 rounded-xl border text-left transition-all ${
+                                            addPayload.role === UserRole.COMMANDANT
+                                                ? 'bg-blue-900/40 border-blue-500 text-white'
+                                                : 'bg-black/40 border-white/10 text-slate-400 hover:border-white/20'
+                                        }`}
+                                    >
+                                        <p className="text-[11px] font-black uppercase tracking-wider">
+                                            Senior Command
+                                        </p>
+                                        <p className="text-[9px] text-slate-400 mt-0.5">
+                                            Parades, Remarks & Audit
+                                        </p>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setAddPayload(prev => ({
+                                                ...prev,
+                                                role: UserRole.COURSE_OFFICER,
+                                                designation: 'Course Officer'
+                                            }))
+                                        }
+                                        className={`p-3 rounded-xl border text-left transition-all ${
+                                            addPayload.role === UserRole.COURSE_OFFICER
+                                                ? 'bg-emerald-900/40 border-emerald-500 text-white'
+                                                : 'bg-black/40 border-white/10 text-slate-400 hover:border-white/20'
+                                        }`}
+                                    >
+                                        <p className="text-[11px] font-black uppercase tracking-wider">
+                                            Course Officer {isCapReached ? '(5/5)' : ''}
+                                        </p>
+                                        <p className="text-[9px] text-slate-400 mt-0.5">
+                                            RC Parade Submissions
+                                        </p>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setAddPayload(prev => ({
+                                                ...prev,
+                                                role: UserRole.MEDICAL_OFFICER,
+                                                designation: 'Regimental Medical Officer',
+                                                courseNumber: ''
+                                            }))
+                                        }
+                                        className={`p-3 rounded-xl border text-left transition-all ${
+                                            addPayload.role === UserRole.MEDICAL_OFFICER
+                                                ? 'bg-rose-900/40 border-rose-500 text-white'
+                                                : 'bg-black/40 border-white/10 text-slate-400 hover:border-white/20'
+                                        }`}
+                                    >
+                                        <p className="text-[11px] font-black uppercase tracking-wider">
+                                            Medical Officer
+                                        </p>
+                                        <p className="text-[9px] text-slate-400 mt-0.5">
+                                            Sickbay Triage & Verify
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Designation Field & Presets */}
+                            {addPayload.role === UserRole.COMMANDANT ? (
+                                <div className="space-y-2 p-3.5 rounded-xl bg-blue-950/30 border border-blue-500/20">
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-blue-300">
+                                        Official Designation / Office Title (Non-Overlapping Remark Channel)
+                                    </label>
+                                    <div className="flex flex-wrap gap-1.5 mb-2">
+                                        {SENIOR_OFFICER_PRESETS.map(preset => (
+                                            <button
+                                                key={preset}
+                                                type="button"
+                                                onClick={() =>
+                                                    setAddPayload(prev => ({ ...prev, designation: preset }))
+                                                }
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
+                                                    addPayload.designation === preset
+                                                        ? 'bg-blue-600 text-white border-blue-500'
+                                                        : 'bg-black/50 text-slate-300 border-white/10 hover:border-blue-400/50'
+                                                }`}
+                                            >
+                                                {preset}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <input
+                                        required
+                                        type="text"
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
+                                        value={addPayload.designation}
+                                        onChange={e => setAddPayload({ ...addPayload, designation: e.target.value })}
+                                        placeholder="e.g. Director Field Studies"
+                                    />
+                                    <p className="text-[10px] text-slate-400">
+                                        Stored in dedicated <code className="text-blue-300">designation</code> column; <code className="text-blue-300">course_name</code> remains strictly <code className="text-blue-300">Academy HQ</code>.
+                                    </p>
+                                </div>
+                            ) : addPayload.role === UserRole.MEDICAL_OFFICER ? (
+                                <div className="space-y-2 p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/20">
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-rose-300">
+                                        Medical Corps Designation / Title (Sickbay Duty Channel)
+                                    </label>
+                                    <div className="flex flex-wrap gap-1.5 mb-2">
+                                        {MEDICAL_OFFICER_PRESETS.map(preset => (
+                                            <button
+                                                key={preset}
+                                                type="button"
+                                                onClick={() =>
+                                                    setAddPayload(prev => ({ ...prev, designation: preset }))
+                                                }
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
+                                                    addPayload.designation === preset
+                                                        ? 'bg-rose-600 text-white border-rose-500'
+                                                        : 'bg-black/50 text-slate-300 border-white/10 hover:border-rose-400/50'
+                                                }`}
+                                            >
+                                                {preset}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <input
+                                        required
+                                        type="text"
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:border-rose-500/50 outline-none transition-all"
+                                        value={addPayload.designation}
+                                        onChange={e => setAddPayload({ ...addPayload, designation: e.target.value })}
+                                        placeholder="e.g. Regimental Medical Officer"
+                                    />
+                                    <p className="text-[10px] text-slate-400">
+                                        Assigned to Academy Clinic & Sickbay Triage (<code className="text-rose-300">/medical</code>); <code className="text-rose-300">course_name</code> remains <code className="text-rose-300">Academy HQ</code>.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
+                                        Assigned Regular Course Number (Optional)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
+                                        value={addPayload.courseNumber}
+                                        onChange={e => setAddPayload({ ...addPayload, courseNumber: e.target.value })}
+                                        placeholder="e.g. 12"
+                                    />
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
+                                    Full Name & Rank
+                                </label>
+                                <input
+                                    required
+                                    type="text"
+                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
+                                    value={addPayload.fullName}
+                                    onChange={e => setAddPayload({ ...addPayload, fullName: e.target.value })}
+                                    placeholder={
+                                        addPayload.role === UserRole.COMMANDANT
+                                            ? 'e.g. CP Ibrahim Musa (Director Field Studies)'
+                                            : 'e.g. DSP John Doe'
+                                    }
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
+                                        Username
+                                    </label>
+                                    <input
+                                        required
+                                        type="text"
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
+                                        value={addPayload.username}
+                                        onChange={e => setAddPayload({ ...addPayload, username: e.target.value })}
+                                        placeholder="e.g. dir_field_studies"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
+                                        Login Email
+                                    </label>
+                                    <input
+                                        required
+                                        type="email"
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
+                                        value={addPayload.email}
+                                        onChange={e => setAddPayload({ ...addPayload, email: e.target.value })}
+                                        placeholder="dfs@polac.edu.ng"
+                                    />
+                                </div>
                             </div>
                             <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">Username</label>
-                                <input required type="text" className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all" value={addPayload.username} onChange={e => setAddPayload({...addPayload, username: e.target.value})} placeholder="e.g. jdoe" />
-                            </div>
-                            <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">Email</label>
-                                <input required type="email" className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all" value={addPayload.email} onChange={e => setAddPayload({...addPayload, email: e.target.value})} placeholder="officer@polac.edu" />
-                            </div>
-                            <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">Initial Password</label>
-                                <input required type="text" className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500/50 outline-none transition-all" value={addPayload.password} onChange={e => setAddPayload({...addPayload, password: e.target.value})} placeholder="Secure password" />
+                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
+                                    Initial Password
+                                </label>
+                                <input
+                                    required
+                                    type="text"
+                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500/50 outline-none transition-all"
+                                    value={addPayload.password}
+                                    onChange={e => setAddPayload({ ...addPayload, password: e.target.value })}
+                                    placeholder="Secure initial password"
+                                />
                             </div>
                             <div className="flex gap-3 pt-4">
-                                <button disabled={isAdding} type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50">
-                                    {isAdding ? 'Provisioning...' : 'Add Officer'}
+                                <button
+                                    disabled={isAdding || (addPayload.role === UserRole.COURSE_OFFICER && isCapReached)}
+                                    type="submit"
+                                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50"
+                                >
+                                    {isAdding
+                                        ? 'Provisioning...'
+                                        : addPayload.role === UserRole.COMMANDANT
+                                        ? `Provision ${addPayload.designation || 'Senior Officer'}`
+                                        : addPayload.role === UserRole.MEDICAL_OFFICER
+                                        ? `Provision ${addPayload.designation || 'Medical Officer'}`
+                                        : 'Provision Course Officer'}
                                 </button>
-                                <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-6 bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 font-black py-3 rounded-xl text-xs uppercase tracking-widest transition-all">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsAddModalOpen(false)}
+                                    className="px-6 bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 font-black py-3 rounded-xl text-xs uppercase tracking-widest transition-all"
+                                >
                                     Cancel
                                 </button>
                             </div>
@@ -343,29 +711,38 @@ export const CredentialSettings: React.FC = () => {
                 </div>
             )}
 
-            {/* Self-Management Card (Commandant) */}
+            {/* Self-Management Card (System Administrator) */}
             <div className="bg-[#050505] p-6 rounded-2xl border border-white/10 shadow-2xl relative overflow-hidden group">
                 <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-6">
                     <div className="flex items-center gap-6 text-center sm:text-left">
-                        <div className="w-16 h-16 rounded-2xl bg-blue-900/50 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                        <div className="w-16 h-16 rounded-2xl bg-amber-900/40 border border-amber-500/30 flex items-center justify-center text-amber-400">
                             <ShieldCheck size={32} />
                         </div>
                         <div>
-                            <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">Active Authority</span>
-                            <h3 className="text-xl font-black text-white mt-1 uppercase tracking-tight">{currentUser?.fullName || 'COMMANDANT'}</h3>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">COMMANDANT OF THE POLICE ACADEMY</p>
+                            <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                System Administrator Authority
+                            </span>
+                            <h3 className="text-xl font-black text-white mt-1 uppercase tracking-tight">
+                                {currentUser?.fullName || 'SYSTEM ADMINISTRATOR'}
+                            </h3>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">
+                                {currentUser?.designation || 'SYSTEM ADMINISTRATOR'} • {currentUser?.email || 'admin@gmail.com'}
+                            </p>
                         </div>
                     </div>
                     
                     <button 
                         onClick={() => {
-                            const self = users.find(u => u.role === UserRole.COMMANDANT || String(u.id) === String(currentUser?.id));
+                            const self =
+                                users.find(u => String(u.id) === String(currentUser?.id)) ||
+                                users.find(u => u.role === UserRole.ADMIN) ||
+                                (currentUser ? { ...currentUser } : null);
                             if (self) handleInitiateOverride(self);
                             else toast.error('Security profile not found in active registry.');
                         }}
                         className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-black text-[10px] uppercase tracking-widest transition-all hover:translate-y-[-2px]"
                     >
-                        Update My Protocols
+                        Update Admin Credentials
                     </button>
                 </div>
                 <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl group-hover:bg-blue-600/10 transition-colors duration-700" />
@@ -444,15 +821,63 @@ export const CredentialSettings: React.FC = () => {
                                     </div>
                                 )}
 
-                                <div className="md:col-span-2 space-y-2">
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Department Authority (Course Number)</label>
-                                    <input 
-                                        type="number"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white uppercase font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                        value={editPayload.courseNumber}
-                                        onChange={e => setEditPayload({...editPayload, courseNumber: e.target.value})}
-                                        placeholder="e.g. 11"
-                                    />
+                                {targetUser.role === UserRole.COURSE_OFFICER ? (
+                                    <div className="md:col-span-2 space-y-2">
+                                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">
+                                            Department Authority (Regular Course Number)
+                                        </label>
+                                        <input 
+                                            type="number"
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white uppercase font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
+                                            value={editPayload.courseNumber}
+                                            onChange={e => setEditPayload({...editPayload, courseNumber: e.target.value})}
+                                            placeholder="e.g. 11"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="md:col-span-2 space-y-2">
+                                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">
+                                            Official Designation / Office Title
+                                        </label>
+                                        <input 
+                                            type="text"
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
+                                            value={editPayload.designation}
+                                            onChange={e => setEditPayload({...editPayload, designation: e.target.value})}
+                                            placeholder="e.g. Director Field Studies"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Account Active Status Toggle with Sole-Admin Lockout Protection */}
+                                <div className="md:col-span-2 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4">
+                                    <div>
+                                        <p className="text-xs font-black text-white uppercase tracking-wider">
+                                            Account Active Status & Session Validity
+                                        </p>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">
+                                            {isTargetSoleActiveAdmin
+                                                ? 'Lockout Guard Active: The sole active System Administrator account cannot be deactivated.'
+                                                : 'Saving changes automatically increments session_version and terminates any active sessions for this user.'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={isTargetSoleActiveAdmin}
+                                        onClick={() =>
+                                            !isTargetSoleActiveAdmin &&
+                                            setEditPayload(prev => ({ ...prev, isActive: !prev.isActive }))
+                                        }
+                                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all shrink-0 ${
+                                            isTargetSoleActiveAdmin
+                                                ? 'bg-amber-950/40 text-amber-400 border-amber-500/30 cursor-not-allowed'
+                                                : editPayload.isActive
+                                                ? 'bg-emerald-950/50 text-emerald-400 border-emerald-500/40'
+                                                : 'bg-red-950/50 text-red-400 border-red-500/40'
+                                        }`}
+                                    >
+                                        {editPayload.isActive ? 'Active' : 'Deactivated'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -491,22 +916,12 @@ export const CredentialSettings: React.FC = () => {
                 </div>
                 <div className="group relative w-full md:w-auto">
                     <button 
-                        onClick={() => !isCapReached && setIsAddModalOpen(true)}
-                        disabled={isCapReached}
-                        className={`w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all border ${
-                            isCapReached 
-                            ? 'bg-slate-800/50 text-slate-500 border-slate-700 cursor-not-allowed opacity-50'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-900/20'
-                        }`}
+                        onClick={() => setIsAddModalOpen(true)}
+                        className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all border bg-blue-600 hover:bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-900/20"
                     >
                         <Plus size={16} />
-                        Add Course Officer
+                        Provision Officer Profile
                     </button>
-                    {isCapReached && (
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-3 py-1.5 bg-slate-800 text-slate-300 text-[10px] font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-slate-700">
-                            Cap Reached (5/5). Use Lifecycle Engine for Change of Command.
-                        </div>
-                    )}
                 </div>
             </div>
 

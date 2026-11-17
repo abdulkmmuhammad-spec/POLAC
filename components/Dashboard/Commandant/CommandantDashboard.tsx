@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Settings, Radio, ChevronRight, Shield, ShieldAlert } from 'lucide-react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 
 import { Sidebar } from '../../Layout/Sidebar';
+import { BottomNav } from '../../Layout/BottomNav';
 import { Header } from '../../Layout/Header';
 import { DashboardOverview } from '../DashboardOverview';
 import { AttendanceAudit } from './AttendanceAudit';
+import { RemarksCenter } from './RemarksCenter';
 import { DefaulterAnalysis } from './DefaulterAnalysis';
 import { CadetManager } from '../../CadetRegistry/CadetManager';
 import { BulkCoursePurgeModal } from '../../CadetRegistry/BulkCoursePurgeModal';
@@ -13,13 +15,10 @@ import { CommandAnalytics } from './CommandAnalytics';
 import { OfficerManager } from './OfficerManager';
 import { AuditLogView } from '../../Settings/AuditLogView';
 import { HistoricalAlertsView } from '../../Settings/HistoricalAlertsView';
-import { TacticalHUD } from './TacticalHUD';
 import { CredentialSettings } from './CredentialSettings';
 import { GraduationPanel } from './GraduationPanel';
 import { HandoverWizard } from './HandoverWizard';
 import { PushNotificationManager } from '../../PushNotificationManager';
-import { Notification } from '../../../types';
-import { NotificationPreviewModal } from '../../Layout/NotificationPreviewModal';
 import { useParade } from '../../../context/ParadeContext';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
@@ -347,61 +346,36 @@ const SettingsContainer: React.FC = () => {
     );
 };
 
-export const CommandantDashboard: React.FC = () => {
+export const AdminDashboard: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { notifications, markNotificationRead } = useParade();
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [selectedAlert, setSelectedAlert] = useState<Notification | null>(null);
 
     const getTitle = () => {
         const path = location.pathname;
+        if (path.includes('remarks')) return 'Command Remarks & Directives Audit';
         if (path.includes('audit')) return 'Attendance Audit Ledger';
         if (path.includes('cadet_registry')) return 'Master Cadet Registry';
         if (path.includes('analytics')) return 'Advanced Command Analytics';
         if (path.includes('settings')) return 'System Settings & Forensics';
-        return 'Command Overview';
+        return 'Admin Command Overview';
     };
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden relative">
-            <Sidebar
-                isOpen={isSidebarOpen}
-                onClose={() => setIsSidebarOpen(false)}
-            />
+            <Sidebar />
 
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header
                     title={getTitle()}
-                    onProfileClick={() => navigate('/commandant/settings')}
-                    onMenuClick={() => setIsSidebarOpen(true)}
+                    onProfileClick={() => navigate('/admin/settings')}
                 />
 
-                <main className="flex-1 overflow-y-auto p-4 md:p-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
-                        <TacticalHUD 
-                            notifications={notifications}
-                            onResolve={markNotificationRead} // In this context, resolving is acknowledging
-                            onView={(alert) => {
-                                setSelectedAlert(alert);
-                            }}
-                        />
-
-                        {/* Tactical HUD Alert Preview Modal */}
-                        <NotificationPreviewModal
-                            notification={selectedAlert}
-                            isOpen={!!selectedAlert}
-                            onClose={() => setSelectedAlert(null)}
-                            onAcknowledge={(id) => markNotificationRead(id)}
-                            onNavigate={(route, state) => {
-                                setSelectedAlert(null);
-                                navigate(route, { state });
-                            }}
-                        />
-                        
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <Routes>
                                 <Route index element={<DashboardOverview />} />
+                                <Route path="remarks" element={<RemarksCenter />} />
                                 <Route path="audit" element={<AttendanceAudit />} />
                                 <Route path="cadet_registry" element={<CadetManager />} />
                                 <Route path="analytics" element={<CommandAnalytics />} />
@@ -412,10 +386,51 @@ export const CommandantDashboard: React.FC = () => {
                                         </div>
                                     </div>
                                 } />
+                                <Route path="*" element={<Navigate to="/admin" replace />} />
                             </Routes>
                         </div>
                     </div>
                 </main>
+
+                <BottomNav />
+            </div>
+        </div>
+    );
+};
+
+export const CommandantDashboard: React.FC = () => {
+    const location = useLocation();
+    const { currentUser } = useAuth();
+
+    const getTitle = () => {
+        const path = location.pathname;
+        const officeTitle = currentUser?.designation || 'Commandant';
+        if (path.includes('remarks')) return `${officeTitle} • Remarks & Directives`;
+        if (path.includes('audit')) return 'Attendance Audit Ledger';
+        return `${officeTitle} • Parade States`;
+    };
+
+    return (
+        <div className="flex h-screen bg-slate-50 overflow-hidden relative">
+            <Sidebar />
+
+            <div className="flex-1 flex flex-col overflow-hidden">
+                <Header title={getTitle()} />
+
+                <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8 md:pb-8">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <Routes>
+                                <Route index element={<DashboardOverview />} />
+                                <Route path="remarks" element={<RemarksCenter />} />
+                                <Route path="audit" element={<AttendanceAudit />} />
+                                <Route path="*" element={<Navigate to="/commandant" replace />} />
+                            </Routes>
+                        </div>
+                    </div>
+                </main>
+
+                <BottomNav />
             </div>
         </div>
     );

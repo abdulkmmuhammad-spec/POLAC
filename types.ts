@@ -1,7 +1,9 @@
 
 export enum UserRole {
+  ADMIN = 'admin',
   COMMANDANT = 'commandant',
-  COURSE_OFFICER = 'course_officer'
+  COURSE_OFFICER = 'course_officer',
+  MEDICAL_OFFICER = 'medical_officer'
 }
 
 export enum ParadeType {
@@ -26,6 +28,8 @@ export interface User {
   serviceNumber?: string;
   role: UserRole;
   fullName: string;
+  /** Official office title / designation (e.g., 'Commandant', 'Director Field Studies', 'System Administrator'). */
+  designation?: string;
   courseName?: string;
   /**
    * @deprecated Use courseNumber instead. Kept for backward compatibility
@@ -39,6 +43,7 @@ export interface User {
   email?: string;
   password?: string;
   isActive?: boolean;
+  sessionVersion?: number;
 }
 
 export interface CadetDetail {
@@ -161,8 +166,12 @@ export interface RemarkThreadMessage {
   id: string;
   senderRole: 'commandant' | 'course_officer';
   senderName: string;
+  senderTitle?: string;
   message: string;
   timestamp: string;
+  paradeType?: ParadeType | string | null;
+  paradeDate?: string | null;
+  submissionId?: string | null;
 }
 
 export interface CommandantRemark {
@@ -170,6 +179,8 @@ export interface CommandantRemark {
   submissionId: string;
   commandantId?: string | null;
   commandantName: string;
+  /** Official designation of the issuing Senior Officer (e.g. 'Commandant', 'Director Field Studies'). */
+  issuerRoleTitle?: string;
   courseOfficerId?: string | null;
   courseOfficerName?: string | null;
   courseNumber?: number | null;
@@ -272,3 +283,39 @@ export interface CadetImportParseResult {
   allRows: ParsedCadetRow[];
   globalErrors: string[];
 }
+
+export type MedicalVerificationStatus = 'pending_verification' | 'admitted' | 'not_admitted';
+
+export interface SickbayMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole: string;
+  senderDesignation?: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface SickbayVerification {
+  id: string;
+  cadetDetailId?: string;
+  paradeRecordId?: string;
+  courseNumber: number;
+  cadetName: string;
+  squad?: string;
+  paradeDate: string;
+  paradeType: string;
+  reportedByOfficer: string;
+  status: MedicalVerificationStatus;
+  medicalOfficerId?: string;
+  medicalOfficerName?: string;
+  clinicalNote?: string;
+  targetedRecipientRole?: 'commandant' | 'dfs' | 'course_officer';
+  targetedRecipientId?: string;
+  messages?: SickbayMessage[];
+  threadStatus?: 'open' | 'replied' | 'resolved';
+  verifiedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+

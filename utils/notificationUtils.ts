@@ -1,5 +1,47 @@
 import { Notification } from '../types';
 
+export interface ParsedMisconductRemark {
+    isMisconduct: boolean;
+    alertLevel: 'CRITICAL' | 'FLAGRANT' | null;
+    cadetName: string | null;
+    squad: string | null;
+    absences: number | null;
+    alertId: string | null;
+    cleanText: string;
+}
+
+export const parseMisconductRemark = (text?: string | null): ParsedMisconductRemark => {
+    const raw = (text || '').trim();
+    const match = raw.match(
+        /^\[MISCONDUCT:([^|]+)\|CADET:([^|]+)\|SQUAD:([^|]+)\|ABSENCES:([^|]+)\|ALERT_ID:([^\]]+)\]\s*([\s\S]*)$/i
+    );
+    if (!match) {
+        return {
+            isMisconduct: false,
+            alertLevel: null,
+            cadetName: null,
+            squad: null,
+            absences: null,
+            alertId: null,
+            cleanText: raw
+        };
+    }
+
+    const levelRaw = match[1].trim().toUpperCase();
+    const alertLevel: 'CRITICAL' | 'FLAGRANT' = levelRaw === 'FLAGRANT' ? 'FLAGRANT' : 'CRITICAL';
+    const absencesNum = parseInt(match[4].trim(), 10);
+
+    return {
+        isMisconduct: true,
+        alertLevel,
+        cadetName: match[2].trim(),
+        squad: match[3].trim(),
+        absences: Number.isNaN(absencesNum) ? null : absencesNum,
+        alertId: match[5].trim(),
+        cleanText: (match[6] || '').trim()
+    };
+};
+
 export const inferSeverity = (n: Notification): 'critical' | 'info' | 'system' => {
     const type = n.type?.toLowerCase() || '';
     const title = n.title?.toLowerCase() || '';
@@ -66,11 +108,12 @@ export interface NotificationTarget {
     };
 }
 
-export const parseNotificationTarget = (n: Notification): NotificationTarget => {
+export const parseNotificationTarget = (n: Notification, viewerRole?: string): NotificationTarget => {
     const type = n.type?.toLowerCase() || '';
     const title = n.title?.toLowerCase() || '';
     const content = n.content?.toLowerCase() || '';
     const courseNumber = n.courseNumber || n.metadata?.courseNumber || (n.yearGroup && n.yearGroup > 0 ? n.yearGroup : undefined);
+    const basePrefix = viewerRole === 'admin' ? '/admin' : '/commandant';
 
     // 0. Commandant Parade Remarks & Officer Responses
     if (type === 'commandant_remark' || type === 'remark_resolved' || title.includes("commandant's parade remark") || title.includes('parade inquiry resolved')) {
@@ -85,7 +128,7 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
     if (type === 'remark_response' || title.includes('officer justification filed')) {
         return {
             category: 'parade',
-            route: '/commandant',
+            route: basePrefix,
             courseNumber,
             actionLabel: 'Review Officer Response'
         };
@@ -121,7 +164,7 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
 
         return {
             category: 'parade',
-            route: isPerfectAttendance ? '/commandant' : '/commandant/audit',
+            route: isPerfectAttendance ? basePrefix : `${basePrefix}/audit`,
             courseNumber,
             paradeType,
             actionLabel: isPerfectAttendance ? 'View in Tactical Summary' : 'Inspect in Attendance Audit',
@@ -133,7 +176,7 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
     if (title.includes('ledger printed') || title.includes('audit ledger') || title.includes('report produced')) {
         return {
             category: 'general',
-            route: '/commandant/audit',
+            route: `${basePrefix}/audit`,
             courseNumber,
             actionLabel: 'Preview Audit Ledger',
             previewMode: true
@@ -148,11 +191,11 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
         }
         return {
             category: 'cadet',
-            route: '/commandant/cadet_registry',
+            route: viewerRole === 'admin' ? '/admin/cadet_registry' : `${basePrefix}/audit`,
             courseNumber,
             cadetName: cadetName,
-            actionLabel: 'Preview Performance Dossier',
-            previewMode: true
+            actionLabel: viewerRole === 'admin' ? 'Preview Performance Dossier' : 'View in Attendance Audit',
+            previewMode: viewerRole === 'admin'
         };
     }
 
@@ -162,10 +205,10 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
         let cadetName = n.metadata?.cadetName;
         return {
             category: 'cadet',
-            route: '/commandant/cadet_registry',
+            route: viewerRole === 'admin' ? '/admin/cadet_registry' : `${basePrefix}/audit`,
             courseNumber,
             cadetName,
-            actionLabel: 'View in Cadet Registry'
+            actionLabel: viewerRole === 'admin' ? 'View in Cadet Registry' : 'View in Attendance Audit'
         };
     }
 
@@ -173,16 +216,16 @@ export const parseNotificationTarget = (n: Notification): NotificationTarget => 
     if (type.includes('settings') || type.includes('system') || title.includes('settings') || title.includes('rc changed') || title.includes('time changed')) {
         return {
             category: 'settings',
-            route: '/commandant/settings',
+            route: viewerRole === 'admin' ? '/admin/settings' : basePrefix,
             courseNumber,
-            actionLabel: 'Open System Forensics'
+            actionLabel: viewerRole === 'admin' ? 'Open System Forensics' : 'View Overview'
         };
     }
 
     // 4. Default / General Activity
     return {
         category: 'general',
-        route: '/commandant',
+        route: basePrefix,
         courseNumber,
         actionLabel: 'View Command Overview'
     };
