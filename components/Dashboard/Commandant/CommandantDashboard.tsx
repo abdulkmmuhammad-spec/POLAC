@@ -5,6 +5,7 @@ import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-
 import { Sidebar } from '../../Layout/Sidebar';
 import { BottomNav } from '../../Layout/BottomNav';
 import { Header } from '../../Layout/Header';
+import { PageTransitionWrapper } from '../../Layout/PageTransitionWrapper';
 import { DashboardOverview } from '../DashboardOverview';
 import { AttendanceAudit } from './AttendanceAudit';
 import { RemarksCenter } from './RemarksCenter';
@@ -372,8 +373,8 @@ export const AdminDashboard: React.FC = () => {
 
                 <main className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
-                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <Routes>
+                        <PageTransitionWrapper>
+                            <Routes location={location}>
                                 <Route index element={<DashboardOverview />} />
                                 <Route path="remarks" element={<RemarksCenter />} />
                                 <Route path="audit" element={<AttendanceAudit />} />
@@ -388,7 +389,7 @@ export const AdminDashboard: React.FC = () => {
                                 } />
                                 <Route path="*" element={<Navigate to="/admin" replace />} />
                             </Routes>
-                        </div>
+                        </PageTransitionWrapper>
                     </div>
                 </main>
 
@@ -419,14 +420,14 @@ export const CommandantDashboard: React.FC = () => {
 
                 <main className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
-                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <Routes>
+                        <PageTransitionWrapper>
+                            <Routes location={location}>
                                 <Route index element={<DashboardOverview />} />
                                 <Route path="remarks" element={<RemarksCenter />} />
                                 <Route path="audit" element={<AttendanceAudit />} />
                                 <Route path="*" element={<Navigate to="/commandant" replace />} />
                             </Routes>
-                        </div>
+                        </PageTransitionWrapper>
                     </div>
                 </main>
 

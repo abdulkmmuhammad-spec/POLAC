@@ -292,7 +292,7 @@ export const SickbayChatDrawer: React.FC<SickbayChatDrawerProps> = ({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-50 flex justify-end" data-drawer-open="true">
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -319,7 +319,7 @@ export const SickbayChatDrawer: React.FC<SickbayChatDrawerProps> = ({
             className="relative w-full md:max-w-lg bg-[#efeae2] h-full flex flex-col shadow-2xl z-10 overflow-hidden"
           >
             {/* ── WhatsApp-style Header ── */}
-            <div className="bg-blue-900 text-white px-3.5 py-3 flex items-center justify-between gap-3 shrink-0 shadow-md">
+            <div className="bg-blue-900 text-white px-3.5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 flex items-center justify-between gap-3 shrink-0 shadow-md">
               <div className="flex items-center gap-2.5 min-w-0">
                 <button
                   type="button"

@@ -109,7 +109,8 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
     };
 
     return (
-        <header className="bg-blue-900 border-b border-white/10 h-16 md:h-20 flex items-center justify-between px-3.5 sm:px-5 md:px-8 shrink-0 relative z-30 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+        <header className="sticky top-0 z-30 shrink-0 bg-blue-900/95 backdrop-blur-md border-b border-white/10 pt-[env(safe-area-inset-top)] shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+            <div className="h-16 md:h-20 flex items-center justify-between px-3.5 sm:px-5 md:px-8">
             <div className="flex items-center gap-2.5 md:gap-4 min-w-0">
                 <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                     <div className="flex w-8 h-8 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 items-center justify-center shrink-0 shadow-sm overflow-hidden">
@@ -281,6 +282,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 >
                     <LogOut size={17} />
                 </button>
+            </div>
             </div>
 
             {/* ── Notification Drawer ── */}

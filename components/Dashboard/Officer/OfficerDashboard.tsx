@@ -20,6 +20,7 @@ import { Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-d
 import { useAuth } from '../../../context/AuthContext';
 import { Header } from '../../Layout/Header';
 import { BottomNav } from '../../Layout/BottomNav';
+import { PageTransitionWrapper } from '../../Layout/PageTransitionWrapper';
 import { OfficerProfile } from './OfficerProfile';
 import { ParadeForm } from '../../Parade/ParadeForm';
 import { SubmissionHistory } from './SubmissionHistory';
@@ -640,14 +641,14 @@ export const OfficerDashboard: React.FC = () => {
                 {/* Persistent Critical / Flagrant Misconduct Alert Widget & Auto-Pop Modal across all Officer Tabs */}
                 <AtRiskCadetsWidget courseNumber={officerCourseNumber} />
 
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
-                    <Routes>
+                <PageTransitionWrapper>
+                    <Routes location={location}>
                         <Route index element={<OfficerProfile />} />
                         <Route path="submit" element={<ParadeForm />} />
                         <Route path="remarks" element={<OfficerRemarksCenter />} />
                         <Route path="history" element={<SubmissionHistory />} />
                     </Routes>
-                </div>
+                </PageTransitionWrapper>
             </main>
 
             <BottomNav />

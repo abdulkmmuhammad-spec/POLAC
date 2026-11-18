@@ -858,7 +858,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                             className="w-full bg-white shadow-2xl sm:border-l border-slate-200 flex flex-col h-full overflow-hidden touch-pan-y"
                         >
                             {/* ── 1. Sticky Chat Header (WhatsApp / Instagram DM Style) ── */}
-                            <div className="bg-slate-900 text-white px-3.5 py-3 sm:px-5 sm:py-3.5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+                            <div className="bg-slate-900 text-white px-3.5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 sm:px-5 sm:pb-3.5 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
                                 <div className="flex items-center gap-3 min-w-0">
                                     <button
                                         type="button"

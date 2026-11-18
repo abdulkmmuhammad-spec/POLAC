@@ -1,7 +1,8 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Header } from '../../Layout/Header';
 import { BottomNav } from '../../Layout/BottomNav';
+import { PageTransitionWrapper } from '../../Layout/PageTransitionWrapper';
 import { SickbayTriageBoard } from './SickbayTriageBoard';
 import { MedicalRemarksCenter } from './MedicalRemarksCenter';
 import { useAuth } from '../../../context/AuthContext';
@@ -15,6 +16,7 @@ import { useAuth } from '../../../context/AuthContext';
  */
 export const MedicalDashboard: React.FC = () => {
   const { currentUser } = useAuth();
+  const location = useLocation();
 
   const headerTitle = currentUser?.designation || 'Medical Officer';
 
@@ -69,11 +71,13 @@ export const MedicalDashboard: React.FC = () => {
         <Header title={headerTitle} />
 
         <main className="flex-1 overflow-y-auto pb-28 md:pb-6">
-          <Routes>
-            <Route index element={<SickbayTriageBoard />} />
-            <Route path="remarks" element={<MedicalRemarksCenter />} />
-            <Route path="*" element={<Navigate to="/medical" replace />} />
-          </Routes>
+          <PageTransitionWrapper>
+            <Routes location={location}>
+              <Route index element={<SickbayTriageBoard />} />
+              <Route path="remarks" element={<MedicalRemarksCenter />} />
+              <Route path="*" element={<Navigate to="/medical" replace />} />
+            </Routes>
+          </PageTransitionWrapper>
         </main>
 
         <BottomNav />
