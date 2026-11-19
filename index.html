@@ -45,6 +45,41 @@
 
 <body class="bg-slate-50 text-slate-900 antialiased">
     <div id="root"></div>
+    <script>
+        (function () {
+            var KEY = 'polac_chunk_reload';
+            var recover = function () {
+                try {
+                    if (sessionStorage.getItem(KEY)) return;
+                    sessionStorage.setItem(KEY, '1');
+                    if ('caches' in window) {
+                        caches.keys().then(function (names) {
+                            names.forEach(function (n) { caches.delete(n); });
+                        });
+                    }
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.getRegistrations().then(function (regs) {
+                            regs.forEach(function (r) { r.unregister(); });
+                        }).finally(function () {
+                            window.location.reload();
+                        });
+                        return;
+                    }
+                    window.location.reload();
+                } catch (e) {}
+            };
+            window.addEventListener('vite:preloadError', recover);
+            window.addEventListener('error', function (e) {
+                var target = e && e.target;
+                if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+                    recover();
+                }
+            }, true);
+            window.addEventListener('load', function () {
+                try { sessionStorage.removeItem(KEY); } catch (e) {}
+            });
+        })();
+    </script>
     <script type="module" src="/index.tsx"></script>
 </body>
 

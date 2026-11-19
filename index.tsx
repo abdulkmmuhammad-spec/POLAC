@@ -15,6 +15,11 @@ window.onerror = (message, source, lineno, colno, error) => {
   console.error('Fatal App Error:', { message, source, lineno, colno, error });
 };
 
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  window.location.reload();
+});
+
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
