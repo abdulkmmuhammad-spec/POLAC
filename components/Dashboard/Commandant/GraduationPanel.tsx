@@ -88,54 +88,59 @@ export const GraduationPanel: React.FC<GraduationPanelProps> = ({ onCommissionIn
     }
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden mt-6 text-slate-800">
-            <div className="p-4 border-b bg-indigo-900 text-white flex items-center gap-3">
-                <GraduationCap size={16} />
+        <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 overflow-hidden text-slate-800">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
+                    <GraduationCap size={20} />
+                </div>
                 <div>
-                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em]">Cohort Graduation Engine</h3>
+                    <h3 className="text-base font-bold text-slate-900">Regular Course Graduation</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                        Archive a graduating Regular Course and advance remaining intakes
+                    </p>
                 </div>
             </div>
-            <div className="p-6 space-y-6">
-                <div className="p-4 bg-indigo-50/50 rounded-md border border-indigo-100 flex items-start gap-3">
-                    <Shield size={14} className="text-indigo-900 mt-0.5 shrink-0" />
-                    <p className="text-[10px] text-indigo-900/80 leading-relaxed font-bold uppercase tracking-tight">
-                        <strong>FORENSIC INTEGRITY LOCK:</strong> Graduating a course permanently locks all associated parade records, marks all cadets as GRADUATED, and deactivates the assigned Course Officer's account to prevent identity hijacking.
+            <div className="p-4 sm:p-5 space-y-5">
+                <div className="p-3.5 bg-indigo-50/70 rounded-xl border border-indigo-100 flex items-start gap-2.5">
+                    <Shield size={16} className="text-indigo-700 mt-0.5 shrink-0" />
+                    <p className="text-xs text-indigo-950/90 leading-relaxed">
+                        <span className="font-semibold">Integrity Lock:</span> Graduating a course permanently locks its parade records, marks cadets as Graduated, and deactivates the assigned Course Officer account.
                     </p>
                 </div>
 
-                <div className="p-4 bg-amber-50 rounded-md border border-amber-200 flex items-start gap-3">
-                    <AlertTriangle size={14} className="text-amber-700 mt-0.5 shrink-0" />
-                    <p className="text-[10px] text-amber-800/90 leading-relaxed font-bold uppercase tracking-tight">
-                        <strong>Notice:</strong> Confirming this graduation will instantly increment the academy's baseline Active RC configuration. All remaining active cohorts will immediately advance to their next year levels dynamically.
+                <div className="p-3.5 bg-amber-50/80 rounded-xl border border-amber-200/80 flex items-start gap-2.5">
+                    <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-900 leading-relaxed">
+                        Confirming graduation increments the Active RC baseline, advancing all remaining active Regular Courses by one year level.
                     </p>
                 </div>
 
-                <div className="space-y-4">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Target Course to Graduate</label>
+                <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-700">Target Course to Graduate</label>
                     <div className="flex items-center gap-3">
                         <input
                             type="number"
                             min={1}
-                            className="w-32 px-4 py-3 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-900 outline-none font-mono font-black text-lg"
+                            className="w-28 min-h-[44px] px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:border-indigo-600 outline-none font-mono font-bold text-base text-slate-900"
                             value={targetRC}
                             onChange={(e) => setTargetRC(parseInt(e.target.value) || 0)}
                             disabled={isSubmitting}
                         />
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Regular Course</span>
+                        <span className="text-xs font-semibold text-slate-500">Regular Course</span>
                     </div>
                 </div>
 
-                <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg space-y-3">
+                <div className="p-4 bg-rose-50/80 border border-rose-200 rounded-xl space-y-3">
                     <div className="flex items-center gap-2 text-rose-700">
                         <AlertTriangle size={16} />
-                        <span className="text-xs font-black uppercase tracking-widest">Danger Zone</span>
+                        <span className="text-xs font-bold">Danger Zone</span>
                     </div>
-                    <p className="text-[10px] font-bold text-rose-800/80 uppercase">
-                        To confirm this irreversible action, please type: <strong>GRADUATE RC {targetRC}</strong>
+                    <p className="text-xs text-rose-900 leading-relaxed">
+                        To confirm this irreversible action, type <span className="font-mono font-bold">GRADUATE RC {targetRC}</span> below:
                     </p>
                     <input
                         type="text"
-                        className="w-full px-4 py-3 bg-white border border-rose-200 rounded focus:ring-1 focus:ring-rose-500 outline-none font-mono font-bold text-sm text-rose-900 placeholder:text-rose-300"
+                        className="w-full min-h-[44px] px-3.5 py-2 bg-white border border-rose-200 rounded-xl focus:border-rose-500 outline-none font-mono font-bold text-sm text-rose-900 placeholder:text-rose-300"
                         placeholder={`GRADUATE RC ${targetRC}`}
                         value={confirmText}
                         onChange={(e) => setConfirmText(e.target.value)}
@@ -146,9 +151,9 @@ export const GraduationPanel: React.FC<GraduationPanelProps> = ({ onCommissionIn
                 <button
                     onClick={handleGraduation}
                     disabled={isSubmitting || confirmText !== `GRADUATE RC ${targetRC}`}
-                    className="w-full flex items-center justify-center gap-2 px-6 h-[50px] rounded-md font-black text-xs uppercase tracking-widest transition-all shadow-md bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+                    className="w-full min-h-[44px] flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-2xs bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {isSubmitting ? 'Executing Graduation Protocol...' : 'Finalize Graduation'} <CheckCircle size={14} />
+                    {isSubmitting ? 'Processing Graduation...' : 'Finalize Graduation'} <CheckCircle size={15} />
                 </button>
             </div>
         </div>

@@ -1,966 +1,992 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, Eye, EyeOff, UserCog, Mail, Key, Save, AlertTriangle, ShieldCheck, Plus, Search, ChevronDown, UserPlus, X } from 'lucide-react';
-import { dbService, updateUserCredentials } from '../../../services/dbService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Search,
+  UserPlus,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  X,
+  AlertTriangle,
+  Check,
+  Loader2
+} from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { dbService, supabase, updateUserCredentials } from '../../../services/dbService';
 import { User, UserRole } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
-import { toast } from 'react-hot-toast';
 import { SecurityOverrideModal } from './SecurityOverrideModal';
+import { toast } from 'react-hot-toast';
 
 const SENIOR_OFFICER_PRESETS = [
-    'Director Field Studies',
-    'Commandant',
-    'Deputy Commandant',
-    'Director Academic Planning'
+  'Commandant',
+  'Director Field Studies',
+  'Deputy Commandant'
 ];
 
 const MEDICAL_OFFICER_PRESETS = [
-    'Regimental Medical Officer',
-    'Medical Officer on Duty',
-    'Sickbay Nursing Officer'
+  'Regimental Medical Officer',
+  'Medical Officer on Duty',
+  'Sickbay Nursing Officer'
 ];
 
+const RC_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15];
+
+type RoleFilter = 'all' | 'course_officer' | 'commandant' | 'medical_officer';
+
+const sanitizeUsername = (val: string): string =>
+  val.toLowerCase().replace(/[^a-z0-9._]/g, '');
+
+const getInitials = (name?: string): string => {
+  const parts = (name || 'U').trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return (parts[0] || 'U').slice(0, 2).toUpperCase();
+};
+
+const getRoleSummary = (u: User): string => {
+  const handle = u.username ? `@${u.username}` : '';
+  let roleLabel = u.designation || 'Officer';
+  if (u.role === UserRole.COURSE_OFFICER) {
+    roleLabel = u.courseNumber ? `RC ${u.courseNumber} Course Officer` : 'Course Officer';
+  } else if (u.role === UserRole.ADMIN) {
+    roleLabel = u.designation || 'System Administrator';
+  } else if (u.role === UserRole.MEDICAL_OFFICER) {
+    roleLabel = u.designation || 'Medical Officer';
+  } else if (u.role === UserRole.COMMANDANT) {
+    roleLabel = u.designation || 'Commandant';
+  }
+  return handle ? `${handle} • ${roleLabel}` : roleLabel;
+};
+
 export const CredentialSettings: React.FC = () => {
-    const { currentUser } = useAuth();
-    const [users, setUsers] = useState<User[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [revealPasswords, setRevealPasswords] = useState<Record<string, boolean>>({});
-    
-    // Override State
-    const [targetUser, setTargetUser] = useState<User | null>(null);
-    const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
-    const [verifiedCurrentPassword, setVerifiedCurrentPassword] = useState('');
-    const [editPayload, setEditPayload] = useState({
-        email: '',
-        password: '',
-        confirmPassword: '',
-        courseNumber: '',
-        designation: '',
-        isActive: true
+  const { currentUser } = useAuth();
+  const shouldReduceMotion = useReducedMotion();
+
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+
+  // Add Officer Sheet State
+  const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [addPayload, setAddPayload] = useState({
+    role: UserRole.COURSE_OFFICER as UserRole,
+    courseNumber: '12',
+    designation: 'Course Officer',
+    fullName: '',
+    username: '',
+    email: '',
+    password: ''
+  });
+
+  // Manage Officer Auth + Sheet State
+  const [targetUser, setTargetUser] = useState<User | null>(null);
+  const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
+  const [isManageOpen, setIsManageOpen] = useState(false);
+  const [verifiedCurrentPassword, setVerifiedCurrentPassword] = useState('');
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editPayload, setEditPayload] = useState({
+    fullName: '',
+    username: '',
+    email: '',
+    courseNumber: '',
+    designation: '',
+    password: '',
+    auditReason: '',
+    isActive: true
+  });
+
+  const fetchUsers = async () => {
+    setIsLoading(true);
+    try {
+      const data = await dbService.getAllUsers();
+      setUsers(data);
+    } catch {
+      toast.error('Failed to load officers.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  // Body scroll lock while any sheet is open
+  useEffect(() => {
+    if (!isAddSheetOpen && !isManageOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isAddSheetOpen, isManageOpen]);
+
+  const activeCourseOfficersCount = useMemo(
+    () => users.filter(u => u.role === UserRole.COURSE_OFFICER && u.isActive !== false).length,
+    [users]
+  );
+  const isCapReached = activeCourseOfficersCount >= 5;
+
+  const activeAdminCount = useMemo(
+    () => users.filter(u => u.role === UserRole.ADMIN && u.isActive !== false).length,
+    [users]
+  );
+
+  // Duplicate username checks
+  const isAddUsernameTaken = useMemo(() => {
+    const clean = addPayload.username.trim().toLowerCase();
+    if (!clean) return false;
+    return users.some(u => (u.username || '').trim().toLowerCase() === clean);
+  }, [addPayload.username, users]);
+
+  const isEditUsernameTaken = useMemo(() => {
+    const clean = editPayload.username.trim().toLowerCase();
+    if (!clean || !targetUser) return false;
+    return users.some(
+      u => String(u.id) !== String(targetUser.id) && (u.username || '').trim().toLowerCase() === clean
+    );
+  }, [editPayload.username, targetUser, users]);
+
+  const filteredUsers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase().replace(/^@/, '');
+    return users.filter(u => {
+      if (roleFilter === 'course_officer' && u.role !== UserRole.COURSE_OFFICER) return false;
+      if (roleFilter === 'commandant' && u.role !== UserRole.COMMANDANT && u.role !== UserRole.ADMIN) {
+        return false;
+      }
+      if (roleFilter === 'medical_officer' && u.role !== UserRole.MEDICAL_OFFICER) return false;
+
+      if (!q) return true;
+      return (
+        (u.fullName || '').toLowerCase().includes(q) ||
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.designation || '').toLowerCase().includes(q) ||
+        (u.courseNumber ? `rc ${u.courseNumber}`.includes(q) : false)
+      );
     });
+  }, [users, roleFilter, searchQuery]);
 
-    // Split-View & Add Officer State
-    const [searchQuery, setSearchQuery] = useState('');
-    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [isAdding, setIsAdding] = useState(false);
-    const [addPayload, setAddPayload] = useState({
-        fullName: '',
-        username: '',
-        email: '',
-        password: '',
-        role: UserRole.COMMANDANT as UserRole,
-        designation: 'Director Field Studies',
-        courseNumber: ''
+  const handleOpenAdd = () => {
+    setAddPayload({
+      role: isCapReached ? UserRole.COMMANDANT : UserRole.COURSE_OFFICER,
+      courseNumber: '12',
+      designation: isCapReached ? 'Director Field Studies' : 'Course Officer',
+      fullName: '',
+      username: '',
+      email: '',
+      password: ''
     });
+    setShowAddPassword(false);
+    setIsAddSheetOpen(true);
+  };
 
-    const fetchUsers = async () => {
-        setIsLoading(true);
-        try {
-            const data = await dbService.getAllUsers();
-            setUsers(data);
-        } catch (err) {
-            toast.error('Failed to access credential registry.');
-        } finally {
-            setIsLoading(false);
+  const handleAddOfficer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    if (addPayload.role === UserRole.COURSE_OFFICER && isCapReached) {
+      toast.error('Maximum of 5 active Course Officers reached.');
+      return;
+    }
+    if (!addPayload.username.trim()) {
+      toast.error('Please enter a username.');
+      return;
+    }
+    if (isAddUsernameTaken) {
+      toast.error('Username is already taken.');
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      await dbService.registerOfficer(
+        currentUser.id,
+        {
+          email: addPayload.email.trim(),
+          password: addPayload.password,
+          username: addPayload.username.trim().toLowerCase(),
+          fullName: addPayload.fullName.trim(),
+          role: addPayload.role,
+          designation:
+            addPayload.role === UserRole.COMMANDANT
+              ? addPayload.designation.trim() || 'Director Field Studies'
+              : addPayload.role === UserRole.MEDICAL_OFFICER
+              ? addPayload.designation.trim() || 'Regimental Medical Officer'
+              : 'Course Officer',
+          courseNumber:
+            addPayload.role === UserRole.COURSE_OFFICER && addPayload.courseNumber
+              ? Number(addPayload.courseNumber)
+              : undefined
+        },
+        {
+          email: currentUser.email,
+          username: currentUser.username
         }
-    };
+      );
+      toast.success(`${addPayload.fullName.trim()} added`);
+      setIsAddSheetOpen(false);
+      fetchUsers();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add officer.');
+    } finally {
+      setIsAdding(false);
+    }
+  };
 
-    useEffect(() => {
-        fetchUsers();
-    }, []);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                if (isEditing) setIsEditing(false);
-                if (isAddModalOpen) setIsAddModalOpen(false);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isEditing, isAddModalOpen]);
-
-    const toggleReveal = (userId: string | number) => {
-        setRevealPasswords(prev => ({
-            ...prev,
-            [userId]: !prev[userId]
-        }));
-    };
-
-    const handleInitiateOverride = (user: User) => {
-        if (!user) return;
-        setTargetUser(user);
-        setVerifiedCurrentPassword('');
-        setEditPayload({
-            email: user.email || '',
-            password: user.password || '',
-            confirmPassword: user.password || '',
-            courseNumber: user.courseNumber ? String(user.courseNumber) : '',
-            designation:
-                user.designation ||
-                (user.role === UserRole.ADMIN
-                    ? 'System Administrator'
-                    : user.role === UserRole.COMMANDANT
-                    ? 'Commandant'
-                    : 'Course Officer'),
-            isActive: user.isActive !== false
-        });
-        setIsOverrideModalOpen(true);
-    };
-
-    const handleAuthorize = async (password: string) => {
-        if (!currentUser) return;
-        const isValid = await dbService.verifyCommandantAccess(currentUser.id, password);
-        if (isValid) {
-            setVerifiedCurrentPassword(password);
-            setIsOverrideModalOpen(false);
-            setIsEditing(true);
-            toast.success('Authority verified. Secure link established.');
-        } else {
-            toast.error('Verification failed. Invalid administration password.');
-        }
-    };
-
-    const activeAdminCount = users.filter(u => u.role === UserRole.ADMIN && u.isActive !== false).length;
-    const isTargetSoleActiveAdmin =
-        targetUser?.role === UserRole.ADMIN &&
-        targetUser?.isActive !== false &&
-        activeAdminCount <= 1;
-
-    const handleSaveOverride = async () => {
-        if (!targetUser) return;
-
-        if (!verifiedCurrentPassword) {
-            toast.error('Current password verification is required before saving.');
-            return;
-        }
-
-        const isSelfEdit = String(targetUser.id) === String(currentUser?.id);
-        if (isSelfEdit && editPayload.password !== editPayload.confirmPassword) {
-            toast.error('Passwords do not match. Override aborted to prevent lockout.');
-            return;
-        }
-
-        if (isSelfEdit && !editPayload.password.trim()) {
-            toast.error('Admin password cannot be empty.');
-            return;
-        }
-
-        if (isTargetSoleActiveAdmin && !editPayload.isActive) {
-            toast.error('Lockout Prevention: Cannot deactivate the sole active System Administrator account.');
-            return;
-        }
-
-        try {
-            await updateUserCredentials({
-                adminId: String(currentUser?.id),
-                targetUserId: String(targetUser.id),
-                newEmail: editPayload.email,
-                newCourseAssignment:
-                    targetUser.role === UserRole.COURSE_OFFICER ? editPayload.courseNumber : '',
-                newDesignation: editPayload.designation,
-                newPassword: editPayload.password,
-                currentPassword: verifiedCurrentPassword,
-                isActive: editPayload.isActive,
-                auditDetails: 'Sensitive credential modification via System Administrator Control (Active sessions invalidated)'
-            });
-
-            toast.success(`Access protocols updated for ${targetUser.fullName}. Active sessions invalidated.`);
-            setIsEditing(false);
-            setTargetUser(null);
-            setVerifiedCurrentPassword('');
-            fetchUsers();
-        } catch (err: any) {
-            const errMsg = err?.message || String(err);
-            if (errMsg.includes('DUPLICATE_EMAIL') || errMsg.includes('users_email_key') || errMsg.includes('unique constraint')) {
-                toast.error(`Override aborted: Email '${editPayload.email}' is already assigned to another account.`);
-            } else if (errMsg.includes('ADMIN_LOCKOUT_PREVENTED')) {
-                toast.error('Lockout Prevention: Cannot deactivate the last active System Administrator.');
-            } else {
-                toast.error(errMsg || 'Override execution failed. Database rejected modification.');
-            }
-        }
-    };
-
-    const handleAddOfficer = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!currentUser) return;
-
-        if (addPayload.role === UserRole.COURSE_OFFICER && isCapReached) {
-            toast.error('Course Officer cap (5/5) reached. Use the Lifecycle Engine for Change of Command.');
-            return;
-        }
-
-        setIsAdding(true);
-        try {
-            await dbService.registerOfficer(currentUser.id, {
-                email: addPayload.email,
-                password: addPayload.password,
-                username: addPayload.username,
-                fullName: addPayload.fullName,
-                role: addPayload.role,
-                designation:
-                    addPayload.role === UserRole.COMMANDANT
-                        ? addPayload.designation || 'Director Field Studies'
-                        : addPayload.role === UserRole.MEDICAL_OFFICER
-                        ? addPayload.designation || 'Regimental Medical Officer'
-                        : 'Course Officer',
-                courseNumber:
-                    addPayload.role === UserRole.COURSE_OFFICER && addPayload.courseNumber
-                        ? Number(addPayload.courseNumber)
-                        : undefined
-            });
-            toast.success(
-                addPayload.role === UserRole.COMMANDANT
-                    ? `Senior Officer (${addPayload.designation || 'Executive'}) provisioned.`
-                    : addPayload.role === UserRole.MEDICAL_OFFICER
-                    ? `Medical Officer (${addPayload.designation || 'RMO'}) provisioned.`
-                    : 'Course Officer successfully provisioned.'
-            );
-            setIsAddModalOpen(false);
-            setAddPayload({
-                fullName: '',
-                username: '',
-                email: '',
-                password: '',
-                role: UserRole.COMMANDANT,
-                designation: 'Director Field Studies',
-                courseNumber: ''
-            });
-            fetchUsers();
-        } catch (err: any) {
-            toast.error(err.message || 'Failed to register officer.');
-        } finally {
-            setIsAdding(false);
-        }
-    };
-
-    // Filter Logic
-    const filteredUsers = users.filter(u => {
-        const query = searchQuery.toLowerCase();
-        return (
-            u.fullName?.toLowerCase().includes(query) ||
-            u.username?.toLowerCase().includes(query) ||
-            u.courseName?.toLowerCase().includes(query) ||
-            u.designation?.toLowerCase().includes(query) ||
-            u.role.toLowerCase().includes(query)
-        );
+  const handleRowClick = (user: User) => {
+    setTargetUser(user);
+    setVerifiedCurrentPassword('');
+    setShowEditPassword(false);
+    setEditPayload({
+      fullName: user.fullName || '',
+      username: sanitizeUsername(user.username || ''),
+      email: user.email || '',
+      courseNumber: user.courseNumber ? String(user.courseNumber) : '12',
+      designation: user.designation || '',
+      password: '',
+      auditReason: '',
+      isActive: user.isActive !== false
     });
+    setIsOverrideModalOpen(true);
+  };
 
-    const activeRoster = filteredUsers.filter(
-        u => u.role === UserRole.ADMIN || u.role === UserRole.COMMANDANT || u.role === UserRole.MEDICAL_OFFICER || u.isActive
-    );
-    const inactiveRegistry = filteredUsers.filter(
-        u => u.role === UserRole.COURSE_OFFICER && !u.isActive
-    );
+  const handleAuthorize = async (password: string) => {
+    if (!currentUser) return;
+    const isValid = await dbService.verifyCommandantAccess(currentUser.id, password);
+    if (isValid) {
+      setVerifiedCurrentPassword(password);
+      setIsOverrideModalOpen(false);
+      setIsManageOpen(true);
+    } else {
+      toast.error('Invalid administrator password.');
+    }
+  };
 
-    const activeOfficerCount = activeRoster.filter(u => u.role === UserRole.COURSE_OFFICER).length;
-    const isCapReached = activeOfficerCount >= 5;
+  const isTargetSoleActiveAdmin =
+    targetUser?.role === UserRole.ADMIN &&
+    targetUser?.isActive !== false &&
+    activeAdminCount <= 1;
 
-    if (isLoading) return (
-        <div className="py-20 flex flex-col items-center gap-4 text-slate-500">
-            <div className="w-10 h-10 border-2 border-slate-700 border-t-white rounded-full animate-spin" />
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">Decrypting Security Roster...</p>
-        </div>
-    );
+  const handleSaveManage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetUser || !currentUser || !verifiedCurrentPassword) return;
 
-    const renderTable = (roster: User[]) => (
-        <>
-            <div className="hidden md:block w-full overflow-x-auto rounded-xl border border-slate-800/60 bg-slate-950/20 scrollbar-thin">
-                <table className="w-full text-left">
-                    <thead className="bg-[#0a0a0a] text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-white/5">
-                        <tr>
-                            <th className="p-6">Officer Personnel</th>
-                            <th className="p-6">Command Level</th>
-                            <th className="p-6">Digital Credentials</th>
-                            <th className="p-6 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                        {roster.map((user) => (
-                            <tr key={user.id} className="hover:bg-white/[0.02] transition-colors group">
-                                <td className="p-6">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 rounded-lg bg-slate-900 border border-white/10 flex items-center justify-center text-slate-500 font-black">
-                                            {user.fullName?.charAt(0) || user.username?.charAt(0).toUpperCase() || '?'}
-                                        </div>
-                                        <div>
-                                            <p className="text-xs font-black text-white uppercase tracking-tight">{user.fullName || 'Unknown Officer'}</p>
-                                            <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">{user.username}</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="p-6">
-                                    <span className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest border ${
-                                        user.role === UserRole.ADMIN
-                                        ? 'bg-amber-900/20 text-amber-400 border-amber-500/30'
-                                        : user.role === UserRole.COMMANDANT 
-                                        ? 'bg-blue-900/20 text-blue-400 border-blue-500/30' 
-                                        : user.role === UserRole.MEDICAL_OFFICER
-                                        ? 'bg-rose-900/20 text-rose-400 border-rose-500/30'
-                                        : 'bg-emerald-900/20 text-emerald-400 border-emerald-500/30'
-                                    }`}>
-                                        {user.role === UserRole.ADMIN
-                                            ? 'System Admin'
-                                            : user.role === UserRole.COMMANDANT
-                                            ? user.designation || 'Commandant'
-                                            : user.role === UserRole.MEDICAL_OFFICER
-                                            ? user.designation || 'Medical Officer'
-                                            : 'Course Officer'}
-                                    </span>
-                                    <p className="text-[10px] text-slate-500 font-bold mt-2 uppercase">
-                                        {user.courseName || 'Academy HQ'}
-                                    </p>
-                                </td>
-                                <td className="p-6">
-                                    <div className="space-y-3">
-                                        <div className="flex items-center gap-2">
-                                            <Mail size={12} className="text-slate-600" />
-                                            <span className="text-[10px] font-mono text-slate-400">{user.email || 'NO_EMAIL_ASSIGNED'}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-4 p-2 bg-black rounded-lg border border-white/5 group-hover:border-white/10 transition-colors">
-                                            <div className="flex items-center gap-2">
-                                                <Key size={12} className="text-slate-600" />
-                                                <span className="text-xs font-mono text-white tracking-widest">
-                                                    {revealPasswords[user.id] ? user.password : '••••••••'}
-                                                </span>
-                                            </div>
-                                            <button 
-                                                onClick={() => toggleReveal(user.id)}
-                                                className="text-slate-600 hover:text-white transition-colors"
-                                            >
-                                                {revealPasswords[user.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="p-6 text-right">
-                                    <button 
-                                        onClick={() => handleInitiateOverride(user)}
-                                        className="px-4 py-2 bg-transparent hover:bg-red-500/10 border border-white/10 hover:border-red-500/40 text-slate-500 hover:text-red-500 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all"
-                                    >
-                                        Security Override
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                        {roster.length === 0 && (
-                            <tr>
-                                <td colSpan={4} className="p-8 text-center text-slate-500 text-xs font-black uppercase tracking-widest">
-                                    No records found matching criteria
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
+    if (!editPayload.username.trim()) {
+      toast.error('Username is required.');
+      return;
+    }
+    if (isEditUsernameTaken) {
+      toast.error('Username is already taken.');
+      return;
+    }
+    if (isTargetSoleActiveAdmin && !editPayload.isActive) {
+      toast.error('Cannot suspend the last active System Administrator.');
+      return;
+    }
+    if (editPayload.password.trim() && !editPayload.auditReason.trim()) {
+      toast.error('Please enter a reason for resetting this password.');
+      return;
+    }
 
-            <div className="grid grid-cols-1 gap-4 md:hidden p-4">
-                {roster.map((user) => (
-                    <div key={user.id} className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md p-4 rounded-xl space-y-4 shadow-lg">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-slate-800 text-slate-300 font-bold border border-slate-700/60 flex items-center justify-center text-sm uppercase">
-                                    {user.fullName?.charAt(0) || user.username?.charAt(0).toUpperCase() || '?'}
-                                </div>
-                                <div>
-                                    <p className="text-xs font-black text-white uppercase tracking-tight">{user.fullName || 'Unknown Officer'}</p>
-                                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">{user.username}</p>
-                                </div>
-                            </div>
-                            <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border shrink-0 ${
-                                user.role === UserRole.ADMIN
-                                ? 'bg-amber-900/20 text-amber-400 border-amber-500/30'
-                                : user.role === UserRole.COMMANDANT 
-                                ? 'bg-blue-900/20 text-blue-400 border-blue-500/30' 
-                                : user.role === UserRole.MEDICAL_OFFICER
-                                ? 'bg-rose-900/20 text-rose-400 border-rose-500/30'
-                                : 'bg-emerald-900/20 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                                {user.role === UserRole.ADMIN
-                                    ? 'Admin'
-                                    : user.role === UserRole.COMMANDANT
-                                    ? user.designation || 'Cmdt'
-                                    : user.role === UserRole.MEDICAL_OFFICER
-                                    ? user.designation || 'Medical'
-                                    : 'Officer'}
-                            </span>
-                        </div>
-                        <div className="space-y-2.5 text-xs">
-                            <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                                <span className="text-slate-500 text-[9px] font-black uppercase">Authority</span>
-                                <span className="text-slate-300 font-bold uppercase">
-                                    {user.designation
-                                        ? `${user.designation} • ${user.courseName || 'Academy HQ'}`
-                                        : user.courseName || 'Academy HQ'}
-                                </span>
-                            </div>
-                            <div className="flex justify-between items-center border-b border-white/5 pb-2 gap-2">
-                                <span className="text-slate-500 text-[9px] font-black uppercase shrink-0">Email</span>
-                                <span className="text-slate-300 font-mono truncate max-w-[180px] text-right">{user.email || 'NO_EMAIL'}</span>
-                            </div>
-                            <div className="flex justify-between items-center gap-2">
-                                <span className="text-slate-500 text-[9px] font-black uppercase shrink-0">Password</span>
-                                <div className="flex items-center gap-2 bg-black px-2 py-1 rounded border border-white/5">
-                                    <span className="text-xs font-mono text-white tracking-widest">
-                                        {revealPasswords[user.id] ? user.password : '••••••••'}
-                                    </span>
-                                    <button 
-                                        onClick={() => toggleReveal(user.id)}
-                                        className="text-slate-500 hover:text-white transition-colors"
-                                    >
-                                        {revealPasswords[user.id] ? <EyeOff size={12} /> : <Eye size={12} />}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="pt-2">
-                            <button 
-                                onClick={() => handleInitiateOverride(user)}
-                                className="w-full py-2.5 px-4 bg-slate-800/80 hover:bg-slate-700/60 text-slate-200 border border-slate-700/50 text-[10px] font-black tracking-widest uppercase rounded-lg transition-all text-center"
-                            >
-                                Security Override
-                            </button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </>
-    );
+    setIsSavingEdit(true);
+    try {
+      await updateUserCredentials({
+        adminId: String(currentUser.id),
+        targetUserId: String(targetUser.id),
+        newEmail: editPayload.email.trim(),
+        newCourseAssignment:
+          targetUser.role === UserRole.COURSE_OFFICER ? editPayload.courseNumber : '',
+        newDesignation: editPayload.designation.trim(),
+        newPassword: editPayload.password.trim() || undefined,
+        currentPassword: verifiedCurrentPassword,
+        isActive: editPayload.isActive,
+        auditDetails:
+          editPayload.auditReason.trim() || 'Updated officer profile in Users & Access'
+      });
 
-    return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500 p-3 md:p-6 mx-0 md:mx-2">
-            <SecurityOverrideModal 
-                isOpen={isOverrideModalOpen}
-                onClose={() => setIsOverrideModalOpen(false)}
-                onAuthorize={handleAuthorize}
-                targetName={targetUser?.fullName || ''}
+      // Update full_name & username cleanly
+      await supabase
+        .from('users')
+        .update({
+          full_name: editPayload.fullName.trim(),
+          username: editPayload.username.trim().toLowerCase()
+        })
+        .eq('id', targetUser.id);
+
+      toast.success(`Updated ${editPayload.fullName.trim()}`);
+      setIsManageOpen(false);
+      setTargetUser(null);
+      setVerifiedCurrentPassword('');
+      fetchUsers();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update officer.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const roleAvatarColor = (role: UserRole) => {
+    if (role === UserRole.MEDICAL_OFFICER) return 'bg-rose-50 text-rose-700 border-rose-200';
+    if (role === UserRole.COURSE_OFFICER) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    return 'bg-blue-50 text-blue-800 border-blue-200';
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* ── Top Search + Add Officer Row ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-3.5 sm:p-4 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex-1 flex items-center">
+            <Search size={16} className="absolute left-3.5 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search officers..."
+              className="w-full min-h-[44px] pl-10 pr-9 py-2 bg-slate-100/80 focus:bg-white border border-transparent focus:border-slate-300 rounded-full text-base sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all"
             />
-
-            {isAddModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-                    <div className="w-full max-w-lg bg-slate-900/95 border border-slate-800 backdrop-blur-xl rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-center justify-between gap-3 mb-6 border-b border-white/5 pb-4">
-                            <div className="flex items-center gap-3">
-                                <UserPlus className="text-blue-500" size={24} />
-                                <div>
-                                    <h3 className="text-sm font-black text-white uppercase tracking-widest">
-                                        Provision Officer Login Profile
-                                    </h3>
-                                    <p className="text-[10px] text-slate-400 font-mono uppercase mt-0.5">
-                                        Senior Executive (Commandant Portal) or Course Officer
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setIsAddModalOpen(false)}
-                                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleAddOfficer} className="space-y-4">
-                            {/* Role Selector */}
-                            <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-2">
-                                    Portal Authority Role
-                                </label>
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            setAddPayload(prev => ({
-                                                ...prev,
-                                                role: UserRole.COMMANDANT,
-                                                designation: prev.designation || 'Director Field Studies',
-                                                courseNumber: ''
-                                            }))
-                                        }
-                                        className={`p-3 rounded-xl border text-left transition-all ${
-                                            addPayload.role === UserRole.COMMANDANT
-                                                ? 'bg-blue-900/40 border-blue-500 text-white'
-                                                : 'bg-black/40 border-white/10 text-slate-400 hover:border-white/20'
-                                        }`}
-                                    >
-                                        <p className="text-[11px] font-black uppercase tracking-wider">
-                                            Senior Command
-                                        </p>
-                                        <p className="text-[9px] text-slate-400 mt-0.5">
-                                            Parades, Remarks & Audit
-                                        </p>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            setAddPayload(prev => ({
-                                                ...prev,
-                                                role: UserRole.COURSE_OFFICER,
-                                                designation: 'Course Officer'
-                                            }))
-                                        }
-                                        className={`p-3 rounded-xl border text-left transition-all ${
-                                            addPayload.role === UserRole.COURSE_OFFICER
-                                                ? 'bg-emerald-900/40 border-emerald-500 text-white'
-                                                : 'bg-black/40 border-white/10 text-slate-400 hover:border-white/20'
-                                        }`}
-                                    >
-                                        <p className="text-[11px] font-black uppercase tracking-wider">
-                                            Course Officer {isCapReached ? '(5/5)' : ''}
-                                        </p>
-                                        <p className="text-[9px] text-slate-400 mt-0.5">
-                                            RC Parade Submissions
-                                        </p>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            setAddPayload(prev => ({
-                                                ...prev,
-                                                role: UserRole.MEDICAL_OFFICER,
-                                                designation: 'Regimental Medical Officer',
-                                                courseNumber: ''
-                                            }))
-                                        }
-                                        className={`p-3 rounded-xl border text-left transition-all ${
-                                            addPayload.role === UserRole.MEDICAL_OFFICER
-                                                ? 'bg-rose-900/40 border-rose-500 text-white'
-                                                : 'bg-black/40 border-white/10 text-slate-400 hover:border-white/20'
-                                        }`}
-                                    >
-                                        <p className="text-[11px] font-black uppercase tracking-wider">
-                                            Medical Officer
-                                        </p>
-                                        <p className="text-[9px] text-slate-400 mt-0.5">
-                                            Sickbay Triage & Verify
-                                        </p>
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Designation Field & Presets */}
-                            {addPayload.role === UserRole.COMMANDANT ? (
-                                <div className="space-y-2 p-3.5 rounded-xl bg-blue-950/30 border border-blue-500/20">
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-blue-300">
-                                        Official Designation / Office Title (Non-Overlapping Remark Channel)
-                                    </label>
-                                    <div className="flex flex-wrap gap-1.5 mb-2">
-                                        {SENIOR_OFFICER_PRESETS.map(preset => (
-                                            <button
-                                                key={preset}
-                                                type="button"
-                                                onClick={() =>
-                                                    setAddPayload(prev => ({ ...prev, designation: preset }))
-                                                }
-                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
-                                                    addPayload.designation === preset
-                                                        ? 'bg-blue-600 text-white border-blue-500'
-                                                        : 'bg-black/50 text-slate-300 border-white/10 hover:border-blue-400/50'
-                                                }`}
-                                            >
-                                                {preset}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <input
-                                        required
-                                        type="text"
-                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
-                                        value={addPayload.designation}
-                                        onChange={e => setAddPayload({ ...addPayload, designation: e.target.value })}
-                                        placeholder="e.g. Director Field Studies"
-                                    />
-                                    <p className="text-[10px] text-slate-400">
-                                        Stored in dedicated <code className="text-blue-300">designation</code> column; <code className="text-blue-300">course_name</code> remains strictly <code className="text-blue-300">Academy HQ</code>.
-                                    </p>
-                                </div>
-                            ) : addPayload.role === UserRole.MEDICAL_OFFICER ? (
-                                <div className="space-y-2 p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/20">
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-rose-300">
-                                        Medical Corps Designation / Title (Sickbay Duty Channel)
-                                    </label>
-                                    <div className="flex flex-wrap gap-1.5 mb-2">
-                                        {MEDICAL_OFFICER_PRESETS.map(preset => (
-                                            <button
-                                                key={preset}
-                                                type="button"
-                                                onClick={() =>
-                                                    setAddPayload(prev => ({ ...prev, designation: preset }))
-                                                }
-                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
-                                                    addPayload.designation === preset
-                                                        ? 'bg-rose-600 text-white border-rose-500'
-                                                        : 'bg-black/50 text-slate-300 border-white/10 hover:border-rose-400/50'
-                                                }`}
-                                            >
-                                                {preset}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <input
-                                        required
-                                        type="text"
-                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:border-rose-500/50 outline-none transition-all"
-                                        value={addPayload.designation}
-                                        onChange={e => setAddPayload({ ...addPayload, designation: e.target.value })}
-                                        placeholder="e.g. Regimental Medical Officer"
-                                    />
-                                    <p className="text-[10px] text-slate-400">
-                                        Assigned to Academy Clinic & Sickbay Triage (<code className="text-rose-300">/medical</code>); <code className="text-rose-300">course_name</code> remains <code className="text-rose-300">Academy HQ</code>.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div>
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
-                                        Assigned Regular Course Number (Optional)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
-                                        value={addPayload.courseNumber}
-                                        onChange={e => setAddPayload({ ...addPayload, courseNumber: e.target.value })}
-                                        placeholder="e.g. 12"
-                                    />
-                                </div>
-                            )}
-
-                            <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
-                                    Full Name & Rank
-                                </label>
-                                <input
-                                    required
-                                    type="text"
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
-                                    value={addPayload.fullName}
-                                    onChange={e => setAddPayload({ ...addPayload, fullName: e.target.value })}
-                                    placeholder={
-                                        addPayload.role === UserRole.COMMANDANT
-                                            ? 'e.g. CP Ibrahim Musa (Director Field Studies)'
-                                            : 'e.g. DSP John Doe'
-                                    }
-                                />
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
-                                        Username
-                                    </label>
-                                    <input
-                                        required
-                                        type="text"
-                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
-                                        value={addPayload.username}
-                                        onChange={e => setAddPayload({ ...addPayload, username: e.target.value })}
-                                        placeholder="e.g. dir_field_studies"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
-                                        Login Email
-                                    </label>
-                                    <input
-                                        required
-                                        type="email"
-                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none transition-all"
-                                        value={addPayload.email}
-                                        onChange={e => setAddPayload({ ...addPayload, email: e.target.value })}
-                                        placeholder="dfs@polac.edu.ng"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5">
-                                    Initial Password
-                                </label>
-                                <input
-                                    required
-                                    type="text"
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500/50 outline-none transition-all"
-                                    value={addPayload.password}
-                                    onChange={e => setAddPayload({ ...addPayload, password: e.target.value })}
-                                    placeholder="Secure initial password"
-                                />
-                            </div>
-                            <div className="flex gap-3 pt-4">
-                                <button
-                                    disabled={isAdding || (addPayload.role === UserRole.COURSE_OFFICER && isCapReached)}
-                                    type="submit"
-                                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl text-xs uppercase tracking-widest transition-all disabled:opacity-50"
-                                >
-                                    {isAdding
-                                        ? 'Provisioning...'
-                                        : addPayload.role === UserRole.COMMANDANT
-                                        ? `Provision ${addPayload.designation || 'Senior Officer'}`
-                                        : addPayload.role === UserRole.MEDICAL_OFFICER
-                                        ? `Provision ${addPayload.designation || 'Medical Officer'}`
-                                        : 'Provision Course Officer'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAddModalOpen(false)}
-                                    className="px-6 bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 font-black py-3 rounded-xl text-xs uppercase tracking-widest transition-all"
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="absolute right-2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-full"
+              >
+                <X size={15} />
+              </button>
             )}
+          </div>
 
-            {/* Self-Management Card (System Administrator) */}
-            <div className="bg-[#050505] p-6 rounded-2xl border border-white/10 shadow-2xl relative overflow-hidden group">
-                <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-6">
-                    <div className="flex items-center gap-6 text-center sm:text-left">
-                        <div className="w-16 h-16 rounded-2xl bg-amber-900/40 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                            <ShieldCheck size={32} />
-                        </div>
-                        <div>
-                            <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                                System Administrator Authority
-                            </span>
-                            <h3 className="text-xl font-black text-white mt-1 uppercase tracking-tight">
-                                {currentUser?.fullName || 'SYSTEM ADMINISTRATOR'}
-                            </h3>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">
-                                {currentUser?.designation || 'SYSTEM ADMINISTRATOR'} • {currentUser?.email || 'admin@gmail.com'}
-                            </p>
-                        </div>
-                    </div>
-                    
-                    <button 
-                        onClick={() => {
-                            const self =
-                                users.find(u => String(u.id) === String(currentUser?.id)) ||
-                                users.find(u => u.role === UserRole.ADMIN) ||
-                                (currentUser ? { ...currentUser } : null);
-                            if (self) handleInitiateOverride(self);
-                            else toast.error('Security profile not found in active registry.');
-                        }}
-                        className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-black text-[10px] uppercase tracking-widest transition-all hover:translate-y-[-2px]"
-                    >
-                        Update Admin Credentials
-                    </button>
-                </div>
-                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl group-hover:bg-blue-600/10 transition-colors duration-700" />
-            </div>
-
-            {/* Credential Override Form Modal Overlay */}
-            {isEditing && targetUser && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-                    <div className="w-full max-w-2xl bg-[#0a0a0a] rounded-2xl border border-red-500/30 shadow-[0_0_50px_-12px_rgba(239,68,68,0.3)] overflow-hidden animate-in zoom-in-95 duration-200">
-                        {/* Tactical Modal Header */}
-                        <div className="bg-red-950/20 p-6 border-b border-red-500/10 flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500">
-                                    <UserCog size={24} />
-                                </div>
-                                <div>
-                                    <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Live Protocol Injection</h3>
-                                    <p className="text-[10px] text-red-400 font-mono font-bold uppercase tracking-widest mt-0.5">Target: {targetUser.fullName}</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setIsEditing(false)}
-                                className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        {/* Modal Body */}
-                        <div className="p-6 sm:p-8 space-y-6 max-h-[75vh] overflow-y-auto">
-                            {String(targetUser.id) === String(currentUser?.id) && (
-                                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
-                                    <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
-                                    <p className="text-xs text-red-400 font-bold leading-relaxed uppercase tracking-wide">
-                                        WARNING: You are modifying your own administrative credentials. Ensure the new password matches the confirmation field, or you will be permanently locked out.
-                                    </p>
-                                </div>
-                            )}
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-2">
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Secure Email</label>
-                                    <div className="relative">
-                                        <Mail size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                                        <input 
-                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                            value={editPayload.email}
-                                            onChange={e => setEditPayload({...editPayload, email: e.target.value})}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Auth Token (Password)</label>
-                                    <div className="relative">
-                                        <Key size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                                        <input 
-                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white font-mono focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                            value={editPayload.password}
-                                            onChange={e => setEditPayload({...editPayload, password: e.target.value})}
-                                        />
-                                    </div>
-                                </div>
-
-                                {String(targetUser.id) === String(currentUser?.id) && (
-                                    <div className="space-y-2 md:col-span-2">
-                                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">Confirm Auth Token</label>
-                                        <div className="relative">
-                                            <Key size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <input 
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-sm text-white font-mono focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                                value={editPayload.confirmPassword}
-                                                onChange={e => setEditPayload({...editPayload, confirmPassword: e.target.value})}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-
-                                {targetUser.role === UserRole.COURSE_OFFICER ? (
-                                    <div className="md:col-span-2 space-y-2">
-                                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">
-                                            Department Authority (Regular Course Number)
-                                        </label>
-                                        <input 
-                                            type="number"
-                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white uppercase font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                            value={editPayload.courseNumber}
-                                            onChange={e => setEditPayload({...editPayload, courseNumber: e.target.value})}
-                                            placeholder="e.g. 11"
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="md:col-span-2 space-y-2">
-                                        <label className="block text-[10px] font-mono font-bold tracking-widest text-slate-400 mb-1.5 ml-1">
-                                            Official Designation / Office Title
-                                        </label>
-                                        <input 
-                                            type="text"
-                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm text-white font-bold focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none transition-all"
-                                            value={editPayload.designation}
-                                            onChange={e => setEditPayload({...editPayload, designation: e.target.value})}
-                                            placeholder="e.g. Director Field Studies"
-                                        />
-                                    </div>
-                                )}
-
-                                {/* Account Active Status Toggle with Sole-Admin Lockout Protection */}
-                                <div className="md:col-span-2 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4">
-                                    <div>
-                                        <p className="text-xs font-black text-white uppercase tracking-wider">
-                                            Account Active Status & Session Validity
-                                        </p>
-                                        <p className="text-[10px] text-slate-400 mt-0.5">
-                                            {isTargetSoleActiveAdmin
-                                                ? 'Lockout Guard Active: The sole active System Administrator account cannot be deactivated.'
-                                                : 'Saving changes automatically increments session_version and terminates any active sessions for this user.'}
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        disabled={isTargetSoleActiveAdmin}
-                                        onClick={() =>
-                                            !isTargetSoleActiveAdmin &&
-                                            setEditPayload(prev => ({ ...prev, isActive: !prev.isActive }))
-                                        }
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all shrink-0 ${
-                                            isTargetSoleActiveAdmin
-                                                ? 'bg-amber-950/40 text-amber-400 border-amber-500/30 cursor-not-allowed'
-                                                : editPayload.isActive
-                                                ? 'bg-emerald-950/50 text-emerald-400 border-emerald-500/40'
-                                                : 'bg-red-950/50 text-red-400 border-red-500/40'
-                                        }`}
-                                    >
-                                        {editPayload.isActive ? 'Active' : 'Deactivated'}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Modal Action Footer */}
-                        <div className="p-6 bg-black/60 border-t border-white/5 flex gap-4">
-                            <button 
-                                onClick={handleSaveOverride}
-                                className="flex-1 bg-white text-black font-black py-4 rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-3"
-                            >
-                                <Save size={18} />
-                                Deploy Protocols
-                            </button>
-                            <button 
-                                onClick={() => setIsEditing(false)}
-                                className="px-8 bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 hover:text-white font-black py-4 rounded-xl text-xs uppercase tracking-widest transition-all"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Strategic Personnel Registry */}
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-6 mt-8">
-                <div className="relative w-full md:w-96">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                    <input 
-                        type="text"
-                        placeholder="Search officers, ID, or assignment..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-white border border-slate-700 text-slate-900 pl-11 pr-4 py-3 rounded-xl backdrop-blur-md focus:ring-2 focus:ring-blue-500/50 outline-none placeholder:text-slate-500 text-sm"
-                    />
-                </div>
-                <div className="group relative w-full md:w-auto">
-                    <button 
-                        onClick={() => setIsAddModalOpen(true)}
-                        className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all border bg-blue-600 hover:bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-900/20"
-                    >
-                        <Plus size={16} />
-                        Provision Officer Profile
-                    </button>
-                </div>
-            </div>
-
-            {/* Active Command Roster */}
-            <div className="bg-[#050505] rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
-                <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <Shield size={18} className="text-blue-500" />
-                        <h3 className="text-[11px] font-black text-white uppercase tracking-[0.2em]">Active Command Roster</h3>
-                    </div>
-                    <span className="text-[10px] font-mono text-blue-500 uppercase tracking-widest bg-blue-500/10 px-2 py-1 rounded">{activeRoster.length} Active Profiles</span>
-                </div>
-                {renderTable(activeRoster)}
-            </div>
-
-            {/* Archived Credentials */}
-            <details className="group bg-[#050505] rounded-2xl border border-white/10 overflow-hidden shadow-xl mt-6">
-                <summary className="p-6 bg-slate-900/30 hover:bg-slate-900/50 cursor-pointer flex items-center justify-between transition-colors list-none outline-none">
-                    <div className="flex items-center gap-3">
-                        <UserCog size={18} className="text-slate-500" />
-                        <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Archived / Inactive Registry</h3>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">{inactiveRegistry.length} Inactive Profiles</span>
-                        <ChevronDown size={16} className="text-slate-500 group-open:rotate-180 transition-transform" />
-                    </div>
-                </summary>
-                <div className="border-t border-white/5">
-                    {renderTable(inactiveRegistry)}
-                </div>
-            </details>
-
-            {/* Tactical Backdrop */}
-            <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl flex items-center gap-3">
-                <AlertTriangle size={14} className="text-emerald-500 shrink-0" />
-                <p className="text-[9px] text-emerald-500/80 leading-relaxed font-bold uppercase tracking-tight">
-                    Encrypted Core Link Active: Modifying any credential here initiates an instant global override of user access rights.
-                </p>
-            </div>
+          <button
+            type="button"
+            onClick={handleOpenAdd}
+            className="min-h-[44px] px-4 py-2 rounded-full bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0 shadow-2xs transition-colors"
+          >
+            <UserPlus size={15} />
+            <span>Add Officer</span>
+          </button>
         </div>
-    );
+
+        {/* Role Filter Pills */}
+        <div
+          data-no-page-swipe="true"
+          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar"
+        >
+          {(
+            [
+              { key: 'all', label: 'All' },
+              { key: 'course_officer', label: `Course Officers (${activeCourseOfficersCount}/5)` },
+              { key: 'commandant', label: 'Senior Officer' },
+              { key: 'medical_officer', label: 'Medical' }
+            ] as const
+          ).map(pill => {
+            const isActive = roleFilter === pill.key;
+            return (
+              <button
+                key={pill.key}
+                type="button"
+                onClick={() => setRoleFilter(pill.key)}
+                className={`min-h-[38px] px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                  isActive
+                    ? 'bg-slate-900 text-white shadow-2xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
+                }`}
+              >
+                {pill.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── iOS Contacts-Style Grouped Roster ── */}
+      {isLoading ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 flex flex-col items-center justify-center gap-3">
+          <div className="w-8 h-8 border-3 border-blue-700 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-slate-500 font-medium">Loading officers...</p>
+        </div>
+      ) : filteredUsers.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-2">
+          <p className="text-sm font-bold text-slate-800">No officers found</p>
+          <p className="text-xs text-slate-500">
+            Try a different search term or tap Add Officer to create an account.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden divide-y divide-slate-100">
+          {filteredUsers.map(u => {
+            const isActive = u.isActive !== false;
+            return (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => handleRowClick(u)}
+                className="w-full min-h-[64px] px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50 active:bg-slate-100 text-left transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-full border flex items-center justify-center font-mono text-xs font-bold shrink-0 ${roleAvatarColor(
+                      u.role
+                    )}`}
+                  >
+                    {getInitials(u.fullName || u.username)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900 truncate">
+                      {u.fullName || u.username}
+                    </p>
+                    <p className="text-xs text-slate-500 truncate mt-0.5">
+                      {getRoleSummary(u)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
+                      isActive
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}
+                  >
+                    {isActive ? 'Active' : 'Suspended'}
+                  </span>
+                  <ChevronRight size={16} className="text-slate-400" />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Security Verification Modal ── */}
+      <SecurityOverrideModal
+        isOpen={isOverrideModalOpen}
+        onClose={() => setIsOverrideModalOpen(false)}
+        onAuthorize={handleAuthorize}
+        targetName={targetUser?.fullName || ''}
+      />
+
+      {/* ── Instagram-Style Add Officer Bottom Sheet ── */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {isAddSheetOpen && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                data-drawer-open="true"
+                className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center"
+              >
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => !isAdding && setIsAddSheetOpen(false)}
+                  className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs"
+                />
+
+                <motion.form
+                  onSubmit={handleAddOfficer}
+                  autoComplete="off"
+                  initial={shouldReduceMotion ? { opacity: 0 } : { y: '100%', opacity: 0.9 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { y: '100%', opacity: 0.9 }}
+                  transition={
+                    shouldReduceMotion
+                      ? { duration: 0.12 }
+                      : { type: 'spring', stiffness: 360, damping: 32 }
+                  }
+                  className="relative z-10 w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border-t sm:border border-slate-200 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] max-h-[92vh] overflow-y-auto space-y-4"
+                >
+                  <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto -mt-1 sm:hidden" />
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Add Officer</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Create a login account and assign their role
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddSheetOpen(false)}
+                      aria-label="Close"
+                      className="min-w-[44px] min-h-[44px] -mr-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* 3-Way Segmented Role Control */}
+                  <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
+                    {[
+                      { role: UserRole.COURSE_OFFICER, label: 'Course Officer' },
+                      { role: UserRole.COMMANDANT, label: 'Senior Officer' },
+                      { role: UserRole.MEDICAL_OFFICER, label: 'Medical Officer' }
+                    ].map(opt => {
+                      const active = addPayload.role === opt.role;
+                      return (
+                        <button
+                          key={opt.role}
+                          type="button"
+                          onClick={() =>
+                            setAddPayload(prev => ({
+                              ...prev,
+                              role: opt.role,
+                              designation:
+                                opt.role === UserRole.COMMANDANT
+                                  ? 'Director Field Studies'
+                                  : opt.role === UserRole.MEDICAL_OFFICER
+                                  ? 'Regimental Medical Officer'
+                                  : 'Course Officer'
+                            }))
+                          }
+                          className={`min-h-[40px] px-1.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                            active
+                              ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 1. Role Assignment */}
+                  {addPayload.role === UserRole.COURSE_OFFICER ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-slate-700">
+                          Regular Course (RC)
+                        </label>
+                        {isCapReached && (
+                          <span className="text-[11px] font-semibold text-rose-600">
+                            5/5 slots full
+                          </span>
+                        )}
+                      </div>
+                      <select
+                        value={addPayload.courseNumber}
+                        onChange={e =>
+                          setAddPayload(prev => ({ ...prev, courseNumber: e.target.value }))
+                        }
+                        className="w-full min-h-[44px] bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm font-semibold text-slate-900 outline-none"
+                      >
+                        {RC_OPTIONS.map(rc => (
+                          <option key={rc} value={String(rc)}>
+                            Regular Course {rc} (RC {rc})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Title
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(addPayload.role === UserRole.MEDICAL_OFFICER
+                          ? MEDICAL_OFFICER_PRESETS
+                          : SENIOR_OFFICER_PRESETS
+                        ).map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() =>
+                              setAddPayload(prev => ({ ...prev, designation: preset }))
+                            }
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                              addPayload.designation === preset
+                                ? 'bg-blue-900 text-white border-blue-900'
+                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={addPayload.designation}
+                        onChange={e =>
+                          setAddPayload(prev => ({ ...prev, designation: e.target.value }))
+                        }
+                        placeholder="Enter title..."
+                        className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm text-slate-900 outline-none"
+                      />
+                    </div>
+                  )}
+
+                  {/* 2. Full Name */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={addPayload.fullName}
+                      onChange={e =>
+                        setAddPayload(prev => ({ ...prev, fullName: e.target.value }))
+                      }
+                      placeholder="e.g. DSP Musa Ibrahim"
+                      className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none"
+                    />
+                  </div>
+
+                  {/* 3. Username (@handle) */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Username
+                    </label>
+                    <div
+                      className={`flex items-center bg-slate-50 focus-within:bg-white border rounded-xl px-3.5 min-h-[44px] transition-colors ${
+                        isAddUsernameTaken
+                          ? 'border-rose-400 bg-rose-50/40'
+                          : 'border-slate-200 focus-within:border-blue-600'
+                      }`}
+                    >
+                      <span className="text-slate-400 font-semibold text-base sm:text-sm mr-1">
+                        @
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        value={addPayload.username}
+                        onChange={e =>
+                          setAddPayload(prev => ({
+                            ...prev,
+                            username: sanitizeUsername(e.target.value)
+                          }))
+                        }
+                        placeholder="dsp.musa"
+                        className="w-full bg-transparent py-2 text-base sm:text-sm font-mono text-slate-900 placeholder:text-slate-400 outline-none"
+                      />
+                    </div>
+                    {isAddUsernameTaken && (
+                      <p className="text-xs font-semibold text-rose-600 mt-1">
+                        Username is already taken.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 4. Email Address */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      name="new-officer-email"
+                      autoComplete="off"
+                      value={addPayload.email}
+                      onChange={e =>
+                        setAddPayload(prev => ({ ...prev, email: e.target.value }))
+                      }
+                      className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm text-slate-900 outline-none"
+                    />
+                  </div>
+
+                  {/* 5. Password */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Password
+                    </label>
+                    <div className="relative flex items-center">
+                      <input
+                        type={showAddPassword ? 'text' : 'password'}
+                        required
+                        name="new-officer-password"
+                        autoComplete="new-password"
+                        value={addPayload.password}
+                        onChange={e =>
+                          setAddPayload(prev => ({ ...prev, password: e.target.value }))
+                        }
+                        className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl pl-3.5 pr-11 py-2 text-base sm:text-sm text-slate-900 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAddPassword(prev => !prev)}
+                        aria-label={showAddPassword ? 'Hide password' : 'Show password'}
+                        className="absolute right-1 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg"
+                      >
+                        {showAddPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={
+                      isAdding ||
+                      isAddUsernameTaken ||
+                      (addPayload.role === UserRole.COURSE_OFFICER && isCapReached)
+                    }
+                    className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-blue-900 hover:bg-blue-800 disabled:opacity-50 text-white text-sm font-bold shadow-sm transition-all"
+                  >
+                    {isAdding ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+                    <span>{isAdding ? 'Adding Officer...' : 'Add Officer'}</span>
+                  </button>
+                </motion.form>
+              </div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+
+      {/* ── Tappable Manage Officer Bottom Sheet ── */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {isManageOpen && targetUser && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                data-drawer-open="true"
+                className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center"
+              >
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => !isSavingEdit && setIsManageOpen(false)}
+                  className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs"
+                />
+
+                <motion.form
+                  onSubmit={handleSaveManage}
+                  initial={shouldReduceMotion ? { opacity: 0 } : { y: '100%', opacity: 0.9 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { y: '100%', opacity: 0.9 }}
+                  transition={
+                    shouldReduceMotion
+                      ? { duration: 0.12 }
+                      : { type: 'spring', stiffness: 360, damping: 32 }
+                  }
+                  className="relative z-10 w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border-t sm:border border-slate-200 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] max-h-[92vh] overflow-y-auto space-y-4"
+                >
+                  <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto -mt-1 sm:hidden" />
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="text-base font-bold text-slate-900">Manage Officer</h3>
+                      <p className="text-xs text-slate-500 truncate mt-0.5">
+                        {targetUser.fullName}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsManageOpen(false)}
+                      aria-label="Close"
+                      className="min-w-[44px] min-h-[44px] -mr-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* Full Name */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editPayload.fullName}
+                      onChange={e =>
+                        setEditPayload(prev => ({ ...prev, fullName: e.target.value }))
+                      }
+                      className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm text-slate-900 outline-none"
+                    />
+                  </div>
+
+                  {/* Username */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Username
+                    </label>
+                    <div
+                      className={`flex items-center bg-slate-50 focus-within:bg-white border rounded-xl px-3.5 min-h-[44px] ${
+                        isEditUsernameTaken
+                          ? 'border-rose-400 bg-rose-50/40'
+                          : 'border-slate-200 focus-within:border-blue-600'
+                      }`}
+                    >
+                      <span className="text-slate-400 font-semibold text-base sm:text-sm mr-1">
+                        @
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        value={editPayload.username}
+                        onChange={e =>
+                          setEditPayload(prev => ({
+                            ...prev,
+                            username: sanitizeUsername(e.target.value)
+                          }))
+                        }
+                        className="w-full bg-transparent py-2 text-base sm:text-sm font-mono text-slate-900 outline-none"
+                      />
+                    </div>
+                    {isEditUsernameTaken && (
+                      <p className="text-xs font-semibold text-rose-600 mt-1">
+                        Username is already taken.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={editPayload.email}
+                      onChange={e =>
+                        setEditPayload(prev => ({ ...prev, email: e.target.value }))
+                      }
+                      className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm text-slate-900 outline-none"
+                    />
+                  </div>
+
+                  {/* Assigned RC (for Course Officer) */}
+                  {targetUser.role === UserRole.COURSE_OFFICER && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Assigned Regular Course
+                      </label>
+                      <select
+                        value={editPayload.courseNumber}
+                        onChange={e =>
+                          setEditPayload(prev => ({ ...prev, courseNumber: e.target.value }))
+                        }
+                        className="w-full min-h-[44px] bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm font-semibold text-slate-900 outline-none"
+                      >
+                        {RC_OPTIONS.map(rc => (
+                          <option key={rc} value={String(rc)}>
+                            Regular Course {rc} (RC {rc})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Active / Suspended Toggle */}
+                  <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Account Active</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {isTargetSoleActiveAdmin
+                          ? 'Protected: last active Admin'
+                          : 'Suspended officers are signed out immediately'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={editPayload.isActive}
+                      disabled={isTargetSoleActiveAdmin}
+                      onClick={() =>
+                        setEditPayload(prev => ({ ...prev, isActive: !prev.isActive }))
+                      }
+                      className={`relative inline-flex h-8 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-40 ${
+                        editPayload.isActive ? 'bg-emerald-500' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow-md transition ${
+                          editPayload.isActive ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Optional Password Reset */}
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Reset Password (Optional)
+                      </label>
+                      <div className="relative flex items-center">
+                        <input
+                          type={showEditPassword ? 'text' : 'password'}
+                          value={editPayload.password}
+                          onChange={e =>
+                            setEditPayload(prev => ({ ...prev, password: e.target.value }))
+                          }
+                          placeholder="Leave blank to keep current password"
+                          className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl pl-3.5 pr-11 py-2 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowEditPassword(prev => !prev)}
+                          aria-label={showEditPassword ? 'Hide password' : 'Show password'}
+                          className="absolute right-1 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg"
+                        >
+                          {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {editPayload.password.trim().length > 0 && (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Reason for Password Reset
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editPayload.auditReason}
+                          onChange={e =>
+                            setEditPayload(prev => ({ ...prev, auditReason: e.target.value }))
+                          }
+                          placeholder="e.g. Officer requested reset"
+                          className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-blue-600 rounded-xl px-3.5 py-2 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {isTargetSoleActiveAdmin && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2 text-xs text-amber-900">
+                      <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                      <span>The sole active System Administrator cannot be suspended.</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit || isEditUsernameTaken}
+                    className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-blue-900 hover:bg-blue-800 disabled:opacity-50 text-white text-sm font-bold shadow-sm transition-all"
+                  >
+                    {isSavingEdit ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                    <span>{isSavingEdit ? 'Saving...' : 'Save Changes'}</span>
+                  </button>
+                </motion.form>
+              </div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+    </div>
+  );
 };

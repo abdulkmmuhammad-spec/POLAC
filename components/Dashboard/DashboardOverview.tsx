@@ -7,16 +7,17 @@ import { useParade, CourseSummaryEntry } from '../../context/ParadeContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatRC } from '../../utils/rcHelpers';
 import { ParadeType, UserRole } from '../../types';
+import { isDFS } from '../../utils/commandHierarchy';
 import AtRiskCadetsWidget from './Commandant/AtRiskCadetsWidget';
 import { ParadeRemarkDrawer, ParadeRemarkTarget } from './Commandant/ParadeRemarkDrawer';
 
 const NetworkErrorFallback: React.FC<{ error: any, onRetry: () => void }> = ({ error, onRetry }) => {
     const [isRetrying, setIsRetrying] = React.useState(false);
     return (
-        <div className="flex flex-col items-center justify-center p-12 bg-amber-50 rounded-2xl border border-amber-200 mt-6 shadow-sm">
-            <AlertCircle size={48} className="text-amber-500 mb-4 animate-pulse" />
-            <h3 className="text-xl font-black text-amber-900 uppercase tracking-widest mb-2">Network Connection Interrupted</h3>
-            <p className="text-xs font-mono text-amber-700/70 mb-6 bg-white p-3 rounded-md shadow-inner border border-amber-100 max-w-lg text-center break-words">
+        <div className="flex flex-col items-center justify-center p-10 bg-amber-50 rounded-2xl border border-amber-200 mt-6 shadow-2xs">
+            <AlertCircle size={40} className="text-amber-600 mb-3" />
+            <h3 className="text-lg font-bold text-amber-950 mb-1.5">Connection Interrupted</h3>
+            <p className="text-xs font-mono text-amber-800/80 mb-5 bg-white p-3 rounded-xl border border-amber-100 max-w-lg text-center break-words">
                 {error?.message || 'Database execution failure. Unable to resolve host or connect to gateway.'}
             </p>
             <button
@@ -26,9 +27,9 @@ const NetworkErrorFallback: React.FC<{ error: any, onRetry: () => void }> = ({ e
                     setTimeout(() => setIsRetrying(false), 500);
                 }}
                 disabled={isRetrying}
-                className="flex items-center gap-3 px-8 py-3.5 bg-amber-600 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-lg hover:bg-amber-700 hover:-translate-y-0.5 transition-all active:scale-95 disabled:opacity-50 disabled:hover:translate-y-0"
+                className="min-h-[44px] flex items-center gap-2 px-6 py-2.5 bg-amber-600 text-white text-xs font-bold rounded-xl shadow-sm hover:bg-amber-700 transition-all active:scale-95 disabled:opacity-50"
             >
-                {isRetrying ? <RefreshCcw className="animate-spin" size={16} /> : <Zap size={16} />}
+                {isRetrying ? <RefreshCcw className="animate-spin" size={15} /> : <Zap size={15} />}
                 {isRetrying ? 'Reconnecting...' : 'Retry Connection'}
             </button>
         </div>
@@ -39,6 +40,7 @@ export const DashboardOverview: React.FC = () => {
     const location = useLocation();
     const { currentUser } = useAuth();
     const isAdmin = currentUser?.role === UserRole.ADMIN;
+    const canMessageCourses = isDFS(currentUser);
     const { records, remarks, stats, courseSummary, yesterdaySummary, activeDate, activeRC, selectedParadeType, setSelectedParadeType, isError, error, refetchRecords } = useParade();
     const [showYesterday, setShowYesterday] = React.useState(false);
     const [activeRemarkTarget, setActiveRemarkTarget] = React.useState<ParadeRemarkTarget | null>(null);
@@ -242,30 +244,30 @@ export const DashboardOverview: React.FC = () => {
             {/* Antigravity Module: At-Risk Cadets Widget */}
             <AtRiskCadetsWidget />
 
-            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-5 border-b bg-slate-50/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 overflow-hidden">
+                <div className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/70 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-md bg-blue-900 flex items-center justify-center text-white shadow-sm border border-blue-950">
-                            <Zap size={18} />
+                        <div className="w-10 h-10 rounded-xl bg-blue-900 flex items-center justify-center text-white shadow-2xs shrink-0">
+                            <FileText size={18} />
                         </div>
                         <div>
-                            <p className="text-[10px] font-black text-blue-900 uppercase tracking-[0.2em] mb-0.5">
-                                Tactical Summary • {showYesterday ? 'ARCHIVE DATA' : `Today ${formattedActiveDate}`}
+                            <p className="text-xs font-semibold text-blue-800">
+                                Parade Summary • {showYesterday ? 'Yesterday' : `Today, ${formattedActiveDate}`}
                             </p>
-                            <h3 className="font-black text-slate-900 uppercase tracking-tight text-sm">
-                                {selectedParadeType} FORMATION STATE {showYesterday && '(YESTERDAY)'}
+                            <h3 className="font-bold text-slate-900 text-base">
+                                {String(selectedParadeType).charAt(0).toUpperCase() + String(selectedParadeType).slice(1).toLowerCase()} Parade State
                             </h3>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-1 bg-slate-200/50 p-1 rounded-md border border-slate-200 w-full md:w-auto">
+                    <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
                         {paradeTypes.map((type) => (
                             <button
                                 key={type.id}
                                 onClick={() => setSelectedParadeType(type.id)}
-                                className={`flex-1 md:flex-initial flex items-center justify-center gap-2 px-3 sm:px-5 py-2.5 md:py-2 rounded-sm text-[10px] font-black uppercase tracking-widest transition-all ${selectedParadeType === type.id
-                                    ? 'bg-blue-900 text-white shadow-md'
-                                    : 'text-slate-500 hover:text-slate-800'
+                                className={`flex-1 md:flex-initial min-h-[40px] flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs font-semibold transition-all ${selectedParadeType === type.id
+                                    ? 'bg-blue-900 text-white shadow-2xs'
+                                    : 'text-slate-600 hover:text-slate-900'
                                     }`}
                             >
                                 {type.label}
@@ -276,62 +278,63 @@ export const DashboardOverview: React.FC = () => {
                 <div className="overflow-x-auto">
                     {/* Desktop Table View */}
                     <table className="w-full text-sm text-left hidden md:table">
-                        <thead className="bg-blue-900 text-white">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
                             <tr>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest">REGULAR COURSE</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-center">LEVEL</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">PRESENT</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">ABSENT</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">SICK</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">DETENTION</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">PASS</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">SUSPENSION</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">YET TO REPORT</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">TOTAL</th>
-                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-right">COMMAND ACTION</th>
+                                <th className="px-5 py-3.5 text-xs font-semibold">Regular Course</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-center">Level</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Present</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Absent</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Sick</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Detention</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Pass</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Suspension</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Yet to Report</th>
+                                <th className="px-4 py-3.5 text-xs font-semibold text-right">Total</th>
+                                <th className="px-5 py-3.5 text-xs font-semibold text-right">Action</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
                             {displayData.map(c => {
                                 const subId = c.latestSubmission?.id;
                                 const rSummary = getSubmissionRemarkSummary(subId);
+                                const mutedZero = 'text-slate-300 font-normal';
                                 return (
-                                    <tr key={c.courseNumber} className="hover:bg-slate-50 border-l-[3px] border-l-transparent hover:border-l-blue-900 transition-all font-mono">
-                                        <td className="px-6 py-4 font-black">
-                                            <span className="text-blue-900 tracking-tighter">
+                                    <tr key={c.courseNumber} className="hover:bg-slate-50/80 border-l-[3px] border-l-transparent hover:border-l-blue-900 transition-all font-mono">
+                                        <td className="px-5 py-3.5 font-bold">
+                                            <span className="text-blue-900">
                                                 {formatRC(c.courseNumber)}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-slate-500 font-bold text-center">Terma {c.currentLevel}</td>
-                                        <td className="px-6 py-4 text-emerald-600 font-black text-right">{c.present}</td>
-                                        <td className="px-6 py-4 text-rose-600 font-black text-right">{c.absent}</td>
-                                        <td className="px-6 py-4 text-amber-600 font-black text-right">{c.sick}</td>
-                                        <td className="px-6 py-4 text-indigo-600 font-black text-right">{c.detention}</td>
-                                        <td className="px-6 py-4 text-cyan-600 font-black text-right">{c.pass}</td>
-                                        <td className="px-6 py-4 text-slate-500 font-black text-right">{c.suspension}</td>
-                                        <td className="px-6 py-4 text-orange-600 font-black text-right">{c.yet_to_report}</td>
-                                        <td className="px-6 py-4 font-black text-slate-900 text-right bg-slate-50/30">{c.total}</td>
-                                        <td className="px-6 py-4 text-right font-sans">
+                                        <td className="px-4 py-3.5 text-slate-500 font-medium text-center font-sans text-xs">Terma {c.currentLevel}</td>
+                                        <td className="px-4 py-3.5 text-emerald-700 font-semibold text-right">{c.present}</td>
+                                        <td className={`px-4 py-3.5 text-right ${c.absent > 0 ? 'text-rose-600 font-bold' : mutedZero}`}>{c.absent}</td>
+                                        <td className={`px-4 py-3.5 text-right ${c.sick > 0 ? 'text-amber-600 font-bold' : mutedZero}`}>{c.sick}</td>
+                                        <td className={`px-4 py-3.5 text-right ${c.detention > 0 ? 'text-indigo-600 font-bold' : mutedZero}`}>{c.detention}</td>
+                                        <td className={`px-4 py-3.5 text-right ${c.pass > 0 ? 'text-cyan-600 font-bold' : mutedZero}`}>{c.pass}</td>
+                                        <td className={`px-4 py-3.5 text-right ${c.suspension > 0 ? 'text-slate-700 font-bold' : mutedZero}`}>{c.suspension}</td>
+                                        <td className={`px-4 py-3.5 text-right ${c.yet_to_report > 0 ? 'text-orange-600 font-bold' : mutedZero}`}>{c.yet_to_report}</td>
+                                        <td className="px-4 py-3.5 font-bold text-slate-900 text-right bg-slate-50/40">{c.total}</td>
+                                        <td className="px-5 py-3.5 text-right font-sans">
                                             <div className="inline-flex items-center justify-end gap-2">
                                                 {rSummary.addressed > 0 && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200" title="Course Officer responded">
-                                                        <Clock size={10} /> Reply ({rSummary.addressed})
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200" title="Course Officer responded">
+                                                        <Clock size={11} /> Reply ({rSummary.addressed})
                                                     </span>
                                                 )}
                                                 {rSummary.pending > 0 && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-300" title="Pending Course Officer review">
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="Pending Course Officer review">
                                                         Pending ({rSummary.pending})
                                                     </span>
                                                 )}
                                                 {rSummary.total > 0 && rSummary.pending === 0 && rSummary.addressed === 0 && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                                        <CheckCheck size={10} /> Resolved
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                        <CheckCheck size={11} /> Resolved
                                                     </span>
                                                 )}
                                                 <button
                                                     type="button"
                                                     onClick={() => openCourseRemarkDrawer(c)}
-                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border shadow-2xs ${
+                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
                                                         c.absent > 0
                                                             ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
                                                             : 'bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-900 border-slate-200 hover:border-blue-200'
@@ -339,7 +342,7 @@ export const DashboardOverview: React.FC = () => {
                                                 >
                                                     {c.absent > 0 ? <Flag size={12} /> : <MessageSquarePlus size={12} />}
                                                     <span>
-                                                        {isAdmin
+                                                        {!canMessageCourses
                                                             ? 'View Remarks'
                                                             : c.absent > 0
                                                             ? 'Flag Absence'
@@ -403,33 +406,33 @@ export const DashboardOverview: React.FC = () => {
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Present</span>
-                                            <span className="text-sm font-black text-emerald-600 font-mono shrink-0">{item.present}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Present</span>
+                                            <span className="text-sm font-bold text-emerald-700 font-mono shrink-0">{item.present}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Absent</span>
-                                            <span className="text-sm font-black text-rose-600 font-mono shrink-0">{item.absent}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Absent</span>
+                                            <span className={`text-sm font-mono shrink-0 ${item.absent > 0 ? 'font-bold text-rose-600' : 'font-normal text-slate-300'}`}>{item.absent}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Sick Bay</span>
-                                            <span className="text-sm font-black text-amber-600 font-mono shrink-0">{item.sick}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Sick Bay</span>
+                                            <span className={`text-sm font-mono shrink-0 ${item.sick > 0 ? 'font-bold text-amber-600' : 'font-normal text-slate-300'}`}>{item.sick}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Detention</span>
-                                            <span className="text-sm font-black text-indigo-600 font-mono shrink-0">{item.detention}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Detention</span>
+                                            <span className={`text-sm font-mono shrink-0 ${item.detention > 0 ? 'font-bold text-indigo-600' : 'font-normal text-slate-300'}`}>{item.detention}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">On Permission</span>
-                                            <span className="text-sm font-black text-cyan-600 font-mono shrink-0">{item.pass}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Pass</span>
+                                            <span className={`text-sm font-mono shrink-0 ${item.pass > 0 ? 'font-bold text-cyan-600' : 'font-normal text-slate-300'}`}>{item.pass}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Suspension</span>
-                                            <span className="text-sm font-black text-slate-600 font-mono shrink-0">{item.suspension}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Suspension</span>
+                                            <span className={`text-sm font-mono shrink-0 ${item.suspension > 0 ? 'font-bold text-slate-700' : 'font-normal text-slate-300'}`}>{item.suspension}</span>
                                         </div>
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 flex items-center justify-between col-span-2 min-w-0">
-                                            <span className="text-xs font-black text-slate-500 uppercase tracking-tight truncate pr-1">Yet to Report</span>
-                                            <span className="text-sm font-black text-orange-600 font-mono shrink-0">{item.yet_to_report}</span>
+                                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between col-span-2 min-w-0">
+                                            <span className="text-xs font-semibold text-slate-600 truncate pr-1">Yet to Report</span>
+                                            <span className={`text-sm font-mono shrink-0 ${item.yet_to_report > 0 ? 'font-bold text-orange-600' : 'font-normal text-slate-300'}`}>{item.yet_to_report}</span>
                                         </div>
                                     </div>
                                     <div className="pt-1 flex items-center justify-between gap-2">

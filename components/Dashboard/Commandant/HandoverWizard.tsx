@@ -76,30 +76,35 @@ export const HandoverWizard: React.FC<HandoverWizardProps> = ({ prefilledTargetR
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden mt-6 text-slate-800">
-            <div className="p-4 border-b bg-teal-900 text-white flex items-center gap-3">
-                <RefreshCw size={16} />
+        <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 overflow-hidden text-slate-800">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+                    <RefreshCw size={20} />
+                </div>
                 <div>
-                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em]">Change of Command Handover</h3>
+                    <h3 className="text-base font-bold text-slate-900">Change of Command Handover</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                        Transfer a Regular Course to a newly commissioned Course Officer
+                    </p>
                 </div>
             </div>
             
-            <form onSubmit={handleHandover} className="p-6 space-y-6">
-                <div className="p-4 bg-teal-50/50 rounded-md border border-teal-100 flex items-start gap-3">
-                    <Shield size={14} className="text-teal-900 mt-0.5 shrink-0" />
-                    <p className="text-[10px] text-teal-900/80 leading-relaxed font-bold uppercase tracking-tight">
-                        <strong>PROTOCOL:</strong> Use this wizard to commission a new Course Officer and immediately hand over command of a specific Regular Course. This ensures continuity without password sharing.
+            <form onSubmit={handleHandover} className="p-4 sm:p-5 space-y-5">
+                <div className="p-3.5 bg-teal-50/70 rounded-xl border border-teal-100 flex items-start gap-2.5">
+                    <Shield size={16} className="text-teal-700 mt-0.5 shrink-0" />
+                    <p className="text-xs text-teal-950/90 leading-relaxed">
+                        Assign a new Course Officer and immediately transfer command of a Regular Course—no password sharing needed.
                     </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-1 block">Target Course (RC)</label>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Target Course (RC)</label>
                         <input
                             type="number"
                             min={1}
                             required
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-teal-900 outline-none font-mono font-bold text-sm"
+                            className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:border-teal-600 outline-none font-mono font-bold text-sm text-slate-900"
                             value={targetRC || ''}
                             onChange={(e) => setTargetRC(parseInt(e.target.value))}
                             disabled={isSubmitting}
@@ -107,11 +112,11 @@ export const HandoverWizard: React.FC<HandoverWizardProps> = ({ prefilledTargetR
                         />
                     </div>
                     <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-1 block">New Officer Name</label>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">New Officer Name</label>
                         <input
                             type="text"
                             required
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-teal-900 outline-none font-bold text-sm"
+                            className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:border-teal-600 outline-none font-semibold text-sm text-slate-900"
                             value={newOfficerName}
                             onChange={(e) => setNewOfficerName(e.target.value)}
                             disabled={isSubmitting}
@@ -119,11 +124,11 @@ export const HandoverWizard: React.FC<HandoverWizardProps> = ({ prefilledTargetR
                         />
                     </div>
                     <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-1 block">Official Service Email</label>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Official Service Email</label>
                         <input
                             type="email"
                             required
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-teal-900 outline-none font-mono font-bold text-sm"
+                            className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:border-teal-600 outline-none font-mono text-sm text-slate-900"
                             value={newOfficerEmail}
                             onChange={(e) => setNewOfficerEmail(e.target.value)}
                             disabled={isSubmitting}
@@ -131,11 +136,11 @@ export const HandoverWizard: React.FC<HandoverWizardProps> = ({ prefilledTargetR
                         />
                     </div>
                     <div className="md:col-span-2">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-1 block">Temporary Credential (Password)</label>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Password</label>
                         <input
                             type="password"
                             required
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded focus:ring-1 focus:ring-teal-900 outline-none font-mono font-bold text-sm"
+                            className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:border-teal-600 outline-none font-mono text-sm text-slate-900"
                             value={newOfficerPassword}
                             onChange={(e) => setNewOfficerPassword(e.target.value)}
                             disabled={isSubmitting}
@@ -144,14 +149,14 @@ export const HandoverWizard: React.FC<HandoverWizardProps> = ({ prefilledTargetR
                     </div>
                 </div>
 
-                <div className="flex justify-end pt-2">
+                <div className="flex justify-end pt-1">
                     <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="px-6 py-3 bg-teal-900 hover:bg-teal-800 text-white text-xs font-black uppercase tracking-widest rounded-lg transition-all shadow-md shadow-teal-900/20 disabled:opacity-50 flex items-center gap-2"
+                        className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl transition-all shadow-2xs disabled:opacity-50 flex items-center justify-center gap-2"
                     >
-                        {isSubmitting ? <RefreshCw size={14} className="animate-spin" /> : <UserPlus size={14} />}
-                        {isSubmitting ? 'Executing Handover...' : 'Execute Change of Command'}
+                        {isSubmitting ? <RefreshCw size={15} className="animate-spin" /> : <UserPlus size={15} />}
+                        {isSubmitting ? 'Transferring Command...' : 'Transfer Command'}
                     </button>
                 </div>
             </form>

@@ -16,7 +16,9 @@ import {
   CommandantRemark,
   CommandantRemarkStatus,
   SickbayVerification,
-  MedicalVerificationStatus
+  MedicalVerificationStatus,
+  CommandReport,
+  CommandReportSummaryPayload
 } from '../types';
 
 /**
@@ -197,9 +199,59 @@ export const dbService = {
       fullName?: string;
       designation?: string;
       courseNumber?: number;
+    },
+    callerIdentity?: {
+      email?: string;
+      username?: string;
     }
   ) => {
     try {
+      // Self-heal stale Safari/PWA session IDs before calling admin_register_officer
+      let resolvedAdminId = String(adminId || '').trim();
+      const callerEmail = callerIdentity?.email?.trim().toLowerCase();
+      const callerUsername = callerIdentity?.username?.trim().toLowerCase();
+
+      if (callerEmail || callerUsername || resolvedAdminId) {
+        const { data: activeAdmins } = await supabase
+          .from('users')
+          .select('id, email, username, role, is_active')
+          .eq('is_active', true)
+          .in('role', ['admin', 'commandant']);
+
+        if (activeAdmins && activeAdmins.length > 0) {
+          const exactIdMatch = activeAdmins.find(u => String(u.id) === resolvedAdminId);
+          if (!exactIdMatch) {
+            const matchedAdmin = activeAdmins.find(
+              u =>
+                (callerEmail && String(u.email || '').trim().toLowerCase() === callerEmail) &&
+                (callerUsername && String(u.username || '').trim().toLowerCase() === callerUsername)
+            ) || activeAdmins.find(
+              u =>
+                (callerEmail && String(u.email || '').trim().toLowerCase() === callerEmail) ||
+                (callerUsername && String(u.username || '').trim().toLowerCase() === callerUsername)
+            );
+            if (matchedAdmin?.id) {
+              resolvedAdminId = String(matchedAdmin.id);
+              // Heal cached polac_session in localStorage so Safari stays in sync
+              if (typeof window !== 'undefined') {
+                try {
+                  const raw = localStorage.getItem('polac_session');
+                  if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object') {
+                      parsed.id = resolvedAdminId;
+                      localStorage.setItem('polac_session', JSON.stringify(parsed));
+                    }
+                  }
+                } catch {
+                  // ignore storage errors
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Backend Cap Enforcement strictly for course_officer
       if (officerData.role === 'course_officer') {
         const { count, error: countError } = await supabase
@@ -220,19 +272,42 @@ export const dbService = {
         (officerData.role === 'commandant'
           ? 'Senior Executive Officer'
           : officerData.role === 'medical_officer'
-          ? 'Medical Officer'
-          : 'Course Officer');
+            ? 'Medical Officer'
+            : 'Course Officer');
 
-      const { data, error } = await supabase.rpc('admin_register_officer', {
-        p_commandant_id: String(adminId),
+      let { data, error } = await supabase.rpc('admin_register_officer', {
+        p_commandant_id: resolvedAdminId,
         p_email: officerData.email.toLowerCase().trim(),
         p_password: officerData.password,
         p_username: officerData.username.trim(),
         p_role: officerData.role,
         p_full_name: fullName,
         p_designation: designation,
-        p_course_number: officerData.courseNumber ?? null
+        p_course_number: officerData.courseNumber ?? null,
+        p_caller_email: callerEmail || null,
+        p_caller_username: callerUsername || null
       });
+
+      // Fallback to 8-arg signature if 20261119_01 migration has not been applied yet
+      if (
+        error &&
+        (error.code === 'PGRST202' ||
+          error.code === '42883' ||
+          error.message?.toLowerCase().includes('could not find the function'))
+      ) {
+        const res8 = await supabase.rpc('admin_register_officer', {
+          p_commandant_id: resolvedAdminId,
+          p_email: officerData.email.toLowerCase().trim(),
+          p_password: officerData.password,
+          p_username: officerData.username.trim(),
+          p_role: officerData.role,
+          p_full_name: fullName,
+          p_designation: designation,
+          p_course_number: officerData.courseNumber ?? null
+        });
+        data = res8.data;
+        error = res8.error;
+      }
 
       if (error) {
         const isMissingSignature =
@@ -271,8 +346,8 @@ export const dbService = {
               officerData.role === 'commandant' || officerData.role === 'medical_officer'
                 ? 'Academy HQ'
                 : officerData.courseNumber
-                ? `REGULAR COURSE ${officerData.courseNumber}`
-                : null,
+                  ? `REGULAR COURSE ${officerData.courseNumber}`
+                  : null,
             course_number: officerData.role === 'course_officer' ? officerData.courseNumber || null : null
           })
           .eq('email', officerData.email.toLowerCase().trim());
@@ -336,8 +411,8 @@ export const dbService = {
         role: (String(d.email || '').toLowerCase() === 'admin@gmail.com' ? 'admin' : d.role) as any,
         fullName:
           d.role === 'commandant' &&
-          !d.designation &&
-          String(d.full_name || '').trim().toUpperCase() === 'DIRECTOR FIELD STUDIES'
+            !d.designation &&
+            String(d.full_name || '').trim().toUpperCase() === 'DIRECTOR FIELD STUDIES'
             ? 'COMMANDANT'
             : d.full_name,
         designation:
@@ -345,8 +420,8 @@ export const dbService = {
           (d.role === 'admin' || String(d.email || '').toLowerCase() === 'admin@gmail.com'
             ? 'System Administrator'
             : d.role === 'commandant'
-            ? 'Commandant'
-            : 'Course Officer'),
+              ? 'Commandant'
+              : 'Course Officer'),
         courseName: d.role === 'course_officer' ? d.course_name : 'Academy HQ',
         yearGroup: d.year_group,
         courseNumber: d.course_number ? parseInt(d.course_number) : undefined,
@@ -395,7 +470,7 @@ export const dbService = {
     }
   },
 
-    // updateUserCredentials moved to standalone function
+  // updateUserCredentials moved to standalone function
 
   // ─── Parade Records ───────────────────────────────────────────────────────
 
@@ -438,7 +513,7 @@ export const dbService = {
            pass_count, suspension_count, yet_to_report_count, grand_total, created_at`;
 
       let query;
-      
+
       if ((role === 'commandant' || role === 'admin') && viewerId) {
         query = supabase
           .from('parade_records')
@@ -490,25 +565,25 @@ export const dbService = {
       const { data, error } = await query;
 
       if (error) throw error;
-      
+
       const formattedData: ParadeRecordMetadata[] = (data || []).map(r => ({
-          id: r.id,
-          date: r.date,
-          paradeType: r.parade_type,
-          yearGroup: r.year_group,
-          courseNumber: r.course_number,
-          presentCount: r.present_count,
-          absentCount: r.absent_count,
-          sickCount: r.sick_count,
-          detentionCount: r.detention_count,
-          passCount: r.pass_count,
-          suspensionCount: r.suspension_count,
-          yetToReportCount: r.yet_to_report_count,
-          grandTotal: r.grand_total,
-          officerName: r.officer_name,
-          officerId: r.officer_id,
-          courseName: r.course_name,
-          createdAt: r.created_at
+        id: r.id,
+        date: r.date,
+        paradeType: r.parade_type,
+        yearGroup: r.year_group,
+        courseNumber: r.course_number,
+        presentCount: r.present_count,
+        absentCount: r.absent_count,
+        sickCount: r.sick_count,
+        detentionCount: r.detention_count,
+        passCount: r.pass_count,
+        suspensionCount: r.suspension_count,
+        yetToReportCount: r.yet_to_report_count,
+        grandTotal: r.grand_total,
+        officerName: r.officer_name,
+        officerId: r.officer_id,
+        courseName: r.course_name,
+        createdAt: r.created_at
       }));
 
       // The next cursor is the `created_at` of the last record in this batch.
@@ -602,7 +677,7 @@ export const dbService = {
       if (filters.courseNumber) {
         query = query.eq('course_number', filters.courseNumber);
       }
-      
+
       if (filters.limit) {
         query = query.limit(filters.limit);
       }
@@ -618,13 +693,13 @@ export const dbService = {
 
   saveRecord: async (record: Omit<ParadeRecord, 'id' | 'createdAt'>) => {
     // ─── MATH VERIFICATION BLOCK ───────────────────────────────────────────
-    const calculatedTotal = (record.presentCount || 0) + 
-                            (record.absentCount || 0) + 
-                            (record.sickCount || 0) + 
-                            (record.detentionCount || 0) + 
-                            (record.passCount || 0) + 
-                            (record.suspensionCount || 0) + 
-                            (record.yetToReportCount || 0);
+    const calculatedTotal = (record.presentCount || 0) +
+      (record.absentCount || 0) +
+      (record.sickCount || 0) +
+      (record.detentionCount || 0) +
+      (record.passCount || 0) +
+      (record.suspensionCount || 0) +
+      (record.yetToReportCount || 0);
     const masterTotal = record.grandTotal;
 
     if (calculatedTotal !== masterTotal) {
@@ -705,7 +780,7 @@ export const dbService = {
           }
         }
       });
-      
+
       return data;
     } catch (err) {
       console.error('Supabase Error (saveRecord):', err);
@@ -972,7 +1047,7 @@ export const dbService = {
           list.unshift(String(id));
           localStorage.setItem('polac_resolved_notification_ids', JSON.stringify(list.slice(0, 500)));
         }
-      } catch {}
+      } catch { }
     }
     try {
       const { error } = await supabase
@@ -1060,9 +1135,9 @@ export const dbService = {
       const { data, error } = await supabase
         .from('graduated_cohorts_summary')
         .select('*');
-        
+
       if (error) throw error;
-      
+
       // Map to the expected frontend interface
       return (data || []).map(r => ({
         courseNumber: r.course_number,
@@ -1255,14 +1330,14 @@ export const dbService = {
             const user = JSON.parse(stored);
             effectiveAdminId = user.id;
           }
-        } catch {}
+        } catch { }
       }
 
       if (!effectiveAdminId) {
         try {
           const { data: authData } = await supabase.auth.getUser();
           effectiveAdminId = authData?.user?.id;
-        } catch {}
+        } catch { }
       }
 
       // 3. Attempt server-side atomic ingestion via bulk_import_cadets RPC
@@ -1808,7 +1883,7 @@ export const dbService = {
         if (raw) {
           return JSON.parse(raw);
         }
-      } catch {}
+      } catch { }
     }
 
     return [];
@@ -1917,7 +1992,7 @@ export const dbService = {
       if (typeof window === 'undefined') return;
       try {
         localStorage.setItem('polac_commandant_remarks', JSON.stringify(items));
-      } catch {}
+      } catch { }
     };
 
     const inferIssuerTitle = (explicitRoleTitle?: string | null): string => {
@@ -2021,7 +2096,7 @@ export const dbService = {
               .from('commandant_remarks')
               .update({ thread: cleanThread })
               .eq('id', data.id)
-              .then(() => {});
+              .then(() => { });
           }
 
           return {
@@ -2046,7 +2121,7 @@ export const dbService = {
           };
         });
       }
-    } catch {}
+    } catch { }
 
     // 2. Cross-Device Notification Synchronization (Partitioned by Course + Senior Officer Authority so threads never overlap)
     try {
@@ -2077,8 +2152,8 @@ export const dbService = {
           const parsedAuthorityTitle = bracketMatch
             ? bracketMatch[1].trim()
             : titleStr.toLowerCase().includes('director field studies')
-            ? 'Director Field Studies'
-            : 'Commandant';
+              ? 'Director Field Studies'
+              : 'Commandant';
 
           const channelKey = `${cNum}::${parsedAuthorityTitle.toLowerCase()}`;
           if (!reconstructedByChannel.has(channelKey)) {
@@ -2192,10 +2267,10 @@ export const dbService = {
         for (const item of localItems) {
           const normalizedTitle =
             item.issuerRoleTitle &&
-            !(
-              item.issuerRoleTitle === 'Director Field Studies' &&
-              (!item.commandantId || String(item.commandantName || '').toUpperCase() === 'DIRECTOR FIELD STUDIES')
-            )
+              !(
+                item.issuerRoleTitle === 'Director Field Studies' &&
+                (!item.commandantId || String(item.commandantName || '').toUpperCase() === 'DIRECTOR FIELD STUDIES')
+              )
               ? item.issuerRoleTitle
               : 'Commandant';
           mergedById.set(item.id, {
@@ -2253,10 +2328,10 @@ export const dbService = {
     for (const item of localItems) {
       const normalizedTitle =
         item.issuerRoleTitle &&
-        !(
-          item.issuerRoleTitle === 'Director Field Studies' &&
-          (!item.commandantId || String(item.commandantName || '').toUpperCase() === 'DIRECTOR FIELD STUDIES')
-        )
+          !(
+            item.issuerRoleTitle === 'Director Field Studies' &&
+            (!item.commandantId || String(item.commandantName || '').toUpperCase() === 'DIRECTOR FIELD STUDIES')
+          )
           ? item.issuerRoleTitle
           : 'Commandant';
       fallbackMerged.set(item.id, {
@@ -2324,7 +2399,7 @@ export const dbService = {
             return bumped;
           }
         }
-      } catch {}
+      } catch { }
     }
 
     const newRemark: CommandantRemark = {
@@ -2384,7 +2459,7 @@ export const dbService = {
           .single();
         if (legacyData) newRemark.id = legacyData.id;
       }
-    } catch {}
+    } catch { }
 
     // Persist in localStorage cache as well for resilience
     if (typeof window !== 'undefined') {
@@ -2393,7 +2468,7 @@ export const dbService = {
         const list: CommandantRemark[] = raw ? JSON.parse(raw) : [];
         localStorage.setItem('polac_commandant_remarks', JSON.stringify([newRemark, ...list]));
         window.dispatchEvent(new CustomEvent('commandant-remarks-updated'));
-      } catch {}
+      } catch { }
     }
 
     // Targeted Notification Dispatch to Course Officer (with explicit Authority Title prefix so channels never collide)
@@ -2487,7 +2562,7 @@ export const dbService = {
           updatedAt: data.updated_at
         };
       }
-    } catch {}
+    } catch { }
 
     // Update localStorage cache
     if (typeof window !== 'undefined') {
@@ -2509,7 +2584,7 @@ export const dbService = {
           }
         }
         window.dispatchEvent(new CustomEvent('commandant-remarks-updated'));
-      } catch {}
+      } catch { }
     }
 
     const authorityTitle = updatedRemark?.issuerRoleTitle || 'Commandant';
@@ -2616,7 +2691,7 @@ export const dbService = {
           updatedAt: data.updated_at
         };
       }
-    } catch {}
+    } catch { }
 
     if (typeof window !== 'undefined') {
       try {
@@ -2644,7 +2719,7 @@ export const dbService = {
             }
           })
         );
-      } catch {}
+      } catch { }
     }
 
     if (!resolvedRemark) {
@@ -2659,7 +2734,7 @@ export const dbService = {
             updatedAt: nowISO
           };
         }
-      } catch {}
+      } catch { }
     }
 
     const authorityTitle =
@@ -2810,7 +2885,7 @@ export const dbService = {
           updatedAt: data.updated_at
         };
       }
-    } catch {}
+    } catch { }
 
     if (typeof window !== 'undefined') {
       try {
@@ -2832,7 +2907,7 @@ export const dbService = {
             }
           })
         );
-      } catch {}
+      } catch { }
     }
 
     await dbService.addNotification({
@@ -2897,7 +2972,7 @@ export const dbService = {
       if (typeof window === 'undefined') return;
       try {
         localStorage.setItem(CACHE_KEY, JSON.stringify(items));
-      } catch {}
+      } catch { }
     };
 
     const readResolvedMap = (): Record<string, { resolvedCount: number; resolvedAt: string }> => {
@@ -2924,7 +2999,7 @@ export const dbService = {
       if (!error && data) {
         dbAlerts = data;
       }
-    } catch {}
+    } catch { }
 
     // 2. Scan recent parade_records and cadet_details to detect any cadet with >= 3 absences
     //    within a 5-day rolling window (including 3 activities in 1 single day)
@@ -3080,7 +3155,7 @@ export const dbService = {
                 updated_at: nowISO
               })
               .eq('id', existingActive.id);
-          } catch {}
+          } catch { }
         }
         mergedByKey.set(key, existingActive);
       } else {
@@ -3122,7 +3197,7 @@ export const dbService = {
           if (!insertErr && insertedData) {
             newAlert.id = insertedData.id;
           }
-        } catch {}
+        } catch { }
 
         mergedByKey.set(key, newAlert);
       }
@@ -3140,7 +3215,7 @@ export const dbService = {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(RESOLVED_KEY, JSON.stringify(resolvedMap));
-      } catch {}
+      } catch { }
     }
 
     if (courseNumber && courseNumber > 0) {
@@ -3166,7 +3241,7 @@ export const dbService = {
           updated_at: nowISO
         })
         .eq('id', alertId);
-    } catch {}
+    } catch { }
 
     if (typeof window !== 'undefined') {
       try {
@@ -3195,7 +3270,7 @@ export const dbService = {
         }
 
         window.dispatchEvent(new CustomEvent('cadet-alerts-updated'));
-      } catch {}
+      } catch { }
     }
   },
 
@@ -3218,7 +3293,7 @@ export const dbService = {
           updated_at: nowISO
         })
         .eq('id', payload.alertId);
-    } catch {}
+    } catch { }
 
     if (typeof window !== 'undefined') {
       try {
@@ -3247,7 +3322,7 @@ export const dbService = {
         }
 
         window.dispatchEvent(new CustomEvent('cadet-alerts-updated'));
-      } catch {}
+      } catch { }
     }
   },
 
@@ -3337,22 +3412,24 @@ export const dbService = {
       });
 
       if (error) {
+        const isPendingUndo = payload.status === 'pending_verification';
         // Direct table update fallback if RPC encounters schema mismatch
         const { error: fallbackError } = await supabase
           .from('sickbay_verifications')
           .update({
             status: payload.status,
-            medical_officer_id: payload.medicalOfficerId,
-            clinical_note: payload.clinicalNote || null,
-            targeted_recipient_role: payload.targetedRecipientRole || null,
-            targeted_recipient_id: payload.targetedRecipientId || null,
-            verified_at: new Date().toISOString(),
+            medical_officer_id: isPendingUndo ? null : payload.medicalOfficerId,
+            medical_officer_name: isPendingUndo ? null : undefined,
+            clinical_note: isPendingUndo ? undefined : payload.clinicalNote || null,
+            targeted_recipient_role: isPendingUndo ? undefined : payload.targetedRecipientRole || null,
+            targeted_recipient_id: isPendingUndo ? undefined : payload.targetedRecipientId || null,
+            verified_at: isPendingUndo ? null : new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .eq('id', payload.verificationId);
 
         if (fallbackError) throw fallbackError;
-        return { status: 'success', message: 'Verification recorded directly.' };
+        return { status: 'success', message: 'Verification updated.' };
       }
 
       return data || { status: 'success' };
@@ -3412,8 +3489,8 @@ export const dbService = {
         const nextStatus = payload.resolve
           ? 'resolved'
           : payload.senderRole === 'medical_officer'
-          ? 'open'
-          : 'replied';
+            ? 'open'
+            : 'replied';
 
         const { error: updateErr } = await supabase
           .from('sickbay_verifications')
@@ -3431,6 +3508,168 @@ export const dbService = {
       return data || { status: 'success' };
     } catch (err) {
       console.error('Supabase Error (replySickbayThread):', err);
+      throw err;
+    }
+  },
+
+  // ─── Weekly Command Reports & Executive Briefs ───────────────────────────
+
+  fetchCommandReports: async (): Promise<CommandReport[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('command_reports')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        senderId: row.sender_id,
+        senderName: row.sender_name,
+        recipientRole: row.recipient_role,
+        weekStart: row.week_start,
+        weekEnd: row.week_end,
+        summaryPayload: row.summary_payload || {
+          totalParades: 0,
+          attendanceRate: 100,
+          totalPresent: 0,
+          totalCadets: 0,
+          totalAbsent: 0,
+          totalSick: 0,
+          totalDetention: 0,
+          sickbayNoShows: 0,
+          courseBreakdown: []
+        },
+        executiveNote: row.executive_note,
+        messages: Array.isArray(row.messages) ? row.messages : [],
+        status: row.status || 'sent',
+        acknowledgedBy: row.acknowledged_by,
+        acknowledgedAt: row.acknowledged_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch (err) {
+      console.error('Supabase Error (fetchCommandReports):', err);
+      return [];
+    }
+  },
+
+  sendWeeklyCommandReport: async (payload: {
+    senderId: string;
+    senderName: string;
+    recipientRole: 'commandant' | 'deputy_commandant' | 'both';
+    weekStart: string;
+    weekEnd: string;
+    summaryPayload: CommandReportSummaryPayload;
+    executiveNote?: string;
+  }): Promise<{ status: string; id?: string }> => {
+    try {
+      const { data, error } = await supabase.rpc('send_weekly_command_report', {
+        p_sender_id: payload.senderId,
+        p_recipient_role: payload.recipientRole,
+        p_week_start: payload.weekStart,
+        p_week_end: payload.weekEnd,
+        p_summary_payload: payload.summaryPayload,
+        p_executive_note: payload.executiveNote || null
+      });
+
+      if (error) {
+        // Fallback direct insert if migration 20261118_02 is not yet executed
+        const initialMessages = payload.executiveNote?.trim()
+          ? [
+            {
+              id: `msg-${Date.now()}`,
+              senderId: payload.senderId,
+              senderName: payload.senderName,
+              senderDesignation: 'Director Field Studies',
+              text: payload.executiveNote.trim(),
+              createdAt: new Date().toISOString()
+            }
+          ]
+          : [];
+
+        const { data: inserted, error: insertErr } = await supabase
+          .from('command_reports')
+          .insert({
+            sender_id: payload.senderId,
+            sender_name: payload.senderName,
+            recipient_role: payload.recipientRole,
+            week_start: payload.weekStart,
+            week_end: payload.weekEnd,
+            summary_payload: payload.summaryPayload,
+            executive_note: payload.executiveNote?.trim() || null,
+            messages: initialMessages,
+            status: 'sent'
+          })
+          .select('id')
+          .single();
+
+        if (insertErr) throw insertErr;
+        return { status: 'success', id: inserted?.id };
+      }
+
+      return data || { status: 'success' };
+    } catch (err) {
+      console.error('Supabase Error (sendWeeklyCommandReport):', err);
+      throw err;
+    }
+  },
+
+  replyCommandReport: async (payload: {
+    reportId: string;
+    senderId: string;
+    senderName: string;
+    senderDesignation?: string;
+    message: string;
+    acknowledge?: boolean;
+  }): Promise<{ status: string; report_status?: string; messages?: any[] }> => {
+    try {
+      const { data, error } = await supabase.rpc('reply_command_report', {
+        p_report_id: payload.reportId,
+        p_sender_id: payload.senderId,
+        p_message: payload.message,
+        p_acknowledge: Boolean(payload.acknowledge)
+      });
+
+      if (error) {
+        const { data: existing } = await supabase
+          .from('command_reports')
+          .select('messages, status')
+          .eq('id', payload.reportId)
+          .single();
+
+        const nextMessages = Array.isArray(existing?.messages) ? [...existing.messages] : [];
+        if (payload.message.trim()) {
+          nextMessages.push({
+            id: `msg-${Date.now()}`,
+            senderId: payload.senderId,
+            senderName: payload.senderName,
+            senderDesignation: payload.senderDesignation || 'Commandant',
+            text: payload.message.trim(),
+            createdAt: new Date().toISOString()
+          });
+        }
+        const nextStatus = payload.acknowledge ? 'acknowledged' : existing?.status || 'sent';
+
+        const { error: updateErr } = await supabase
+          .from('command_reports')
+          .update({
+            messages: nextMessages,
+            status: nextStatus,
+            acknowledged_by: payload.acknowledge ? payload.senderName : undefined,
+            acknowledged_at: payload.acknowledge ? new Date().toISOString() : undefined,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', payload.reportId);
+
+        if (updateErr) throw updateErr;
+        return { status: 'success', report_status: nextStatus, messages: nextMessages };
+      }
+
+      return data || { status: 'success' };
+    } catch (err) {
+      console.error('Supabase Error (replyCommandReport):', err);
       throw err;
     }
   }
@@ -3495,7 +3734,7 @@ export async function updateUserCredentials(payload: {
           .from('users')
           .update(extraUpdates)
           .eq('id', payload.targetUserId);
-      } catch {}
+      } catch { }
     }
 
     return legacyData;

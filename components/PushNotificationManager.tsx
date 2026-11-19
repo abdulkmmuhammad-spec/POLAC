@@ -14,78 +14,87 @@ export const PushNotificationManager: React.FC = () => {
     unsubscribe
   } = usePushNotifications();
 
-  // Show errors if they occur
   React.useEffect(() => {
     if (error) {
       toast.error(error);
     }
   }, [error]);
 
-  if (!isSupported) {
-    return (
-      <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500">
-        Push notifications are not supported in this browser.
-      </div>
-    );
-  }
-
-  if (permission === 'denied') {
-    return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 flex items-start gap-3">
-        <BellOff className="w-5 h-5 flex-shrink-0 mt-0.5" />
-        <div>
-          <p className="font-medium">Notifications Blocked</p>
-          <p className="mt-1 opacity-90">
-            You have blocked notifications for this site. Please enable them in your browser settings to receive live parade alerts.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const handleToggle = async () => {
+    if (isLoading || !isSupported || permission === 'denied') return;
     if (isSubscribed) {
       await unsubscribe();
-      toast.success('Live alerts disabled');
+      toast.success('Push notifications muted');
     } else {
       await subscribe();
-      toast.success('Live pop-up notifications enabled!');
+      toast.success('Push notifications enabled');
     }
   };
 
+  const statusBadge = !isSupported
+    ? { label: 'Unsupported', classes: 'bg-slate-100 text-slate-500' }
+    : permission === 'denied'
+    ? { label: 'Blocked in Browser', classes: 'bg-rose-50 text-rose-700 border border-rose-200' }
+    : isSubscribed
+    ? { label: 'Enabled', classes: 'bg-emerald-50 text-emerald-700 border border-emerald-200' }
+    : { label: 'Muted', classes: 'bg-slate-100 text-slate-600 border border-slate-200' };
+
   return (
-    <div className="p-4 sm:p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
-      <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-4">
-        
-        <div className="flex items-center gap-3.5 sm:gap-4">
-          <div className={`p-3 rounded-full shrink-0 ${isSubscribed ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-            <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+              permission === 'denied'
+                ? 'bg-rose-50 text-rose-600'
+                : isSubscribed
+                ? 'bg-emerald-50 text-emerald-600'
+                : 'bg-slate-100 text-slate-500'
+            }`}
+          >
+            {permission === 'denied' ? <BellOff size={20} /> : <Bell size={20} />}
           </div>
-          <div>
-            <h3 className="text-sm sm:text-base font-semibold text-gray-900">Live Phone & Browser Notifications</h3>
-            <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-              {isSubscribed 
-                ? 'Active — You will receive instant pop-up alerts for Commandant Parade Remarks and parade updates.' 
-                : 'Enable notifications to receive instant pop-up alerts on your phone or browser.'}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-bold text-slate-900">
+                Device Push Notifications
+              </h3>
+              <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusBadge.classes}`}>
+                {statusBadge.label}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              {permission === 'denied'
+                ? 'Blocked by your browser. Allow notifications in site settings to receive live alerts.'
+                : isSubscribed
+                ? 'Saves automatically. Instant alerts are active on this device.'
+                : 'Turn on to receive instant parade and sickbay alerts on this device.'}
             </p>
           </div>
         </div>
 
-        <button
-          onClick={handleToggle}
-          disabled={isLoading}
-          className={`w-full sm:w-auto relative inline-flex items-center justify-center px-6 py-2.5 text-sm font-medium rounded-lg transition-all shrink-0
-            ${isLoading ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-md'}
-            ${isSubscribed 
-              ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50' 
-              : 'bg-[#1e3a8a] text-white hover:bg-[#1e3a8a]/90'
+        {/* iOS-style Instant Auto-Save Switch */}
+        {isSupported && permission !== 'denied' && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isSubscribed}
+            aria-label="Toggle push notifications"
+            onClick={handleToggle}
+            disabled={isLoading}
+            className={`relative inline-flex h-8 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:opacity-60 ${
+              isSubscribed ? 'bg-emerald-500' : 'bg-slate-300'
             }`}
-        >
-          {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-          {!isLoading && isSubscribed && 'Disable Alerts'}
-          {!isLoading && !isSubscribed && 'Enable Alerts'}
-        </button>
-
+          >
+            <span
+              className={`pointer-events-none inline-flex h-7 w-7 transform items-center justify-center rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                isSubscribed ? 'translate-x-6' : 'translate-x-0'
+              }`}
+            >
+              {isLoading && <Loader2 size={14} className="animate-spin text-slate-500" />}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );

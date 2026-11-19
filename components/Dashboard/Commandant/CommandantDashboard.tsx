@@ -17,6 +17,7 @@ import { OfficerManager } from './OfficerManager';
 import { AuditLogView } from '../../Settings/AuditLogView';
 import { HistoricalAlertsView } from '../../Settings/HistoricalAlertsView';
 import { CredentialSettings } from './CredentialSettings';
+import { SystemSettingsCenter } from './SystemSettingsCenter';
 import { GraduationPanel } from './GraduationPanel';
 import { HandoverWizard } from './HandoverWizard';
 import { PushNotificationManager } from '../../PushNotificationManager';
@@ -371,7 +372,7 @@ export const AdminDashboard: React.FC = () => {
                     onProfileClick={() => navigate('/admin/settings')}
                 />
 
-                <main className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
                         <PageTransitionWrapper>
                             <Routes location={location}>
@@ -380,13 +381,7 @@ export const AdminDashboard: React.FC = () => {
                                 <Route path="audit" element={<AttendanceAudit />} />
                                 <Route path="cadet_registry" element={<CadetManager />} />
                                 <Route path="analytics" element={<CommandAnalytics />} />
-                                <Route path="settings" element={
-                                    <div className="py-8">
-                                        <div className="max-w-4xl mx-auto px-4">
-                                            <SettingsContainer />
-                                        </div>
-                                    </div>
-                                } />
+                                <Route path="settings" element={<SystemSettingsCenter />} />
                                 <Route path="*" element={<Navigate to="/admin" replace />} />
                             </Routes>
                         </PageTransitionWrapper>
@@ -418,7 +413,7 @@ export const CommandantDashboard: React.FC = () => {
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header title={getTitle()} />
 
-                <main className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
                         <PageTransitionWrapper>
                             <Routes location={location}>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import {
     LayoutDashboard,
     FileText,
@@ -15,7 +15,9 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
 import { UserRole } from '../../types';
-import { dbService } from '../../services/dbService';
+import { dbService, supabase } from '../../services/dbService';
+import { isExecutiveCommand, isDeputyCommandant, isDFS } from '../../utils/commandHierarchy';
+import { getUnreadExecutiveCount } from '../../utils/executiveChatState';
 
 interface BottomNavItem {
     path: string;
@@ -47,6 +49,7 @@ export const BottomNav: React.FC = () => {
     const { currentUser } = useAuth();
     const { remarks } = useParade();
     const isIOS = useIsIOS();
+    const shouldReduceMotion = useReducedMotion();
 
     // Count remarks needing review for Commandant / Senior Officers
     const commandantNeedsReviewCount = useMemo(() => {
@@ -92,6 +95,60 @@ export const BottomNav: React.FC = () => {
         return () => window.removeEventListener('sickbay-verifications-updated', updateMedicalCount);
     }, [currentUser]);
 
+    // Live count of unread Executive Briefs / Chats (Commandant, Deputy Commandant, and DFS)
+    const [unreadBriefsCount, setUnreadBriefsCount] = React.useState(0);
+
+    React.useEffect(() => {
+        const isExec = isExecutiveCommand(currentUser);
+        const userIsDfs = isDFS(currentUser);
+        if (!currentUser || (!isExec && !userIsDfs)) {
+            setUnreadBriefsCount(0);
+            return;
+        }
+        const myRole = isDeputyCommandant(currentUser) ? 'deputy_commandant' : 'commandant';
+        const refreshBriefsCount = () => {
+            dbService
+                .fetchCommandReports()
+                .then(reports => {
+                    if (isExec) {
+                        const filtered = reports.filter(
+                            r => r.recipientRole === 'both' || r.recipientRole === myRole
+                        );
+                        setUnreadBriefsCount(getUnreadExecutiveCount(filtered, currentUser, 'dfs'));
+                    } else {
+                        const cmdReports = reports.filter(
+                            r => r.recipientRole === 'both' || r.recipientRole === 'commandant'
+                        );
+                        const dcmdReports = reports.filter(
+                            r => r.recipientRole === 'both' || r.recipientRole === 'deputy_commandant'
+                        );
+                        setUnreadBriefsCount(
+                            getUnreadExecutiveCount(cmdReports, currentUser, 'commandant') +
+                                getUnreadExecutiveCount(dcmdReports, currentUser, 'deputy_commandant')
+                        );
+                    }
+                })
+                .catch(() => {});
+        };
+
+        refreshBriefsCount();
+        window.addEventListener('command-reports-updated', refreshBriefsCount);
+
+        const channel = supabase
+            .channel('bottomnav-command-reports')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'command_reports' },
+                refreshBriefsCount
+            )
+            .subscribe();
+
+        return () => {
+            window.removeEventListener('command-reports-updated', refreshBriefsCount);
+            supabase.removeChannel(channel);
+        };
+    }, [currentUser]);
+
     const navItems: BottomNavItem[] = useMemo(() => {
         if (!currentUser) return [];
 
@@ -120,20 +177,35 @@ export const BottomNav: React.FC = () => {
         }
 
         if (currentUser.role === UserRole.COMMANDANT) {
-            const cmdBadge =
+            const isExec = isExecutiveCommand(currentUser);
+            const dfsRemarkBadge =
                 commandantNeedsReviewCount > 0
                     ? commandantNeedsReviewCount
                     : commandantActiveCount > 0
                     ? commandantActiveCount
-                    : undefined;
+                    : 0;
+            const totalDfsBadge = dfsRemarkBadge + unreadBriefsCount;
+            const cmdBadge = isExec
+                ? unreadBriefsCount > 0
+                    ? unreadBriefsCount
+                    : undefined
+                : totalDfsBadge > 0
+                ? totalDfsBadge
+                : undefined;
             return [
                 { path: '/commandant', label: 'Parades', icon: LayoutDashboard, end: true },
                 {
                     path: '/commandant/remarks',
-                    label: 'Remarks',
+                    label: isExec ? 'Briefs' : 'Remarks',
                     icon: MessageSquare,
                     badge: cmdBadge,
-                    badgeTone: commandantNeedsReviewCount > 0 ? 'amber' : 'blue'
+                    badgeTone: isExec
+                        ? 'blue'
+                        : unreadBriefsCount > 0
+                        ? 'blue'
+                        : commandantNeedsReviewCount > 0
+                        ? 'amber'
+                        : 'blue'
                 },
                 { path: '/commandant/audit', label: 'Audit', icon: FileText }
             ];
@@ -152,7 +224,14 @@ export const BottomNav: React.FC = () => {
             },
             { path: '/officer/history', label: 'History', icon: History }
         ];
-    }, [currentUser, commandantNeedsReviewCount, commandantActiveCount, officerPendingRemarksCount]);
+    }, [
+        currentUser,
+        commandantNeedsReviewCount,
+        commandantActiveCount,
+        officerPendingRemarksCount,
+        medicalPendingCount,
+        unreadBriefsCount
+    ]);
 
     if (!currentUser || navItems.length === 0) return null;
 
@@ -161,11 +240,16 @@ export const BottomNav: React.FC = () => {
             aria-label="Mobile Primary Navigation"
             className={
                 isIOS
-                    ? 'fixed inset-x-3 bottom-[max(0.65rem,env(safe-area-inset-bottom))] z-40 md:hidden rounded-full ios-liquid-glass px-2 py-1.5'
-                    : 'fixed bottom-0 inset-x-0 z-40 md:hidden bg-blue-900/95 backdrop-blur-xl border-t border-white/10 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]'
+                    ? 'fixed bottom-0 inset-x-0 z-50 md:hidden bg-white ios-liquid-glass pb-[env(safe-area-inset-bottom)]'
+                    : 'fixed bottom-0 inset-x-0 z-50 md:hidden bg-blue-900 border-t border-white/10 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_12px_rgba(0,0,0,0.2)]'
             }
         >
-            <div className="flex items-stretch justify-around w-full max-w-lg mx-auto px-1">
+            {/* Apple HIG Scroll Edge Fade: content fades cleanly before meeting the bar */}
+            <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -top-5 inset-x-0 h-5 bg-gradient-to-t from-slate-50/95 to-transparent"
+            />
+            <div className="flex items-stretch justify-around w-full max-w-lg mx-auto h-[52px] px-1">
                 {navItems.map(item => {
                     const IconComponent = item.icon;
                     return (
@@ -174,52 +258,52 @@ export const BottomNav: React.FC = () => {
                             to={item.path}
                             end={item.end}
                             className={({ isActive }) =>
-                                `relative flex-1 min-w-[48px] ${
-                                    isIOS ? 'min-h-[50px] py-1 px-1 rounded-full' : 'min-h-[56px] py-1.5 px-1'
-                                } flex flex-col items-center justify-center gap-1 select-none active:scale-95 transition-all duration-150 ${
-                                    isActive
-                                        ? 'text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]'
-                                        : isIOS
-                                        ? 'text-white/75 hover:text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]'
-                                        : 'text-blue-200/60 hover:text-white'
+                                `relative flex-1 min-w-[48px] h-full py-1 px-1 flex flex-col items-center justify-center gap-0.5 select-none active:scale-95 transition-all duration-150 ${
+                                    isIOS
+                                        ? isActive
+                                            ? 'text-blue-900'
+                                            : 'text-slate-500 hover:text-blue-900'
+                                        : isActive
+                                        ? 'text-white'
+                                        : 'text-blue-200/75 hover:text-white'
                                 }`
                             }
                         >
                             {({ isActive }) => (
                                 <>
-                                    {/* iOS Liquid Glass Spring Pill vs Standard Top Bar Indicator */}
+                                    {/* Subtle Active Indicator (WhatsApp/Instagram 49-50px Bar Proportion) */}
                                     {isActive &&
                                         (isIOS ? (
                                             <motion.div
-                                                layoutId="ios-liquid-pill"
-                                                transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                                                className="absolute inset-0 rounded-full bg-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] pointer-events-none"
+                                                layoutId={shouldReduceMotion ? undefined : 'ios-liquid-pill'}
+                                                transition={
+                                                    shouldReduceMotion
+                                                        ? { duration: 0 }
+                                                        : { type: 'spring', stiffness: 420, damping: 32 }
+                                                }
+                                                className="absolute inset-x-2 inset-y-1 rounded-xl bg-blue-900/10 pointer-events-none"
                                             />
                                         ) : (
-                                            <span className="absolute top-0 inset-x-3 mx-auto w-8 h-1 rounded-b-full bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.7)] animate-in fade-in duration-150" />
+                                            <span className="absolute top-0 inset-x-3 mx-auto w-8 h-0.5 rounded-b-full bg-blue-400" />
                                         ))}
 
                                     {/* Icon Container with Optional Unread/Count Badge */}
-                                    <div
-                                        className={`relative z-10 flex items-center justify-center px-3.5 py-0.5 rounded-full transition-colors ${
-                                            isActive && !isIOS
-                                                ? 'bg-white/15 border border-white/10 shadow-[0_0_15px_rgba(255,255,255,0.06)]'
-                                                : ''
-                                        }`}
-                                    >
+                                    <div className="relative z-10 flex items-center justify-center">
                                         <IconComponent
-                                            size={20}
-                                            strokeWidth={isActive ? 2.5 : 2}
+                                            size={22}
+                                            strokeWidth={isActive ? 2.4 : 1.9}
                                             className="shrink-0"
                                         />
                                         {item.badge !== undefined && item.badge > 0 && (
                                             <span
-                                                className={`absolute -top-1 -right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-mono font-black flex items-center justify-center leading-none border border-blue-900 shadow-2xs ${
+                                                className={`absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono font-bold flex items-center justify-center leading-none border-2 ${
+                                                    isIOS ? 'border-white' : 'border-blue-900'
+                                                } shadow-xs ${
                                                     item.badgeTone === 'amber'
-                                                        ? 'bg-amber-400 text-slate-950 shadow-[0_0_8px_rgba(251,191,36,0.5)]'
+                                                        ? 'bg-amber-400 text-slate-950'
                                                         : item.badgeTone === 'rose'
                                                         ? 'bg-rose-500 text-white'
-                                                        : 'bg-blue-400 text-slate-950'
+                                                        : 'bg-blue-600 text-white'
                                                 }`}
                                             >
                                                 {item.badge > 99 ? '99+' : item.badge}
@@ -229,12 +313,14 @@ export const BottomNav: React.FC = () => {
 
                                     {/* Single-Line Concise Label */}
                                     <span
-                                        className={`relative z-10 text-[10px] leading-none uppercase tracking-wider truncate max-w-full ${
-                                            isActive
-                                                ? 'font-black text-white'
-                                                : isIOS
-                                                ? 'font-bold text-white/75'
-                                                : 'font-bold text-blue-200/60'
+                                        className={`relative z-10 text-[10.5px] leading-tight truncate max-w-full ${
+                                            isIOS
+                                                ? isActive
+                                                    ? 'font-bold text-blue-900'
+                                                    : 'font-medium text-slate-500'
+                                                : isActive
+                                                ? 'font-bold text-white'
+                                                : 'font-medium text-blue-200/75'
                                         }`}
                                     >
                                         {item.label}

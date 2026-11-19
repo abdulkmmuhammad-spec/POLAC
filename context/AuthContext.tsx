@@ -207,7 +207,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (user.is_active === false) {
-      throw new Error('This account has been permanently deactivated for forensic integrity.');
+      throw new Error('This account has been deactivated.');
     }
 
     if (user.password !== password) {
@@ -215,7 +215,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const resolvedRole = (
-      normalizedEmail === 'admin@gmail.com' ? UserRole.ADMIN : (user.role as UserRole)
+      user.email?.toLowerCase() === 'admin@gmail.com' ? UserRole.ADMIN : (user.role as UserRole)
     );
 
     const rawSessionUser: User = {

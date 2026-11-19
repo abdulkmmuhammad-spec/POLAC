@@ -22,8 +22,7 @@ import {
     CheckSquare,
     Square,
     Database,
-    History,
-    Sparkles
+    History
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { dbService } from '../../services/dbService';
@@ -1137,7 +1136,7 @@ export const BulkCoursePurgeModal: React.FC<BulkCoursePurgeModalProps> = ({
                             <div className="bg-emerald-50 border-2 border-emerald-200 rounded-3xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                                 <div className="flex items-start gap-3.5">
                                     <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
-                                        <Sparkles size={22} />
+                                        <CheckCircle2 size={22} />
                                     </div>
                                     <div>
                                         <div className="flex items-center gap-2 flex-wrap">

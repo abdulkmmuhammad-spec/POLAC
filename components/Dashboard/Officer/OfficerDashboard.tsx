@@ -302,7 +302,7 @@ export const OfficerDashboard: React.FC = () => {
         <div className="min-h-screen bg-slate-50 flex flex-col">
             <Header title={getTitle()} />
 
-            <main className="max-w-6xl mx-auto p-4 pb-28 sm:p-6 sm:pb-28 md:p-10 md:pb-10 space-y-6 md:space-y-10 w-full flex-1 relative">
+            <main className="max-w-6xl mx-auto p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:p-10 md:pb-10 space-y-6 md:space-y-10 w-full flex-1 relative">
                 {/* Desktop Navigation */}
                 <div className="hidden md:flex items-center space-x-2 border-b border-slate-200 pb-6 mb-8">
                     {tabs.map(tab => (

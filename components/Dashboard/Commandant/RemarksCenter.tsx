@@ -12,19 +12,33 @@ import {
     Eye,
     ExternalLink,
     CheckCircle2,
-    Sparkles,
     SlidersHorizontal,
     X,
-    Stethoscope
+    Stethoscope,
+    FileText
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useParade } from '../../../context/ParadeContext';
 import { dbService, supabase } from '../../../services/dbService';
-import { CommandantRemark, ParadeRecordMetadata, UserRole, SickbayVerification } from '../../../types';
+import {
+    CommandantRemark,
+    ParadeRecordMetadata,
+    UserRole,
+    SickbayVerification,
+    CommandReport
+} from '../../../types';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import { parseMisconductRemark } from '../../../utils/notificationUtils';
+import { isDFS, isExecutiveCommand, isDeputyCommandant } from '../../../utils/commandHierarchy';
+import {
+    getLatestExecutiveActivity,
+    getUnreadExecutiveCount,
+    markExecutiveChatRead
+} from '../../../utils/executiveChatState';
 import { ParadeRemarkDrawer, ParadeRemarkTarget } from './ParadeRemarkDrawer';
 import { SickbayChatDrawer } from '../Medical/SickbayChatDrawer';
+import { WeeklyCommandReportSheet } from './WeeklyCommandReportSheet';
+import { ExecutiveChatDrawer } from './ExecutiveChatDrawer';
 import { toast } from 'react-hot-toast';
 
 const NEW_DIRECTIVE_PROMPTS = [
@@ -34,6 +48,7 @@ const NEW_DIRECTIVE_PROMPTS = [
 ];
 
 type StatusFilter = 'ALL' | 'ADDRESSED' | 'PENDING' | 'RESOLVED';
+type HubFilter = 'ALL' | 'COMMAND' | 'COURSES' | 'MEDICAL';
 type CategoryFilter = 'ALL' | 'MISCONDUCT';
 
 const INITIAL_VISIBLE_THREADS = 20;
@@ -91,9 +106,13 @@ export const RemarksCenter: React.FC = () => {
 
     const isCommandant = currentUser?.role === UserRole.COMMANDANT;
     const isAdmin = currentUser?.role === UserRole.ADMIN;
+    const isDFSOfficer = isDFS(currentUser);
+    const isExecutiveCmd = isExecutiveCommand(currentUser);
+    const isDeputyCmd = isDeputyCommandant(currentUser);
     const currentOfficerDesignation = (currentUser?.designation || 'Commandant').trim();
 
     // Orthogonal Filters
+    const [hubFilter, setHubFilter] = useState<HubFilter>('ALL');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
     const [selectedChannel, setSelectedChannel] = useState<string>('ALL');
     const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('ALL');
@@ -108,6 +127,18 @@ export const RemarksCenter: React.FC = () => {
     // Medical Officer Sickbay Alerts (Grouped 1 WhatsApp DM chat per Medical Officer)
     const [sickbayAlerts, setSickbayAlerts] = useState<SickbayVerification[]>([]);
     const [activeMedicalChannelKey, setActiveMedicalChannelKey] = useState<string | null>(null);
+
+    // Weekly Command Reports & Executive Briefs (DFS <-> Commandant / Deputy Commandant)
+    const [commandReports, setCommandReports] = useState<CommandReport[]>([]);
+    const [isWeeklyReportSheetOpen, setIsWeeklyReportSheetOpen] = useState(false);
+    const [weeklyReportDefaultRecipient, setWeeklyReportDefaultRecipient] = useState<
+        'commandant' | 'deputy_commandant' | 'both'
+    >('both');
+    const [activeExecutivePartner, setActiveExecutivePartner] = useState<{
+        role: 'commandant' | 'deputy_commandant' | 'dfs';
+        title: string;
+        monogram: string;
+    } | null>(null);
 
     useEffect(() => {
         const loadMedicalAlerts = async () => {
@@ -126,6 +157,33 @@ export const RemarksCenter: React.FC = () => {
         loadMedicalAlerts();
         window.addEventListener('sickbay-verifications-updated', loadMedicalAlerts);
         return () => window.removeEventListener('sickbay-verifications-updated', loadMedicalAlerts);
+    }, []);
+
+    useEffect(() => {
+        const loadCommandReports = async () => {
+            try {
+                const reports = await dbService.fetchCommandReports();
+                setCommandReports(reports);
+            } catch {
+                // silent
+            }
+        };
+        loadCommandReports();
+        window.addEventListener('command-reports-updated', loadCommandReports);
+
+        const channel = supabase
+            .channel('remarks-center-command-reports')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'command_reports' },
+                loadCommandReports
+            )
+            .subscribe();
+
+        return () => {
+            window.removeEventListener('command-reports-updated', loadCommandReports);
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     // Dedicated Chat Screen Target
@@ -670,10 +728,178 @@ export const RemarksCenter: React.FC = () => {
         });
     };
 
+    // Executive Command (Commandant & Deputy Commandant):
+    // Clean 1:1 Executive Briefs inbox strictly with Director Field Studies (DFS).
+    if (isExecutiveCmd) {
+        const myRecipientFilter = isDeputyCmd ? 'deputy_commandant' : 'commandant';
+        const myBriefs = commandReports.filter(
+            r => r.recipientRole === 'both' || r.recipientRole === myRecipientFilter
+        );
+        const latestActivity = getLatestExecutiveActivity(myBriefs, currentUser);
+        const unreadCount = getUnreadExecutiveCount(myBriefs, currentUser, 'dfs');
+
+        const openDfsChat = () => {
+            markExecutiveChatRead(currentUser?.id, 'dfs');
+            setActiveExecutivePartner({
+                role: 'dfs',
+                title: 'Director Field Studies',
+                monogram: 'DFS'
+            });
+        };
+
+        return (
+            <div className="space-y-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] md:pb-8 animate-in fade-in duration-200">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-4 sm:p-5 flex items-center justify-between gap-3">
+                    <div>
+                        <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                            Executive Briefs
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Direct channel with Director Field Studies
+                        </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-900 border border-blue-200 text-xs font-semibold shrink-0">
+                        <Shield size={13} />
+                        <span>Chain of Command</span>
+                    </span>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden divide-y divide-slate-100">
+                    <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={openDfsChat}
+                        onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openDfsChat();
+                            }
+                        }}
+                        className="px-4 py-4 flex items-center gap-3.5 hover:bg-slate-50/80 active:bg-slate-50 cursor-pointer transition-colors min-h-[72px]"
+                    >
+                        <div
+                            className={`w-[46px] h-[46px] rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold tracking-tight ${
+                                unreadCount > 0
+                                    ? 'bg-blue-50 text-blue-900 ring-2 ring-blue-600 ring-offset-2'
+                                    : 'bg-slate-100 text-slate-700'
+                            }`}
+                        >
+                            DFS
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-bold text-slate-900 truncate">
+                                    Director Field Studies
+                                </span>
+                                <span
+                                    className={`text-[11px] shrink-0 ${
+                                        unreadCount > 0
+                                            ? 'font-bold text-blue-600'
+                                            : 'font-medium text-slate-400'
+                                    }`}
+                                >
+                                    {latestActivity.latestTimestamp
+                                        ? formatRelativeTimestamp(latestActivity.latestTimestamp)
+                                        : 'Standing'}
+                                </span>
+                            </div>
+                            <p
+                                className={`text-xs truncate mt-0.5 ${
+                                    unreadCount > 0
+                                        ? 'font-semibold text-slate-900'
+                                        : 'text-slate-500'
+                                }`}
+                            >
+                                {latestActivity.previewText ||
+                                    'No weekly command reports received yet.'}
+                            </p>
+                        </div>
+
+                        <div className="shrink-0 flex items-center gap-2">
+                            {unreadCount > 0 ? (
+                                <span className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold inline-flex items-center justify-center shadow-xs">
+                                    {unreadCount}
+                                </span>
+                            ) : myBriefs.length > 0 ? (
+                                <CheckCheck size={16} className="text-emerald-600" />
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+
+                <ExecutiveChatDrawer
+                    isOpen={Boolean(activeExecutivePartner)}
+                    partnerTitle={activeExecutivePartner?.title || 'Director Field Studies'}
+                    partnerMonogram={activeExecutivePartner?.monogram || 'DFS'}
+                    reports={myBriefs}
+                    onClose={() => setActiveExecutivePartner(null)}
+                    onUpdated={updated => {
+                        setCommandReports(prev =>
+                            prev.map(r => (r.id === updated.id ? updated : r))
+                        );
+                    }}
+                />
+            </div>
+        );
+    }
+
     return (
-        <div className="space-y-3 pb-24 md:pb-12 animate-in fade-in duration-200">
+        <div className="space-y-3 pb-[calc(7.5rem+env(safe-area-inset-bottom))] md:pb-8 animate-in fade-in duration-200">
             {/* ── 1. Streamlined WhatsApp / Instagram DM Top Toolbar ── */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-3 sm:p-4 space-y-3">
+                {isDFSOfficer && (
+                    <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <h2 className="text-base font-bold text-slate-900 tracking-tight truncate">
+                                    Command Hub
+                                </h2>
+                                <p className="text-[11px] text-slate-500 truncate">
+                                    Executive briefs, courses & sickbay
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setWeeklyReportDefaultRecipient('both');
+                                    setIsWeeklyReportSheetOpen(true);
+                                }}
+                                className="min-h-[44px] px-4 py-2 rounded-full bg-blue-900 hover:bg-blue-800 active:scale-[0.98] text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 shadow-2xs transition-all"
+                            >
+                                <FileText size={14} />
+                                <span className="whitespace-nowrap">Weekly Report</span>
+                            </button>
+                        </div>
+
+                        <div
+                            data-no-page-swipe="true"
+                            className="flex items-center gap-1.5 overflow-x-auto no-scrollbar touch-pan-x py-0.5"
+                        >
+                            {(
+                                [
+                                    { key: 'ALL', label: 'All' },
+                                    { key: 'COMMAND', label: 'Command' },
+                                    { key: 'COURSES', label: 'Courses' },
+                                    { key: 'MEDICAL', label: 'Medical' }
+                                ] as Array<{ key: HubFilter; label: string }>
+                            ).map(pill => (
+                                <button
+                                    key={pill.key}
+                                    type="button"
+                                    onClick={() => setHubFilter(pill.key)}
+                                    className={`rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                                        hubFilter === pill.key
+                                            ? 'bg-blue-900 text-white shadow-2xs'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
+                                    }`}
+                                >
+                                    {pill.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {/* Search Input with Embedded Right-Edge Filters Toggle */}
                 <div className="relative flex items-center">
                     <Search
@@ -685,7 +911,7 @@ export const RemarksCenter: React.FC = () => {
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                         placeholder="Search course, officer, cadet, or directive..."
-                        className="w-full pl-10 pr-28 py-2.5 bg-slate-100/80 focus:bg-white border border-transparent focus:border-slate-300 rounded-full text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all"
+                        className="w-full pl-10 pr-28 py-2.5 bg-slate-100/80 focus:bg-white border border-transparent focus:border-slate-300 rounded-full text-base sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all"
                     />
 
                     <div className="absolute right-1.5 flex items-center gap-1">
@@ -975,7 +1201,9 @@ export const RemarksCenter: React.FC = () => {
             </div>
 
             {/* ── 2. Clean WhatsApp / Instagram DM Conversation List ── */}
-            {filteredConversations.length === 0 && sickbayAlerts.length === 0 ? (
+            {filteredConversations.length === 0 &&
+            sickbayAlerts.length === 0 &&
+            !(isDFSOfficer && (hubFilter === 'ALL' || hubFilter === 'COMMAND')) ? (
                 <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-2.5">
                     <div className="w-11 h-11 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
                         <CheckCircle2 size={22} />
@@ -999,7 +1227,131 @@ export const RemarksCenter: React.FC = () => {
             ) : (
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
                     <div className="divide-y divide-slate-100 bg-white">
-                        {(() => {
+                        {/* Pinned Executive Command Channels for DFS */}
+                        {isDFSOfficer &&
+                            (hubFilter === 'ALL' || hubFilter === 'COMMAND') &&
+                            (
+                                [
+                                    {
+                                        role: 'commandant' as const,
+                                        title: 'Commandant',
+                                        monogram: 'CMD'
+                                    },
+                                    {
+                                        role: 'deputy_commandant' as const,
+                                        title: 'Deputy Commandant',
+                                        monogram: 'DCMD'
+                                    }
+                                ] as const
+                            )
+                                .filter(
+                                    exec =>
+                                        !searchQuery.trim() ||
+                                        exec.title
+                                            .toLowerCase()
+                                            .includes(searchQuery.trim().toLowerCase())
+                                )
+                                .map(exec => {
+                                    const execReports = commandReports.filter(
+                                        r =>
+                                            r.recipientRole === 'both' ||
+                                            r.recipientRole === exec.role
+                                    );
+                                    const execActivity = getLatestExecutiveActivity(
+                                        execReports,
+                                        currentUser
+                                    );
+                                    const execUnread = getUnreadExecutiveCount(
+                                        execReports,
+                                        currentUser,
+                                        exec.role
+                                    );
+
+                                    const openExecChat = () => {
+                                        markExecutiveChatRead(currentUser?.id, exec.role);
+                                        setActiveExecutivePartner({
+                                            role: exec.role,
+                                            title: exec.title,
+                                            monogram: exec.monogram
+                                        });
+                                    };
+
+                                    return (
+                                        <div
+                                            key={`exec-${exec.role}`}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={openExecChat}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    openExecChat();
+                                                }
+                                            }}
+                                            className="px-4 py-3.5 flex items-center gap-3 hover:bg-blue-50/40 active:bg-blue-50/60 cursor-pointer transition-colors bg-slate-50/40"
+                                        >
+                                            <div
+                                                className={`w-[46px] h-[46px] rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold tracking-tight bg-blue-900 text-white ring-2 ring-offset-2 ${
+                                                    execUnread > 0 ? 'ring-blue-600' : 'ring-blue-200'
+                                                }`}
+                                            >
+                                                {exec.monogram}
+                                            </div>
+
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                        <span className="text-sm font-bold text-slate-900 truncate">
+                                                            {exec.title}
+                                                        </span>
+                                                        <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 text-[10px] font-semibold shrink-0">
+                                                            Command
+                                                        </span>
+                                                    </div>
+                                                    <span
+                                                        className={`text-[11px] shrink-0 ${
+                                                            execUnread > 0
+                                                                ? 'font-bold text-blue-600'
+                                                                : 'font-medium text-slate-400'
+                                                        }`}
+                                                    >
+                                                        {execActivity.latestTimestamp
+                                                            ? formatRelativeTimestamp(
+                                                                  execActivity.latestTimestamp
+                                                              )
+                                                            : 'Direct'}
+                                                    </span>
+                                                </div>
+                                                <p
+                                                    className={`text-xs truncate mt-0.5 ${
+                                                        execUnread > 0
+                                                            ? 'font-semibold text-slate-900'
+                                                            : 'text-slate-500'
+                                                    }`}
+                                                >
+                                                    {execActivity.previewText ||
+                                                        'Tap to view or send Weekly Command Report'}
+                                                </p>
+                                            </div>
+
+                                            <div className="shrink-0 flex items-center gap-1.5">
+                                                {execUnread > 0 ? (
+                                                    <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold inline-flex items-center justify-center">
+                                                        {execUnread}
+                                                    </span>
+                                                ) : execReports.length > 0 ? (
+                                                    <CheckCheck
+                                                        size={14}
+                                                        className="text-emerald-600"
+                                                    />
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                        {(hubFilter === 'ALL' || hubFilter === 'MEDICAL') &&
+                            (() => {
                             // Group all Sickbay alerts into ONE unified DM channel per Medical Officer
                             const q = searchQuery.trim().toLowerCase();
                             const grouped = new Map<string, SickbayVerification[]>();
@@ -1121,7 +1473,8 @@ export const RemarksCenter: React.FC = () => {
                                     );
                                 });
                         })()}
-                        {visibleConversations.map(conv => {
+                        {(hubFilter === 'ALL' || hubFilter === 'COURSES') &&
+                            visibleConversations.map(conv => {
                             const isResolved = conv.addressedCount === 0 && conv.pendingCount === 0;
                             const isAddressed = conv.addressedCount > 0;
                             const isPending = !isAddressed && conv.pendingCount > 0;
@@ -1261,8 +1614,8 @@ export const RemarksCenter: React.FC = () => {
                 </div>
             )}
 
-            {/* ── 3. WhatsApp-Style Floating Action Button for COMMANDANT Users ── */}
-            {isCommandant && (
+            {/* ── 3. WhatsApp-Style Floating Action Button (DFS Only) ── */}
+            {isDFSOfficer && (
                 <button
                     type="button"
                     onClick={() => setIsNewDirectiveOpen(true)}
@@ -1273,8 +1626,8 @@ export const RemarksCenter: React.FC = () => {
                 </button>
             )}
 
-            {/* ── 4. New Directive Sheet / Modal ── */}
-            {isCommandant && isNewDirectiveOpen && (
+            {/* ── 4. New Directive Sheet / Modal (DFS Only) ── */}
+            {isDFSOfficer && isNewDirectiveOpen && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
                     <div
                         className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150"
@@ -1329,7 +1682,7 @@ export const RemarksCenter: React.FC = () => {
 
                         <div className="space-y-2">
                             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-                                <Sparkles size={12} className="text-amber-500 shrink-0" />
+                                <Shield size={12} className="text-blue-700 shrink-0" />
                                 {NEW_DIRECTIVE_PROMPTS.map((qp, idx) => (
                                     <button
                                         key={idx}
@@ -1397,6 +1750,54 @@ export const RemarksCenter: React.FC = () => {
                 onClose={() => setActiveMedicalChannelKey(null)}
                 onUpdated={(updated) => {
                     setSickbayAlerts(prev => prev.map(item => item.id === updated.id ? updated : item));
+                }}
+            />
+
+            {/* ── 7. Executive Chat Drawer & Weekly Command Report Sheet ── */}
+            <ExecutiveChatDrawer
+                isOpen={Boolean(activeExecutivePartner)}
+                partnerTitle={activeExecutivePartner?.title || 'Executive Command'}
+                partnerMonogram={activeExecutivePartner?.monogram || 'CMD'}
+                reports={
+                    activeExecutivePartner && activeExecutivePartner.role !== 'dfs'
+                        ? commandReports.filter(
+                              r =>
+                                  r.recipientRole === 'both' ||
+                                  r.recipientRole === activeExecutivePartner.role
+                          )
+                        : commandReports
+                }
+                onClose={() => setActiveExecutivePartner(null)}
+                onUpdated={updated => {
+                    setCommandReports(prev => prev.map(r => (r.id === updated.id ? updated : r)));
+                }}
+                onComposeReport={
+                    isDFSOfficer
+                        ? () => {
+                              const role =
+                                  activeExecutivePartner?.role === 'commandant' ||
+                                  activeExecutivePartner?.role === 'deputy_commandant'
+                                      ? activeExecutivePartner.role
+                                      : 'both';
+                              setActiveExecutivePartner(null);
+                              setWeeklyReportDefaultRecipient(role);
+                              setIsWeeklyReportSheetOpen(true);
+                          }
+                        : undefined
+                }
+            />
+
+            <WeeklyCommandReportSheet
+                isOpen={isWeeklyReportSheetOpen}
+                defaultRecipient={weeklyReportDefaultRecipient}
+                onClose={() => setIsWeeklyReportSheetOpen(false)}
+                onSent={async () => {
+                    try {
+                        const refreshed = await dbService.fetchCommandReports();
+                        setCommandReports(refreshed);
+                    } catch {
+                        // silent
+                    }
                 }}
             />
         </div>

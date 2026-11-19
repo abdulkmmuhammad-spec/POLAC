@@ -15,6 +15,9 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
 import { UserRole } from '../../types';
+import { dbService, supabase } from '../../services/dbService';
+import { isExecutiveCommand, isDeputyCommandant, isDFS } from '../../utils/commandHierarchy';
+import { getUnreadExecutiveCount } from '../../utils/executiveChatState';
 
 interface SidebarProps {
     isOpen?: boolean;
@@ -26,6 +29,59 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     const { remarks } = useParade();
     const isAdmin = currentUser?.role === UserRole.ADMIN;
     const isMedical = currentUser?.role === UserRole.MEDICAL_OFFICER;
+    const isExecutiveCmd = isExecutiveCommand(currentUser);
+    const userIsDfs = isDFS(currentUser);
+
+    const [unreadBriefsCount, setUnreadBriefsCount] = React.useState(0);
+
+    React.useEffect(() => {
+        if (!currentUser || (!isExecutiveCmd && !userIsDfs)) {
+            setUnreadBriefsCount(0);
+            return;
+        }
+        const myRole = isDeputyCommandant(currentUser) ? 'deputy_commandant' : 'commandant';
+        const refreshBriefsCount = () => {
+            dbService
+                .fetchCommandReports()
+                .then(reports => {
+                    if (isExecutiveCmd) {
+                        const filtered = reports.filter(
+                            r => r.recipientRole === 'both' || r.recipientRole === myRole
+                        );
+                        setUnreadBriefsCount(getUnreadExecutiveCount(filtered, currentUser, 'dfs'));
+                    } else {
+                        const cmdReports = reports.filter(
+                            r => r.recipientRole === 'both' || r.recipientRole === 'commandant'
+                        );
+                        const dcmdReports = reports.filter(
+                            r => r.recipientRole === 'both' || r.recipientRole === 'deputy_commandant'
+                        );
+                        setUnreadBriefsCount(
+                            getUnreadExecutiveCount(cmdReports, currentUser, 'commandant') +
+                                getUnreadExecutiveCount(dcmdReports, currentUser, 'deputy_commandant')
+                        );
+                    }
+                })
+                .catch(() => {});
+        };
+
+        refreshBriefsCount();
+        window.addEventListener('command-reports-updated', refreshBriefsCount);
+
+        const channel = supabase
+            .channel('sidebar-command-reports')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'command_reports' },
+                refreshBriefsCount
+            )
+            .subscribe();
+
+        return () => {
+            window.removeEventListener('command-reports-updated', refreshBriefsCount);
+            supabase.removeChannel(channel);
+        };
+    }, [currentUser, isExecutiveCmd]);
 
     // Count remarks where Course Officer replied and awaits acknowledgment (or active unresolved remarks)
     const needsReviewCount = React.useMemo(() => {
@@ -70,14 +126,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               {
                   path: '/commandant/remarks',
                   icon: MessageSquare,
-                  label: 'Remarks & Directives',
-                  badge:
-                      needsReviewCount > 0
-                          ? needsReviewCount
-                          : activeUnresolvedCount > 0
-                          ? activeUnresolvedCount
-                          : undefined,
-                  badgeTone: needsReviewCount > 0 ? 'amber' : 'blue'
+                  label: isExecutiveCmd ? 'Executive Briefs' : 'Remarks & Directives',
+                  badge: isExecutiveCmd
+                      ? unreadBriefsCount > 0
+                          ? unreadBriefsCount
+                          : undefined
+                      : needsReviewCount + unreadBriefsCount > 0
+                      ? needsReviewCount + unreadBriefsCount
+                      : activeUnresolvedCount > 0
+                      ? activeUnresolvedCount
+                      : undefined,
+                  badgeTone: isExecutiveCmd || unreadBriefsCount > 0
+                      ? 'blue'
+                      : needsReviewCount > 0
+                      ? 'amber'
+                      : 'blue'
               },
               { path: '/commandant/audit', icon: FileText, label: 'Attendance Audit' }
           ];
@@ -111,11 +174,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                     >
                         <div className="flex items-center space-x-3 min-w-0">
                             <item.icon size={18} className="shrink-0" />
-                            <span className="text-[11px] font-black uppercase tracking-widest truncate">{item.label}</span>
+                            <span className="text-xs font-semibold tracking-wide truncate">{item.label}</span>
                         </div>
                         {item.badge !== undefined && item.badge > 0 && (
                             <span
-                                className={`ml-2 px-2 py-0.5 rounded-full text-[9px] font-mono font-black shrink-0 ${
+                                className={`ml-2 px-2 py-0.5 rounded-full text-[11px] font-mono font-bold shrink-0 ${
                                     item.badgeTone === 'amber'
                                         ? 'bg-amber-400 text-slate-950 shadow-[0_0_10px_rgba(251,191,36,0.4)]'
                                         : 'bg-blue-500/30 text-blue-200 border border-blue-400/30'
@@ -133,11 +196,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 <div className="p-4 bg-black/20 flex items-center justify-between border-b border-white/5">
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                        <span className="text-[8px] font-mono font-bold text-emerald-500/80 uppercase tracking-widest">
+                        <span className="text-[11px] font-mono font-semibold text-emerald-400">
                             System: Active
                         </span>
                     </div>
-                    <span className="text-[8px] font-mono text-white/20">V2.4.0</span>
+                    <span className="text-[11px] font-mono text-white/40">V2.4.0</span>
                 </div>
                 <div className="p-4">
                     <button
@@ -146,10 +209,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                             e.preventDefault();
                             logout();
                         }}
-                        className="w-full flex items-center space-x-3 px-4 py-3 text-blue-100/40 hover:text-rose-400 hover:bg-rose-500/5 rounded-md transition-all group"
+                        className="w-full min-h-[44px] flex items-center space-x-3 px-4 py-2.5 text-blue-100/70 hover:text-rose-400 hover:bg-rose-500/5 rounded-md transition-all group"
                     >
                         <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Secure Sign Out</span>
+                        <span className="text-xs font-semibold">Sign Out</span>
                     </button>
                 </div>
             </div>

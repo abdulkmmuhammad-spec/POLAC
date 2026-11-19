@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Bell, CheckCircle, AlertTriangle, Settings,
-    History, Trash2, CheckCheck, Sparkles, Check, ChevronRight
+    History, Trash2, CheckCheck, Check, ChevronRight
 } from 'lucide-react';
 import { Notification } from '../../types';
 import { inferSeverity, getSeverityStyles } from '../../utils/notificationUtils';
@@ -150,14 +150,14 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                                         animate={{ opacity: 1, y: 0 }}
                                         className="flex flex-col items-center justify-center h-full px-10 text-center"
                                     >
-                                        <div className="w-24 h-24 bg-slate-100/50 rounded-[2.5rem] flex items-center justify-center mb-8 border border-white shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)]">
-                                            <Sparkles size={40} className="text-slate-300" />
+                                        <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center mb-6 border border-slate-200/80">
+                                            <Bell size={32} className="text-slate-300" />
                                         </div>
-                                        <p className="text-lg font-black text-slate-400 tracking-tight leading-none mb-2">
-                                            No New Intelligence
+                                        <p className="text-base font-bold text-slate-700 mb-1.5">
+                                            No new notifications
                                         </p>
-                                        <p className="text-xs text-slate-400/70 font-medium leading-relaxed">
-                                            The command cycle is optimal. Real-time alerts will populate here as they occur.
+                                        <p className="text-xs text-slate-500 leading-relaxed">
+                                            Real-time parade, remark, and sickbay alerts will appear here.
                                         </p>
                                     </motion.div>
                                 ) : (

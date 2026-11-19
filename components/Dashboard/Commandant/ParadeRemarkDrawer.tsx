@@ -437,7 +437,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
         // Smoothly scroll chat container towards the top so the roll banner is immediately in view
         chatContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
 
-        toast.success(`📋 Roll loaded at top for ${tag.label} (inspect above)`, {
+        toast.success(`📋 Parade state loaded at top for ${tag.label} (inspect above)`, {
             id: 'inspect-roll-toast',
             duration: 3500
         });
@@ -904,7 +904,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                         }`}
                                     >
                                         <FileText size={12} />
-                                        <span>Roll</span>
+                                        <span>Parade State</span>
                                     </button>
 
                                     {isCommandant && ownsActiveThread && !isResolved && (
@@ -964,13 +964,13 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                     {formatParadeName(displayRecord.paradeType)} • {formatShortDate(displayRecord.date)}: Present {displayRecord.presentCount}/{displayRecord.grandTotal}
                                                 </>
                                             ) : (
-                                                <>Muster Roll • Tap to Inspect</>
+                                                <>Parade State • Tap to Inspect</>
                                             )}
                                         </span>
 
                                         {isRollFlashing && (
                                             <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-black uppercase tracking-wider shrink-0 animate-pulse shadow-xs">
-                                                Live Roll Loaded
+                                                Live Parade State
                                             </span>
                                         )}
                                     </div>
@@ -1018,7 +1018,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                 </span>
                                             </div>
                                             <span className="text-[10px] font-semibold text-slate-400">
-                                                {isLoadingCadets ? 'Loading roll...' : `${cadets.length} cadets on file`}
+                                                {isLoadingCadets ? 'Loading parade state...' : `${cadets.length} cadets on file`}
                                             </span>
                                         </div>
 
@@ -1044,7 +1044,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                         {isLoadingCadets ? (
                                             <div className="py-2 flex items-center justify-center gap-2 text-xs text-slate-400">
                                                 <Loader2 size={13} className="animate-spin text-blue-600" />
-                                                <span>Loading roll exceptions...</span>
+                                                <span>Loading parade state exceptions...</span>
                                             </div>
                                         ) : nonPresentCadets.length > 0 ? (
                                             <div>
@@ -1093,7 +1093,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                             className="sticky top-1 z-30 flex justify-center pointer-events-none"
                                         >
                                             <div className="px-4 py-1.5 rounded-full bg-blue-900/95 text-white shadow-xl border border-blue-400/40 text-xs font-bold flex items-center gap-2 backdrop-blur-md animate-bounce">
-                                                <span>↑ Roll updated above for {activeTaggingParade?.label}</span>
+                                                <span>↑ Parade state updated above for {activeTaggingParade?.label}</span>
                                             </div>
                                         </motion.div>
                                     )}
@@ -1170,7 +1170,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                                             : 'text-blue-700 hover:text-blue-900 hover:underline'
                                                                     }`}
                                                                 >
-                                                                    {isCurrentlyInspecting ? '✓ Inspecting at top' : 'Inspect Roll ↑'}
+                                                                    {isCurrentlyInspecting ? '✓ Inspecting at top' : 'Inspect State ↑'}
                                                                 </button>
                                                             </div>
                                                         </div>
@@ -1191,7 +1191,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                                         )
                                                                     }
                                                                     className="mb-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center justify-between gap-1 cursor-pointer bg-white/10 hover:bg-white/15 text-slate-200 border-l-2 border-amber-400 transition-colors"
-                                                                    title="Click to inspect this parade's muster roll at top and tag in reply"
+                                                                    title="Click to inspect this parade state at top and tag in reply"
                                                                 >
                                                                     <span className="truncate font-semibold uppercase">
                                                                         {msg.isMisconduct
@@ -1201,12 +1201,12 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                                     <span className="text-[9px] shrink-0 flex items-center gap-1">
                                                                         {isCurrentlyInspecting ? (
                                                                             <span className="font-bold text-amber-300 bg-white/10 px-1.5 py-0.5 rounded">
-                                                                                ✓ Active Roll
+                                                                                ✓ Active State
                                                                             </span>
                                                                         ) : (
                                                                             <>
                                                                                 <FileText size={10} />
-                                                                                <span className="font-bold">Roll ↑</span>
+                                                                                <span className="font-bold">State ↑</span>
                                                                             </>
                                                                         )}
                                                                     </span>
@@ -1243,7 +1243,7 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                                         )
                                                                     }
                                                                     className="mb-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center justify-between gap-1 cursor-pointer bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-l-2 border-blue-600 transition-colors"
-                                                                    title="Click to inspect this parade's muster roll at top and tag in reply"
+                                                                    title="Click to inspect this parade state at top and tag in reply"
                                                                 >
                                                                     <span className="truncate font-semibold uppercase">
                                                                         {msg.isMisconduct
@@ -1253,12 +1253,12 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
                                                                     <span className="text-[9px] shrink-0 flex items-center gap-1">
                                                                         {isCurrentlyInspecting ? (
                                                                             <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                                                                                ✓ Active Roll
+                                                                                ✓ Active State
                                                                             </span>
                                                                         ) : (
                                                                             <>
                                                                                 <FileText size={10} />
-                                                                                <span className="font-bold">Roll ↑</span>
+                                                                                <span className="font-bold">State ↑</span>
                                                                             </>
                                                                         )}
                                                                     </span>

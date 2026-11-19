@@ -18,8 +18,7 @@ import { dbService } from '../../services/dbService';
 import {
     parseCadetImportFile,
     downloadNPACSVTemplate,
-    downloadNPAExcelTemplate,
-    downloadLegacyExcelTemplate
+    downloadNPAExcelTemplate
 } from '../../services/cadetImportService';
 import {
     TemplateImportFormat,
@@ -240,15 +239,15 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                         </div>
                         <div>
                             <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-black uppercase tracking-[0.18em]">
-                                    Cadet Enrollment Ingress Port
+                                <h3 className="text-base font-bold text-white">
+                                    Import Cadets
                                 </h3>
-                                <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                    Dual Template Engine
+                                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-200 border border-emerald-500/30">
+                                    NPA Format
                                 </span>
                             </div>
-                            <p className="text-[10px] text-blue-200 font-medium">
-                                Concurrent ingestion: Supports New NPA Number (2-Column) and Legacy (3-Column) spreadsheets
+                            <p className="text-xs text-blue-200 font-medium mt-0.5">
+                                Upload a 2-column NPA Number CSV or Excel spreadsheet
                             </p>
                         </div>
                     </div>
@@ -266,8 +265,8 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                 <div className="px-6 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2 text-slate-600">
                         <FileSpreadsheet size={16} className="text-blue-900 shrink-0" />
-                        <span className="font-bold text-[10px] uppercase tracking-wider text-slate-500">
-                            Download Official Templates:
+                        <span className="font-semibold text-xs text-slate-600">
+                            Download Template:
                         </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -275,33 +274,22 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                         <button
                             type="button"
                             onClick={downloadNPACSVTemplate}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[9px] font-black uppercase tracking-wider shadow-sm transition-all group"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold shadow-2xs transition-all group"
                             title="2 Columns: NPA Number, Name"
                         >
-                            <Download size={12} className="group-hover:translate-y-0.5 transition-transform" />
-                            <span>New NPA Format (CSV)</span>
+                            <Download size={13} className="group-hover:translate-y-0.5 transition-transform" />
+                            <span>NPA Format (CSV)</span>
                         </button>
 
                         {/* New NPA Format Download (Excel) */}
                         <button
                             type="button"
                             onClick={downloadNPAExcelTemplate}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-blue-50 text-blue-800 border border-blue-200 rounded text-[9px] font-black uppercase tracking-wider shadow-sm transition-all group"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-blue-50 text-blue-800 border border-blue-200 rounded-lg text-xs font-semibold shadow-2xs transition-all group"
                             title="2 Columns: NPA Number, Name (.xlsx)"
                         >
-                            <Download size={12} className="group-hover:translate-y-0.5 transition-transform" />
-                            <span>New NPA Format (XLSX)</span>
-                        </button>
-
-                        {/* Legacy Format Download (Excel) */}
-                        <button
-                            type="button"
-                            onClick={downloadLegacyExcelTemplate}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded text-[9px] font-black uppercase tracking-wider shadow-sm transition-all group"
-                            title="3 Columns: Name, Squad, RC_Number (.xlsx)"
-                        >
-                            <Download size={12} className="group-hover:translate-y-0.5 transition-transform" />
-                            <span>Legacy Format (XLSX)</span>
+                            <Download size={13} className="group-hover:translate-y-0.5 transition-transform" />
+                            <span>NPA Format (XLSX)</span>
                         </button>
                     </div>
                 </div>
@@ -309,28 +297,27 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                 {/* MODAL BODY */}
                 <div className="p-6 overflow-y-auto space-y-6 flex-1">
                     {/* FORMAT MODE SELECTOR */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-100/70 rounded-lg border border-slate-200">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-100/70 rounded-xl border border-slate-200">
                         <div>
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                                Ingestion Mode & Schema Matcher
+                            <p className="text-xs font-bold text-slate-800">
+                                Spreadsheet Format
                             </p>
-                            <p className="text-[10px] text-slate-600 font-medium">
-                                Auto-detect analyzes headers automatically, or you can force a schema.
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                Auto-detect analyzes headers automatically, or choose NPA format directly.
                             </p>
                         </div>
-                        <div className="flex bg-white p-1 rounded-md border border-slate-200 shadow-sm shrink-0">
+                        <div className="flex bg-white p-1 rounded-lg border border-slate-200 shadow-2xs shrink-0">
                             {[
-                                { id: 'AUTO', label: '⚡ Auto-Detect' },
-                                { id: 'NPA_FORMAT', label: '📄 NPA Format (2-Col)' },
-                                { id: 'LEGACY_FORMAT', label: '📋 Legacy (3-Col)' }
+                                { id: 'AUTO', label: 'Auto-Detect' },
+                                { id: 'NPA_FORMAT', label: 'NPA Format (2-Col)' }
                             ].map(opt => (
                                 <button
                                     key={opt.id}
                                     type="button"
                                     onClick={() => handleFormatModeChange(opt.id as any)}
-                                    className={`px-3 py-1.5 rounded text-[9px] font-black uppercase tracking-tight transition-all ${
+                                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                                         formatMode === opt.id
-                                            ? 'bg-blue-900 text-white shadow-sm'
+                                            ? 'bg-blue-900 text-white shadow-2xs'
                                             : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                     }`}
                                 >

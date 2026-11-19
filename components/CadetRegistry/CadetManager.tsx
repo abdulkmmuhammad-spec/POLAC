@@ -268,25 +268,27 @@ export const CadetManager: React.FC = () => {
 
     return (
         <div className="space-y-8 max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 border-b bg-blue-900 text-white flex items-center justify-between">
+            <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 overflow-hidden">
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <Users size={16} />
-                        <h3 className="text-[11px] font-black uppercase tracking-[0.2em]">Cadet Enrollment Port</h3>
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-800 flex items-center justify-center shrink-0">
+                            <Users size={20} />
+                        </div>
+                        <div>
+                            <h3 className="text-base font-bold text-slate-900">Cadet Registry</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                Manage active cadets, batch imports, and Regular Course rosters
+                            </p>
+                        </div>
                     </div>
                 </div>
 
-                <div className="p-8">
-                    <div className="flex flex-wrap gap-4 mb-8 p-6 bg-slate-50 rounded-md border border-slate-200">
+                <div className="p-5 sm:p-6">
+                    <div className="flex flex-wrap items-center gap-4 mb-6 p-4 sm:p-5 bg-slate-50 rounded-xl border border-slate-200">
                         <div className="flex-1 min-w-[200px]">
-                            <div className="flex items-center gap-2 mb-1">
-                                <p className="text-[9px] font-black text-blue-900 uppercase tracking-widest">Batch Ingress</p>
-                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                    Dual Schema Support
-                                </span>
-                            </div>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight">
-                                High-volume registry synchronization supporting 2-Column NPA format and 3-Column Legacy templates.
+                            <p className="text-sm font-bold text-slate-900 mb-0.5">Batch Cadet Import</p>
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                                Import cadets in bulk using the 2-column NPA CSV or Excel template.
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -294,10 +296,10 @@ export const CadetManager: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setIsUploadModalOpen(true)}
-                                className="flex items-center gap-2 px-5 py-2.5 bg-blue-900 text-white rounded text-[9px] font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-md active:scale-95"
+                                className="min-h-[44px] flex items-center gap-2 px-4 py-2 bg-blue-900 text-white rounded-xl text-xs font-bold hover:bg-blue-800 transition-all shadow-2xs active:scale-95"
                             >
-                                <Upload size={14} />
-                                Upload Data
+                                <Upload size={15} />
+                                Import Cadets
                             </button>
 
                             {/* BULK COURSE PURGE & RE-ENROLL BUTTON */}
@@ -707,7 +709,7 @@ export const CadetManager: React.FC = () => {
                                     {gradCohortCadets.length === 0 && (
                                         <tr>
                                             <td colSpan={3} className="px-4 py-12 text-center text-slate-400">
-                                                No cadets enrolled in this cohort registry.
+                                                No cadets enrolled in this Regular Course registry.
                                             </td>
                                         </tr>
                                     )}

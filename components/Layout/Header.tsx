@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
 import { UserRole, Notification } from '../../types';
+import { isExecutiveCommand } from '../../utils/commandHierarchy';
 import { dbService } from '../../services/dbService';
 import { ConfirmationModal } from './ConfirmationModal';
 import { NotificationDrawer } from './NotificationDrawer';
@@ -54,13 +55,17 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                   return !['commandant_remark', 'remark_response', 'remark_resolved'].includes(n.type);
               }
               if (currentUser?.role === UserRole.COMMANDANT) {
+                  if (isExecutiveCommand(currentUser)) {
+                      return ['command_report', 'parade_submission', 'parade_update'].includes(n.type);
+                  }
                   return [
                       'parade_submission',
                       'parade_update',
                       'commandant_remark',
                       'remark_response',
                       'remark_resolved',
-                      'sickbay_verification'
+                      'sickbay_verification',
+                      'command_report'
                   ].includes(n.type);
               }
               return true;
@@ -117,15 +122,15 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                         <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
                     <div className="flex flex-col min-w-0">
-                        <p className="text-[9px] sm:text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] leading-none mb-0.5 sm:mb-1">Command Control</p>
+                        <p className="text-[11px] font-bold text-blue-300 tracking-wide leading-none mb-0.5 sm:mb-1">Command Control</p>
                         <h2 className="text-xs sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight truncate">{title}</h2>
                     </div>
                 </div>
             </div>
 
-            <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
-                {/* Collapsed System Status Popover (Relocated Live Auto-Sync & Audio State) */}
-                <div className="relative" ref={statusPopoverRef}>
+            <div className="flex items-center gap-2 md:gap-3 shrink-0">
+                {/* Collapsed System Status Popover (Hidden on mobile for spacious header) */}
+                <div className="relative hidden md:block" ref={statusPopoverRef}>
                     <button
                         type="button"
                         onClick={() => setShowSystemStatus(prev => !prev)}
@@ -215,7 +220,8 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 {/* Notification Bell */}
                 <button
                     onClick={handleOpenDrawer}
-                    className="p-2.5 rounded-xl transition-all relative text-blue-200 hover:bg-white/10 hover:border-white/20 border border-white/5 bg-white/5 group"
+                    aria-label="Open notifications"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition-all relative text-blue-200 hover:bg-white/10 hover:border-white/20 border border-white/5 bg-white/5 group"
                 >
                     <motion.div
                         animate={{ 
@@ -258,8 +264,8 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                     className={`flex items-center gap-1 md:gap-4 ${onProfileClick ? 'cursor-pointer group hover:bg-white/5 p-1 md:px-3 md:py-2 rounded-md border border-transparent hover:border-white/10 transition-all' : ''}`}
                 >
                     <div className="text-right hidden md:block">
-                        <p className="text-[11px] font-black text-white uppercase tracking-wider group-hover:text-blue-400 transition-colors">{currentUser?.fullName}</p>
-                        <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-widest leading-none mt-0.5">
+                        <p className="text-[11px] font-bold text-white tracking-wide">{currentUser?.fullName}</p>
+                        <p className="text-[11px] text-blue-300/80 font-mono leading-none mt-0.5">
                             {currentUser?.designation ||
                                 (currentUser?.role === UserRole.ADMIN
                                     ? 'System Administrator'
@@ -276,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                 </div>
                 <button
                     onClick={logout}
-                    className="p-2 text-blue-200/60 hover:text-rose-400 transition-colors"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-blue-200/70 hover:text-rose-400 hover:bg-white/5 transition-colors"
                     title="Sign Out"
                     aria-label="Sign Out"
                 >

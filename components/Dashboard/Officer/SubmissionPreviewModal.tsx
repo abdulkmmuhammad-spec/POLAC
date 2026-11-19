@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Calendar, FileText, CheckCircle2, Loader2, Flag, Send, CheckCheck, Clock, AlertTriangle } from 'lucide-react';
 import { ParadeRecordMetadata, CadetStatus, CadetDetail, CommandantRemark, SickbayVerification } from '../../../types';
 import { dbService } from '../../../services/dbService';
@@ -78,8 +79,13 @@ export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ 
     // Filter out completely "Present" cadets
     const nonPresentCadets = cadets.filter(c => c.status !== CadetStatus.PRESENT);
 
-    return (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+    return createPortal(
+        <div
+            role="dialog"
+            aria-modal="true"
+            onClick={onClose}
+            className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+        >
             <div
                 className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"
                 onClick={(e) => e.stopPropagation()}
@@ -282,6 +288,7 @@ export const SubmissionPreviewModal: React.FC<SubmissionPreviewModalProps> = ({ 
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };

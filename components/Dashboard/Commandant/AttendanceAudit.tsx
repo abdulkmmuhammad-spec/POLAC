@@ -26,6 +26,7 @@ import { CadetStatus, UserRole, SickbayVerification } from '../../../types';
 import { reportService } from '../../../services/reportService';
 import { dbService, supabase } from '../../../services/dbService';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
+import { isDFS } from '../../../utils/commandHierarchy';
 import { ParadeRemarkDrawer, ParadeRemarkTarget } from './ParadeRemarkDrawer';
 import * as XLSX from 'xlsx';
 
@@ -35,6 +36,7 @@ export const AttendanceAudit: React.FC = () => {
     const location = useLocation();
     const { currentUser } = useAuth();
     const isAdmin = currentUser?.role === UserRole.ADMIN;
+    const canDispatchRemarks = isDFS(currentUser);
     const {
         records,
         remarks,
@@ -854,8 +856,14 @@ export const AttendanceAudit: React.FC = () => {
                                                     className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95"
                                                 >
                                                     <MessageSquare size={13} className="shrink-0" />
-                                                    <span className="hidden md:inline">{isAdmin ? 'View Directives' : 'Remarks & Directives'}</span>
-                                                    <span className="md:hidden">{isAdmin ? 'Directives' : 'Remarks'}</span>
+                                                    <span className="hidden md:inline">
+                                                        {isAdmin || !canDispatchRemarks
+                                                            ? 'View Directives'
+                                                            : 'Remarks & Directives'}
+                                                    </span>
+                                                    <span className="md:hidden">
+                                                        {isAdmin || !canDispatchRemarks ? 'Directives' : 'Remarks'}
+                                                    </span>
                                                     {sessionRemarks.length > 0 && (
                                                         <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-black shrink-0">
                                                             {sessionRemarks.length}

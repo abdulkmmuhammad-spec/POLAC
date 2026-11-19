@@ -34,7 +34,7 @@ const formatRelativeTimestamp = (isoDate?: string): string => {
 
 /**
  * MedicalRemarksCenter — Unified WhatsApp / Instagram DM conversation list
- * matching Commandant and Course Officer Remarks hubs (Jakob's Law).
+ * with inclusive status indicators (text + icon alongside color rings).
  */
 export const MedicalRemarksCenter: React.FC = () => {
   const [verifications, setVerifications] = useState<SickbayVerification[]>([]);
@@ -101,9 +101,9 @@ export const MedicalRemarksCenter: React.FC = () => {
   };
 
   return (
-    <div className="p-3 sm:p-5 space-y-4 pb-24 max-w-4xl mx-auto">
-      {/* ── Top Search & Filter Toolbar (Same DM Pattern) ── */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-3 sm:p-4 space-y-3">
+    <div className="space-y-4">
+      {/* ── Top Search & Filter Toolbar ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-3.5 sm:p-4 space-y-3">
         <div className="relative flex items-center">
           <Search size={16} className="absolute left-3.5 text-slate-400 pointer-events-none" />
           <input
@@ -111,13 +111,14 @@ export const MedicalRemarksCenter: React.FC = () => {
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             placeholder="Search cadet, RC, squad, or message..."
-            className="w-full pl-10 pr-10 py-2.5 bg-slate-100/80 focus:bg-white border border-transparent focus:border-slate-300 rounded-full text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all"
+            className="w-full min-h-[44px] pl-10 pr-10 py-2 bg-slate-100/80 focus:bg-white border border-transparent focus:border-slate-300 rounded-full text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all"
           />
           {searchTerm && (
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-3 p-1 text-slate-400 hover:text-slate-600 rounded-full"
+              aria-label="Clear search"
+              className="absolute right-3 p-1.5 text-slate-400 hover:text-slate-600 rounded-full"
             >
               <X size={14} />
             </button>
@@ -137,14 +138,14 @@ export const MedicalRemarksCenter: React.FC = () => {
               key={pill.key}
               type="button"
               onClick={() => setFilter(pill.key)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`min-h-[38px] rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all whitespace-nowrap inline-flex items-center gap-1.5 ${
                 filter === pill.key
                   ? pill.active
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
               }`}
             >
               <span>{pill.label}</span>
-              <span className={`text-[11px] ${filter === pill.key ? 'opacity-80' : 'text-slate-400'}`}>
+              <span className={`font-mono text-[11px] ${filter === pill.key ? 'opacity-85' : 'text-slate-400'}`}>
                 {pill.count}
               </span>
             </button>
@@ -155,16 +156,16 @@ export const MedicalRemarksCenter: React.FC = () => {
       {/* ── DM Conversation List ── */}
       {isLoading ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 flex flex-col items-center justify-center gap-3">
-          <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs text-slate-400 font-medium">Loading conversations...</p>
+          <div className="w-8 h-8 border-3 border-blue-700 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-slate-500 font-medium">Loading conversations...</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-2.5">
-          <div className="w-11 h-11 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
             <MessageSquare size={22} />
           </div>
-          <h3 className="text-sm font-semibold text-slate-800">No medical remarks yet</h3>
-          <p className="text-xs text-slate-400 max-w-xs mx-auto">
+          <h3 className="text-base font-bold text-slate-900">No medical remarks yet</h3>
+          <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
             Remarks sent when marking cadets Not Admitted will appear here as chat threads.
           </p>
         </div>
@@ -203,10 +204,10 @@ export const MedicalRemarksCenter: React.FC = () => {
                     setActiveChat(v);
                   }
                 }}
-                className="px-4 py-3.5 flex items-center gap-3 hover:bg-slate-50/80 active:bg-slate-50 cursor-pointer transition-colors"
+                className="px-4 py-3.5 min-h-[68px] flex items-center gap-3 hover:bg-slate-50/80 active:bg-slate-50 cursor-pointer transition-colors"
               >
                 <div
-                  className={`w-[46px] h-[46px] rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-black tracking-tight ${ringClass}`}
+                  className={`w-[46px] h-[46px] rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold tracking-tight ${ringClass}`}
                 >
                   {monogram}
                 </div>
@@ -215,15 +216,15 @@ export const MedicalRemarksCenter: React.FC = () => {
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span
                       className={`truncate text-sm ${
-                        isReplied ? 'font-black text-slate-950' : 'font-semibold text-slate-800'
+                        isReplied ? 'font-bold text-slate-950' : 'font-semibold text-slate-800'
                       }`}
                     >
                       {v.cadetName}
                     </span>
-                    <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold shrink-0">
+                    <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold shrink-0">
                       {formatRC(v.courseNumber)}
                     </span>
-                    <span className="text-[11px] text-slate-400 font-medium truncate">
+                    <span className="text-xs text-slate-400 font-medium truncate">
                       • To {recipientLabel(v.targetedRecipientRole)}
                     </span>
                   </div>
@@ -242,11 +243,20 @@ export const MedicalRemarksCenter: React.FC = () => {
                     {formatRelativeTimestamp(lastMsg?.createdAt || v.verifiedAt || v.createdAt)}
                   </span>
                   {isReplied ? (
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600" title="New reply" />
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                      <span>Reply</span>
+                    </span>
                   ) : isResolved ? (
-                    <CheckCheck size={14} className="text-emerald-600" />
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                      <CheckCheck size={13} />
+                      <span>Resolved</span>
+                    </span>
                   ) : (
-                    <Clock size={13} className="text-rose-500" />
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600">
+                      <Clock size={12} />
+                      <span>Open</span>
+                    </span>
                   )}
                 </div>
               </div>

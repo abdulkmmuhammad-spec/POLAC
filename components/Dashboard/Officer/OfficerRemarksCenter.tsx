@@ -491,7 +491,10 @@ export const OfficerRemarksCenter: React.FC = () => {
                                             {formatRelativeTimestamp(lastMsg?.createdAt || v.verifiedAt || v.createdAt)}
                                         </span>
                                         {isNeedsReply ? (
-                                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                                <span>New</span>
+                                            </span>
                                         ) : isReplied ? (
                                             <span className="flex items-center gap-1 text-[11px] font-semibold text-blue-600">
                                                 <Clock size={13} />

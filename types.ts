@@ -319,3 +319,71 @@ export interface SickbayVerification {
   updatedAt?: string;
 }
 
+export interface CommandReportParadeDetail {
+  date: string;
+  paradeType: string;
+  present: number;
+  absent: number;
+  sick: number;
+  detention: number;
+  total: number;
+  rate: number;
+}
+
+export interface CommandReportRepeatAbsentee {
+  name: string;
+  squad: string;
+  absences: number;
+}
+
+export interface CommandReportCourseBreakdown {
+  courseNumber: number;
+  parades: number;
+  present: number;
+  absent: number;
+  sick: number;
+  detention: number;
+  total: number;
+  avgAttendance?: number;
+  paradeDetails?: CommandReportParadeDetail[];
+  repeatAbsentees?: CommandReportRepeatAbsentee[];
+}
+
+export interface CommandReportSummaryPayload {
+  totalParades: number;
+  attendanceRate: number;
+  totalPresent: number;
+  totalCadets: number;
+  totalAbsent: number;
+  totalSick: number;
+  totalDetention: number;
+  sickbayNoShows: number;
+  courseBreakdown: CommandReportCourseBreakdown[];
+}
+
+export interface CommandReportMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderDesignation?: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface CommandReport {
+  id: string;
+  senderId?: string;
+  senderName: string;
+  recipientRole: 'commandant' | 'deputy_commandant' | 'both';
+  weekStart: string;
+  weekEnd: string;
+  summaryPayload: CommandReportSummaryPayload;
+  executiveNote?: string;
+  messages: CommandReportMessage[];
+  status: 'sent' | 'acknowledged';
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
