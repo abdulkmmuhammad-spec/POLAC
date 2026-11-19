@@ -31,6 +31,7 @@ import { useParade } from '../../../context/ParadeContext';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
 import { getStatusFullLabel, getStatusBadgeStyles } from '../../../utils/statusHelpers';
 import { parseMisconductRemark } from '../../../utils/notificationUtils';
+import { markRemarkChatRead } from '../../../utils/executiveChatState';
 import { toast } from 'react-hot-toast';
 
 export interface ParadeRemarkTarget {
@@ -132,6 +133,21 @@ export const ParadeRemarkDrawer: React.FC<ParadeRemarkDrawerProps> = ({
     const [inputText, setInputText] = useState('');
     const [isSending, setIsSending] = useState(false);
     const [isResolving, setIsResolving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen || !currentUser) return;
+        const cNum = targetCourseNumber || submission?.courseNumber || currentUser.courseNumber || 0;
+        if (!cNum) return;
+        const courseRemarks = remarks.filter(r => Number(r.courseNumber) === Number(cNum));
+        let maxMs = 0;
+        for (const r of courseRemarks) {
+            const cMs = new Date(r.createdAt).getTime();
+            const rMs = r.respondedAt ? new Date(r.respondedAt).getTime() : 0;
+            if (!Number.isNaN(cMs) && cMs > maxMs) maxMs = cMs;
+            if (!Number.isNaN(rMs) && rMs > maxMs) maxMs = rMs;
+        }
+        markRemarkChatRead(currentUser.id, `course_${cNum}`, maxMs);
+    }, [isOpen, currentUser, targetCourseNumber, submission?.courseNumber, remarks]);
 
     // Collapsible Pinned Context / Parade Roll state
     const [isRollExpanded, setIsRollExpanded] = useState(false);

@@ -143,7 +143,7 @@ export const parseNotificationTarget = (n: Notification, viewerRole?: string): N
 
         // Extract counts from content string since DB metadata is missing
         // e.g. "Officer xyz submitted TATTOO parade state (Present: 140, Absent: 0, Sick: 0)"
-        let parsedCounts = undefined;
+        let parsedCounts = n.metadata?.counts;
         const presentMatch = content.match(/present:\s*(\d+)/i);
         const absentMatch = content.match(/absent:\s*(\d+)/i);
         const sickMatch = content.match(/sick:\s*(\d+)/i);
@@ -160,6 +160,8 @@ export const parseNotificationTarget = (n: Notification, viewerRole?: string): N
                 sick
             };
             isPerfectAttendance = (absent === 0 && sick === 0);
+        } else if (parsedCounts) {
+            isPerfectAttendance = (parsedCounts.absent ?? 0) === 0 && (parsedCounts.sick ?? 0) === 0;
         }
 
         return {

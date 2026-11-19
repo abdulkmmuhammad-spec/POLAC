@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Bell, AlertTriangle, Settings, User, ArrowRight,
@@ -8,6 +9,7 @@ import {
 import { Notification, UserRole, CommandantRemark } from '../../types';
 import { inferSeverity, getSeverityStyles, parseNotificationTarget, parseMisconductRemark } from '../../utils/notificationUtils';
 import { formatRC } from '../../utils/rcHelpers';
+import { acquireScrollLock, releaseScrollLock } from '../../utils/scrollLock';
 import { useParade } from '../../context/ParadeContext';
 import { useAuth } from '../../context/AuthContext';
 import { dbService } from '../../services/dbService';
@@ -123,6 +125,19 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
         });
         return anyContentMatch.length > 0 ? [anyContentMatch[0]] : (remarks.length > 0 ? [remarks[0]] : []);
     }, [notification, isParadeRemarkNotification, remarks]);
+
+    useEffect(() => {
+        if (!isOpen || !notification) return;
+        acquireScrollLock();
+        const handleKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', handleKey);
+        return () => {
+            releaseScrollLock();
+            window.removeEventListener('keydown', handleKey);
+        };
+    }, [isOpen, notification, onClose]);
 
     if (!notification) return null;
 
@@ -261,10 +276,12 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
         onClose();
     };
 
-    return (
+    if (typeof document === 'undefined') return null;
+
+    return createPortal(
         <AnimatePresence>
             {isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+                <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-6 overflow-y-auto">
                     {/* Backdrop */}
                     <motion.div
                         initial={{ opacity: 0 }}
@@ -709,7 +726,8 @@ export const NotificationPreviewModal: React.FC<NotificationPreviewModalProps> =
                     </motion.div>
                 </div>
             )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body
     );
 };
 

@@ -33,7 +33,8 @@ import { isDFS, isExecutiveCommand, isDeputyCommandant } from '../../../utils/co
 import {
     getLatestExecutiveActivity,
     getUnreadExecutiveCount,
-    markExecutiveChatRead
+    markExecutiveChatRead,
+    getLatestExecutiveItemMs
 } from '../../../utils/executiveChatState';
 import { ParadeRemarkDrawer, ParadeRemarkTarget } from './ParadeRemarkDrawer';
 import { SickbayChatDrawer } from '../Medical/SickbayChatDrawer';
@@ -739,7 +740,7 @@ export const RemarksCenter: React.FC = () => {
         const unreadCount = getUnreadExecutiveCount(myBriefs, currentUser, 'dfs');
 
         const openDfsChat = () => {
-            markExecutiveChatRead(currentUser?.id, 'dfs');
+            markExecutiveChatRead(currentUser?.id, 'dfs', getLatestExecutiveItemMs(myBriefs));
             setActiveExecutivePartner({
                 role: 'dfs',
                 title: 'Director Field Studies',
@@ -1268,7 +1269,11 @@ export const RemarksCenter: React.FC = () => {
                                     );
 
                                     const openExecChat = () => {
-                                        markExecutiveChatRead(currentUser?.id, exec.role);
+                                        markExecutiveChatRead(
+                                            currentUser?.id,
+                                            exec.role,
+                                            getLatestExecutiveItemMs(execReports)
+                                        );
                                         setActiveExecutivePartner({
                                             role: exec.role,
                                             title: exec.title,

@@ -1,6 +1,7 @@
-import { CommandReport, User } from '../types';
+import { CommandReport, CommandantRemark, User, UserRole } from '../types';
 
 const READ_STORAGE_PREFIX = 'polac_exec_chat_read_';
+const REMARK_READ_STORAGE_PREFIX = 'polac_remark_chat_read_';
 
 const isSameOfficer = (
   senderId?: string,
@@ -24,14 +25,36 @@ export const getLastReadTimestamp = (userId?: string | number, partnerKey?: stri
   }
 };
 
-export const markExecutiveChatRead = (userId?: string | number, partnerKey?: string): void => {
+/**
+ * Clock-skew-safe read receipt: stores max(now, latestItemMs) + 1000ms
+ * so server timestamps slightly ahead of the device clock never remain unread.
+ */
+export const markExecutiveChatRead = (
+  userId?: string | number,
+  partnerKey?: string,
+  latestItemMs?: number
+): void => {
   if (typeof window === 'undefined' || !userId || !partnerKey) return;
   try {
-    localStorage.setItem(`${READ_STORAGE_PREFIX}${userId}_${partnerKey}`, new Date().toISOString());
+    const safeMs = Math.max(Date.now(), latestItemMs || 0) + 1000;
+    localStorage.setItem(`${READ_STORAGE_PREFIX}${userId}_${partnerKey}`, new Date(safeMs).toISOString());
     window.dispatchEvent(new CustomEvent('command-reports-updated'));
   } catch {
     // ignore storage errors
   }
+};
+
+export const getLatestExecutiveItemMs = (reports: CommandReport[]): number => {
+  let maxMs = 0;
+  for (const rep of reports || []) {
+    const repMs = new Date(rep.createdAt).getTime();
+    if (!Number.isNaN(repMs) && repMs > maxMs) maxMs = repMs;
+    for (const msg of rep.messages || []) {
+      const msgMs = new Date(msg.createdAt).getTime();
+      if (!Number.isNaN(msgMs) && msgMs > maxMs) maxMs = msgMs;
+    }
+  }
+  return maxMs;
 };
 
 export interface ExecutiveActivitySummary {
@@ -124,3 +147,79 @@ export const getUnreadExecutiveCount = (
   return unread;
 };
 
+// ── WhatsApp-style read tracking for Course Officer & DFS Remarks threads ──
+
+export const markRemarkChatRead = (
+  userId?: string | number,
+  threadKey?: string,
+  latestItemMs?: number
+): void => {
+  if (typeof window === 'undefined' || !userId || !threadKey) return;
+  try {
+    const safeMs = Math.max(Date.now(), latestItemMs || 0) + 1000;
+    localStorage.setItem(
+      `${REMARK_READ_STORAGE_PREFIX}${userId}_${threadKey}`,
+      new Date(safeMs).toISOString()
+    );
+    window.dispatchEvent(new CustomEvent('remarks-read-updated'));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+export const getRemarkChatLastReadMs = (userId?: string | number, threadKey?: string): number => {
+  if (typeof window === 'undefined' || !userId || !threadKey) return 0;
+  try {
+    const raw = localStorage.getItem(`${REMARK_READ_STORAGE_PREFIX}${userId}_${threadKey}`);
+    return raw ? new Date(raw).getTime() || 0 : 0;
+  } catch {
+    return 0;
+  }
+};
+
+export const getUnreadRemarkCount = (
+  remarks: CommandantRemark[],
+  currentUser: User | null | undefined
+): number => {
+  if (!currentUser || !remarks || remarks.length === 0) return 0;
+
+  if (currentUser.role === UserRole.COURSE_OFFICER) {
+    let unread = 0;
+    for (const r of remarks) {
+      const matchesOfficer =
+        (r.courseOfficerId && String(r.courseOfficerId) === String(currentUser.id)) ||
+        (r.courseNumber &&
+          currentUser.courseNumber &&
+          Number(r.courseNumber) === Number(currentUser.courseNumber)) ||
+        (r.courseOfficerName &&
+          currentUser.fullName &&
+          r.courseOfficerName.toLowerCase() === currentUser.fullName.toLowerCase());
+      if (!matchesOfficer || r.status === 'resolved') continue;
+
+      const threadKey = `course_${r.courseNumber || currentUser.courseNumber || '0'}`;
+      const lastReadMs = getRemarkChatLastReadMs(currentUser.id, threadKey);
+      const itemMs = new Date(r.createdAt).getTime();
+      if (!r.officerResponse && (lastReadMs === 0 || (!Number.isNaN(itemMs) && itemMs > lastReadMs))) {
+        unread += 1;
+      }
+    }
+    return unread;
+  }
+
+  // DFS / Senior Officer: count unread Course Officer replies
+  let unread = 0;
+  for (const r of remarks) {
+    if (r.status === 'resolved') continue;
+    const hasReply = Boolean(r.officerResponse) || r.status === 'addressed';
+    if (!hasReply) continue;
+
+    const threadKey = `course_${r.courseNumber || '0'}`;
+    const lastReadMs = getRemarkChatLastReadMs(currentUser.id, threadKey);
+    const replyIso = r.respondedAt || r.createdAt;
+    const replyMs = new Date(replyIso).getTime();
+    if (lastReadMs === 0 || (!Number.isNaN(replyMs) && replyMs > lastReadMs)) {
+      unread += 1;
+    }
+  }
+  return unread;
+};

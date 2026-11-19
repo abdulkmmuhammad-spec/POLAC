@@ -17,7 +17,7 @@ import { useParade } from '../../context/ParadeContext';
 import { UserRole } from '../../types';
 import { dbService, supabase } from '../../services/dbService';
 import { isExecutiveCommand, isDeputyCommandant, isDFS } from '../../utils/commandHierarchy';
-import { getUnreadExecutiveCount } from '../../utils/executiveChatState';
+import { getUnreadExecutiveCount, getUnreadRemarkCount } from '../../utils/executiveChatState';
 
 interface BottomNavItem {
     path: string;
@@ -51,32 +51,19 @@ export const BottomNav: React.FC = () => {
     const isIOS = useIsIOS();
     const shouldReduceMotion = useReducedMotion();
 
-    // Count remarks needing review for Commandant / Senior Officers
-    const commandantNeedsReviewCount = useMemo(() => {
-        return remarks.filter(
-            r => r.status !== 'resolved' && (Boolean(r.officerResponse) || r.status === 'addressed')
-        ).length;
-    }, [remarks]);
+    const [remarkReadTick, setRemarkReadTick] = useState(0);
 
-    const commandantActiveCount = useMemo(() => {
-        return remarks.filter(r => r.status !== 'resolved').length;
-    }, [remarks]);
+    useEffect(() => {
+        const bump = () => setRemarkReadTick(t => t + 1);
+        window.addEventListener('remarks-read-updated', bump);
+        return () => window.removeEventListener('remarks-read-updated', bump);
+    }, []);
 
-    // Count pending remarks for the logged-in Course Officer
-    const officerPendingRemarksCount = useMemo(() => {
-        if (!currentUser || currentUser.role !== UserRole.COURSE_OFFICER) return 0;
-        return remarks.filter(r => {
-            const matchesOfficer =
-                (r.courseOfficerId && String(r.courseOfficerId) === String(currentUser.id)) ||
-                (r.courseNumber &&
-                    currentUser.courseNumber &&
-                    Number(r.courseNumber) === Number(currentUser.courseNumber)) ||
-                (r.courseOfficerName &&
-                    currentUser.fullName &&
-                    r.courseOfficerName.toLowerCase() === currentUser.fullName.toLowerCase());
-            return matchesOfficer && r.status === 'pending' && !r.officerResponse;
-        }).length;
-    }, [remarks, currentUser]);
+    // WhatsApp-style unread remark count (clears when user opens the chat)
+    const unreadRemarkCount = useMemo(() => {
+        void remarkReadTick;
+        return getUnreadRemarkCount(remarks, currentUser);
+    }, [remarks, currentUser, remarkReadTick]);
 
     // Live count of pending sickbay verifications for Medical Officer
     const [medicalPendingCount, setMedicalPendingCount] = React.useState(0);
@@ -178,13 +165,7 @@ export const BottomNav: React.FC = () => {
 
         if (currentUser.role === UserRole.COMMANDANT) {
             const isExec = isExecutiveCommand(currentUser);
-            const dfsRemarkBadge =
-                commandantNeedsReviewCount > 0
-                    ? commandantNeedsReviewCount
-                    : commandantActiveCount > 0
-                    ? commandantActiveCount
-                    : 0;
-            const totalDfsBadge = dfsRemarkBadge + unreadBriefsCount;
+            const totalDfsBadge = unreadRemarkCount + unreadBriefsCount;
             const cmdBadge = isExec
                 ? unreadBriefsCount > 0
                     ? unreadBriefsCount
@@ -199,13 +180,7 @@ export const BottomNav: React.FC = () => {
                     label: isExec ? 'Briefs' : 'Remarks',
                     icon: MessageSquare,
                     badge: cmdBadge,
-                    badgeTone: isExec
-                        ? 'blue'
-                        : unreadBriefsCount > 0
-                        ? 'blue'
-                        : commandantNeedsReviewCount > 0
-                        ? 'amber'
-                        : 'blue'
+                    badgeTone: 'blue'
                 },
                 { path: '/commandant/audit', label: 'Audit', icon: FileText }
             ];
@@ -219,16 +194,14 @@ export const BottomNav: React.FC = () => {
                 path: '/officer/remarks',
                 label: 'Remarks',
                 icon: MessageSquare,
-                badge: officerPendingRemarksCount > 0 ? officerPendingRemarksCount : undefined,
-                badgeTone: 'amber'
+                badge: unreadRemarkCount > 0 ? unreadRemarkCount : undefined,
+                badgeTone: 'blue'
             },
             { path: '/officer/history', label: 'History', icon: History }
         ];
     }, [
         currentUser,
-        commandantNeedsReviewCount,
-        commandantActiveCount,
-        officerPendingRemarksCount,
+        unreadRemarkCount,
         medicalPendingCount,
         unreadBriefsCount
     ]);

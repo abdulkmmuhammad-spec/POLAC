@@ -1,11 +1,19 @@
-import React, { useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence, useReducedMotion, PanInfo } from 'framer-motion';
 import {
-    X, Bell, CheckCircle, AlertTriangle, Settings,
-    History, Trash2, CheckCheck, Check, ChevronRight
+    X,
+    Bell,
+    CheckCircle,
+    AlertTriangle,
+    Settings,
+    Trash2,
+    CheckCheck,
+    ChevronRight
 } from 'lucide-react';
 import { Notification } from '../../types';
 import { inferSeverity, getSeverityStyles } from '../../utils/notificationUtils';
+import { acquireScrollLock, releaseScrollLock } from '../../utils/scrollLock';
 
 interface NotificationDrawerProps {
     isOpen: boolean;
@@ -17,12 +25,33 @@ interface NotificationDrawerProps {
     onSelectNotification?: (notification: Notification) => void;
 }
 
+type FilterTab = 'all' | 'unread';
+
+const useIsMobileSheet = (): boolean => {
+    const [isMobile, setIsMobile] = useState(() =>
+        typeof window !== 'undefined' ? window.innerWidth < 640 : false
+    );
+
+    useEffect(() => {
+        const mq = window.matchMedia('(max-width: 639px)');
+        const update = () => setIsMobile(mq.matches);
+        update();
+        mq.addEventListener('change', update);
+        return () => mq.removeEventListener('change', update);
+    }, []);
+
+    return isMobile;
+};
+
 const getIconForSeverity = (severity: 'critical' | 'info' | 'system') => {
     const styles = getSeverityStyles(severity);
-    const Icon = severity === 'critical' ? AlertTriangle : (severity === 'system' ? Settings : CheckCircle);
-    
+    const Icon =
+        severity === 'critical' ? AlertTriangle : severity === 'system' ? Settings : CheckCircle;
+
     return (
-        <div className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${styles.bg} ${styles.text} shadow-sm border ${styles.border.replace('border-', 'border-opacity-50 border-')}`}>
+        <div
+            className={`shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center ${styles.bg} ${styles.text} border border-slate-200/60`}
+        >
             <Icon size={18} />
         </div>
     );
@@ -30,7 +59,7 @@ const getIconForSeverity = (severity: 'critical' | 'info' | 'system') => {
 
 const formatTime = (timestamp: string): string => {
     const date = new Date(timestamp);
-    if (isNaN(date.getTime())) return 'Unknown time';
+    if (isNaN(date.getTime())) return '';
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     if (diffMs < 0) return 'Just now';
@@ -45,7 +74,12 @@ const formatTime = (timestamp: string): string => {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 
-// ─── Main Component ──────────────────────────────────────────────────
+const isWithinLast24Hours = (timestamp: string): boolean => {
+    const ms = new Date(timestamp).getTime();
+    if (isNaN(ms)) return false;
+    return Date.now() - ms < 24 * 60 * 60 * 1000;
+};
+
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
     isOpen,
     onClose,
@@ -55,207 +89,298 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
     onClearAll,
     onSelectNotification
 }) => {
-    const unreadCount = notifications.filter(n => !n.read).length;
+    const shouldReduceMotion = useReducedMotion();
+    const isMobile = useIsMobileSheet();
+    const [activeTab, setActiveTab] = useState<FilterTab>('all');
+
+    const visibleNotifications = useMemo(
+        () =>
+            notifications.filter(
+                n => !(n.type === 'system' && n.title.includes('Modified'))
+            ),
+        [notifications]
+    );
+
+    const unreadCount = useMemo(
+        () => visibleNotifications.filter(n => !n.read).length,
+        [visibleNotifications]
+    );
+
+    const filteredNotifications = useMemo(
+        () =>
+            activeTab === 'unread'
+                ? visibleNotifications.filter(n => !n.read)
+                : visibleNotifications,
+        [visibleNotifications, activeTab]
+    );
+
+    const { todayItems, earlierItems } = useMemo(() => {
+        const today: Notification[] = [];
+        const earlier: Notification[] = [];
+        for (const n of filteredNotifications) {
+            if (isWithinLast24Hours(n.timestamp)) {
+                today.push(n);
+            } else {
+                earlier.push(n);
+            }
+        }
+        return { todayItems: today, earlierItems: earlier };
+    }, [filteredNotifications]);
 
     useEffect(() => {
+        if (!isOpen) return;
+        acquireScrollLock();
+
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') onClose();
         };
-        if (isOpen) window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            releaseScrollLock();
+            window.removeEventListener('keydown', handleKeyDown);
+        };
     }, [isOpen, onClose]);
 
-    return (
+    const handleDragEnd = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+        if (info.offset.y > 90 || info.velocity.y > 500) {
+            onClose();
+        }
+    };
+
+    if (typeof document === 'undefined') return null;
+
+    const renderRow = (n: Notification) => {
+        const severity = inferSeverity(n);
+        const isUnread = !n.read;
+
+        return (
+            <div
+                key={n.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                    if (isUnread) onMarkRead(n.id);
+                    onSelectNotification?.(n);
+                }}
+                onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (isUnread) onMarkRead(n.id);
+                        onSelectNotification?.(n);
+                    }
+                }}
+                className={`min-h-[64px] px-4 py-3.5 flex items-start gap-3 cursor-pointer transition-colors ${
+                    isUnread
+                        ? 'bg-blue-50/45 hover:bg-blue-50/75'
+                        : 'bg-white hover:bg-slate-50'
+                }`}
+            >
+                {getIconForSeverity(severity)}
+
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                        <p
+                            className={`text-sm truncate ${
+                                isUnread
+                                    ? 'font-bold text-slate-900'
+                                    : 'font-medium text-slate-700'
+                            }`}
+                        >
+                            {n.title}
+                        </p>
+                        <span className="text-[11px] font-medium text-slate-400 shrink-0">
+                            {formatTime(n.timestamp)}
+                        </span>
+                    </div>
+                    <p className="text-xs text-slate-500 line-clamp-2 mt-0.5 leading-relaxed">
+                        {n.content}
+                    </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 self-center shrink-0 pl-1">
+                    {isUnread && (
+                        <span
+                            className="w-2 h-2 rounded-full bg-blue-600"
+                            aria-label="Unread"
+                        />
+                    )}
+                    <ChevronRight size={16} className="text-slate-300" />
+                </div>
+            </div>
+        );
+    };
+
+    return createPortal(
         <AnimatePresence>
             {isOpen && (
                 <>
-                    {/* ── Backdrop ── */}
+                    {/* Dim Backdrop */}
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-md"
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
+                        className="fixed inset-0 z-[115] bg-slate-950/50 backdrop-blur-xs"
                         onClick={onClose}
                     />
 
-                    {/* ── Drawer Panel (Glassmorphic) ── */}
+                    {/* Mobile Bottom Sheet / Desktop Right Sheet */}
                     <motion.div
-                        initial={{ x: '100%' }}
-                        animate={{ x: 0 }}
-                        exit={{ x: '100%' }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className="fixed right-0 top-0 h-full w-full sm:w-[440px] bg-white/80 backdrop-blur-2xl border-l border-white/20 shadow-[-20px_0_50px_rgba(0,0,0,0.1)] z-[70] flex flex-col overflow-hidden"
+                        initial={
+                            shouldReduceMotion
+                                ? { opacity: 0 }
+                                : isMobile
+                                ? { y: '100%' }
+                                : { x: '100%' }
+                        }
+                        animate={{ x: 0, y: 0, opacity: 1 }}
+                        exit={
+                            shouldReduceMotion
+                                ? { opacity: 0 }
+                                : isMobile
+                                ? { y: '100%' }
+                                : { x: '100%' }
+                        }
+                        transition={
+                            shouldReduceMotion
+                                ? { duration: 0.12 }
+                                : { type: 'spring', damping: 28, stiffness: 300 }
+                        }
+                        drag={isMobile && !shouldReduceMotion ? 'y' : false}
+                        dragConstraints={{ top: 0 }}
+                        dragElastic={{ top: 0, bottom: 0.3 }}
+                        onDragEnd={handleDragEnd}
+                        className="fixed inset-x-0 bottom-0 max-h-[88dvh] rounded-t-3xl sm:inset-y-0 sm:right-0 sm:left-auto sm:top-0 sm:max-h-none sm:w-[420px] sm:rounded-l-3xl sm:rounded-tr-none z-[120] bg-white shadow-2xl border-t sm:border-t-0 sm:border-l border-slate-200 flex flex-col overflow-hidden"
                         role="dialog"
                         aria-modal="true"
+                        aria-label="Notifications"
                     >
-                        {/* ── Header Bar ── */}
-                        <div className="px-6 py-6 border-b border-slate-200/50 bg-gradient-to-br from-blue-900/90 to-blue-800/90 text-white shrink-0 shadow-lg">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <motion.div 
-                                        animate={{ rotate: unreadCount > 0 ? [0, -10, 10, -10, 10, 0] : 0 }}
-                                        transition={{ duration: 0.5, repeat: unreadCount > 0 ? Infinity : 0, repeatDelay: 3 }}
-                                        className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10"
+                        {/* Mobile Drag Pill */}
+                        <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+                            <div className="w-9 h-1 rounded-full bg-slate-300" />
+                        </div>
+
+                        {/* Header */}
+                        <div className="px-5 pt-2 sm:pt-[max(1rem,env(safe-area-inset-top))] pb-3 border-b border-slate-200 bg-white space-y-3 shrink-0">
+                            <div className="flex items-center justify-between gap-3">
+                                <h2 className="text-lg font-bold text-slate-900 tracking-tight truncate">
+                                    Notifications
+                                </h2>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    {unreadCount > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={onMarkAllRead}
+                                            className="min-h-[44px] px-3 rounded-full text-xs font-semibold text-blue-700 hover:bg-blue-50 inline-flex items-center gap-1.5 transition-colors"
+                                        >
+                                            <CheckCheck size={14} />
+                                            <span>Mark all read</span>
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={onClose}
+                                        aria-label="Close notifications"
+                                        className="w-11 h-11 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors"
                                     >
-                                        <Bell size={24} className="text-blue-200" />
-                                    </motion.div>
-                                    <div>
-                                        <h2 className="text-xl font-black tracking-tight">Intelligence Feed</h2>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                                            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-200">
-                                                {unreadCount > 0
-                                                    ? `${unreadCount} unread mission alert${unreadCount > 1 ? 's' : ''}`
-                                                    : 'Sector Clear'}
-                                            </p>
-                                        </div>
-                                    </div>
+                                        <X size={18} />
+                                    </button>
                                 </div>
+                            </div>
+
+                            {/* 2-Segment Control: All | Unread */}
+                            <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl">
                                 <button
-                                    onClick={onClose}
-                                    className="p-2.5 hover:bg-white/10 rounded-xl transition-all border border-transparent hover:border-white/10"
+                                    type="button"
+                                    onClick={() => setActiveTab('all')}
+                                    className={`min-h-[40px] px-3 rounded-lg text-xs font-semibold transition-all ${
+                                        activeTab === 'all'
+                                            ? 'bg-white text-slate-900 shadow-2xs'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                    }`}
                                 >
-                                    <X size={20} />
+                                    All ({visibleNotifications.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTab('unread')}
+                                    className={`min-h-[40px] px-3 rounded-lg text-xs font-semibold transition-all ${
+                                        activeTab === 'unread'
+                                            ? 'bg-white text-slate-900 shadow-2xs'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                >
+                                    Unread ({unreadCount})
                                 </button>
                             </div>
                         </div>
 
-                        {/* ── Action Bar ── */}
-                        {notifications.length > 0 && (
-                            <div className="px-6 py-3 border-b border-slate-200/30 bg-white/30 flex items-center justify-between shrink-0">
+                        {/* Chronological Feed */}
+                        <div className="flex-1 overflow-y-auto bg-white">
+                            {filteredNotifications.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full px-8 text-center py-14">
+                                    <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
+                                        <Bell size={24} className="text-slate-400" />
+                                    </div>
+                                    <p className="text-sm font-bold text-slate-800 mb-1">
+                                        {activeTab === 'unread'
+                                            ? 'You are all caught up'
+                                            : 'No notifications yet'}
+                                    </p>
+                                    <p className="text-xs text-slate-500 max-w-xs leading-relaxed">
+                                        {activeTab === 'unread'
+                                            ? 'All alerts have been reviewed.'
+                                            : 'Parade submissions, executive briefs, and sickbay updates will appear here.'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div>
+                                    {todayItems.length > 0 && (
+                                        <div>
+                                            <div className="sticky top-0 z-10 px-4 py-1.5 bg-slate-50/95 backdrop-blur-xs border-y border-slate-100 text-xs font-semibold text-slate-500">
+                                                Today
+                                            </div>
+                                            <div className="divide-y divide-slate-100">
+                                                {todayItems.map(renderRow)}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {earlierItems.length > 0 && (
+                                        <div>
+                                            <div className="sticky top-0 z-10 px-4 py-1.5 bg-slate-50/95 backdrop-blur-xs border-y border-slate-100 text-xs font-semibold text-slate-500">
+                                                Earlier
+                                            </div>
+                                            <div className="divide-y divide-slate-100">
+                                                {earlierItems.map(renderRow)}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        {visibleNotifications.length > 0 && (
+                            <div className="px-5 py-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+                                <span className="text-xs text-slate-500">
+                                    {visibleNotifications.length} notification
+                                    {visibleNotifications.length === 1 ? '' : 's'}
+                                </span>
                                 <button
-                                    onClick={onMarkAllRead}
-                                    className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-blue-600 hover:text-blue-700 transition-colors bg-blue-50/50 px-3 py-1.5 rounded-lg border border-blue-100/50"
-                                >
-                                    <CheckCheck size={14} />
-                                    Acknowledge All
-                                </button>
-                                <button
+                                    type="button"
                                     onClick={onClearAll}
-                                    className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-slate-400 hover:text-rose-600 transition-colors px-2 py-1"
+                                    className="min-h-[44px] px-3 rounded-full text-xs font-semibold text-rose-600 hover:bg-rose-50 inline-flex items-center gap-1.5 transition-colors"
                                 >
                                     <Trash2 size={14} />
-                                    Purge Data
+                                    <span>Clear all</span>
                                 </button>
                             </div>
                         )}
-
-                        {/* ── Notification List ── */}
-                        <div className="flex-1 overflow-y-auto scrollbar-hide py-2">
-                            <AnimatePresence mode="popLayout" initial={false}>
-                                {notifications.length === 0 ? (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        className="flex flex-col items-center justify-center h-full px-10 text-center"
-                                    >
-                                        <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center mb-6 border border-slate-200/80">
-                                            <Bell size={32} className="text-slate-300" />
-                                        </div>
-                                        <p className="text-base font-bold text-slate-700 mb-1.5">
-                                            No new notifications
-                                        </p>
-                                        <p className="text-xs text-slate-500 leading-relaxed">
-                                            Real-time parade, remark, and sickbay alerts will appear here.
-                                        </p>
-                                    </motion.div>
-                                ) : (
-                                    <div className="space-y-1.5 px-3">
-                                        {notifications.map((n, idx) => {
-                                            const severity = inferSeverity(n);
-                                            const styles = getSeverityStyles(severity);
-                                            
-                                            // Noise reduction: Hide generic "Modified" notifications
-                                            if (n.type === 'system' && n.title.includes('Modified')) return null;
-
-                                            return (
-                                                <motion.div
-                                                    key={n.id}
-                                                    layout
-                                                    initial={{ opacity: 0, x: 50 }}
-                                                    animate={{ opacity: 1, x: 0 }}
-                                                    exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-                                                    transition={{ 
-                                                        type: 'spring', 
-                                                        damping: 20, 
-                                                        stiffness: 150,
-                                                        delay: idx < 10 ? idx * 0.05 : 0 
-                                                    }}
-                                                    onClick={() => onSelectNotification?.(n)}
-                                                    className={`relative group rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] hover:shadow-md ${
-                                                        !n.read 
-                                                        ? 'bg-blue-50/60 border-blue-200 shadow-sm hover:bg-blue-50/90' 
-                                                        : 'bg-white/40 border-slate-200/50 hover:bg-white hover:border-blue-200'
-                                                    } ${severity === 'critical' && !n.read ? 'ring-1 ring-rose-400/30' : ''}`}
-                                                >
-                                                    <div className="p-4 flex gap-4">
-                                                        <div className="relative">
-                                                            {getIconForSeverity(severity)}
-                                                            {severity === 'critical' && !n.read && (
-                                                                <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse" />
-                                                            )}
-                                                        </div>
-                                                        
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-start justify-between gap-2">
-                                                                <p className={`text-sm font-black leading-tight mb-1 truncate ${n.read ? 'text-slate-600' : 'text-slate-900'}`}>
-                                                                    {n.title}
-                                                                </p>
-                                                                <div className="flex items-center gap-1">
-                                                                    {!n.read && (
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                onMarkRead(n.id);
-                                                                            }}
-                                                                            className="p-1.5 rounded-lg bg-white shadow-sm border border-slate-200 text-blue-500 hover:bg-blue-500 hover:text-white transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100"
-                                                                            title="Mark as read"
-                                                                        >
-                                                                            <Check size={14} strokeWidth={3} />
-                                                                        </button>
-                                                                    )}
-                                                                    <div className="text-slate-400 group-hover:text-blue-600 transition-colors pl-0.5">
-                                                                        <ChevronRight size={16} />
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <p className={`text-xs leading-relaxed line-clamp-2 ${n.read ? 'text-slate-400' : 'text-slate-600'}`}>
-                                                                {n.content}
-                                                            </p>
-                                                            <div className="flex items-center gap-4 mt-3">
-                                                                <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${styles.badge}`}>
-                                                                    {styles.label}
-                                                                </span>
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <History size={12} className="text-slate-300" />
-                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                                                        {formatTime(n.timestamp)}
-                                                                    </span>
-                                                                </div>
-                                                                <span className="text-[9px] font-bold text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider ml-auto">
-                                                                    Inspect
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </motion.div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-
-                        {/* ── Footer ── */}
-                        <div className="px-6 py-4 border-t border-slate-200/30 bg-white/50 shrink-0 backdrop-blur-md">
-                            <p className="text-[10px] text-center font-black uppercase tracking-[0.2em] text-slate-400">
-                                Secured by Antigravity Command
-                            </p>
-                        </div>
                     </motion.div>
                 </>
             )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body
     );
 };

@@ -16,7 +16,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
 import { CommandReport } from '../../../types';
 import { isDFS } from '../../../utils/commandHierarchy';
-import { markExecutiveChatRead } from '../../../utils/executiveChatState';
+import { markExecutiveChatRead, getLatestExecutiveItemMs } from '../../../utils/executiveChatState';
 import { exportCommandReportPDF } from './WeeklyCommandReportSheet';
 import { toast } from 'react-hot-toast';
 
@@ -81,12 +81,16 @@ export const ExecutiveChatDrawer: React.FC<ExecutiveChatDrawerProps> = ({
 
   useEffect(() => {
     if (isOpen && currentUser) {
-      markExecutiveChatRead(currentUser.id, partnerKey);
+      markExecutiveChatRead(
+        currentUser.id,
+        partnerKey,
+        getLatestExecutiveItemMs(orderedReports)
+      );
     }
     if (isOpen && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [isOpen, orderedReports.length, latestReport?.messages?.length, currentUser, partnerKey]);
+  }, [isOpen, orderedReports, latestReport?.messages?.length, currentUser, partnerKey]);
 
   const handleSendReply = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

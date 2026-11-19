@@ -17,7 +17,7 @@ import { useParade } from '../../context/ParadeContext';
 import { UserRole } from '../../types';
 import { dbService, supabase } from '../../services/dbService';
 import { isExecutiveCommand, isDeputyCommandant, isDFS } from '../../utils/commandHierarchy';
-import { getUnreadExecutiveCount } from '../../utils/executiveChatState';
+import { getUnreadExecutiveCount, getUnreadRemarkCount } from '../../utils/executiveChatState';
 
 interface SidebarProps {
     isOpen?: boolean;
@@ -83,12 +83,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         };
     }, [currentUser, isExecutiveCmd]);
 
-    // Count remarks where Course Officer replied and awaits acknowledgment (or active unresolved remarks)
-    const needsReviewCount = React.useMemo(() => {
-        return remarks.filter(
-            r => r.status !== 'resolved' && (Boolean(r.officerResponse) || r.status === 'addressed')
-        ).length;
-    }, [remarks]);
+    const [remarkReadTick, setRemarkReadTick] = React.useState(0);
+
+    React.useEffect(() => {
+        const bump = () => setRemarkReadTick(t => t + 1);
+        window.addEventListener('remarks-read-updated', bump);
+        return () => window.removeEventListener('remarks-read-updated', bump);
+    }, []);
+
+    const unreadRemarkCount = React.useMemo(() => {
+        void remarkReadTick;
+        return getUnreadRemarkCount(remarks, currentUser);
+    }, [remarks, currentUser, remarkReadTick]);
 
     const activeUnresolvedCount = React.useMemo(() => {
         return remarks.filter(r => r.status !== 'resolved').length;
@@ -131,16 +137,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                       ? unreadBriefsCount > 0
                           ? unreadBriefsCount
                           : undefined
-                      : needsReviewCount + unreadBriefsCount > 0
-                      ? needsReviewCount + unreadBriefsCount
-                      : activeUnresolvedCount > 0
-                      ? activeUnresolvedCount
+                      : unreadRemarkCount + unreadBriefsCount > 0
+                      ? unreadRemarkCount + unreadBriefsCount
                       : undefined,
-                  badgeTone: isExecutiveCmd || unreadBriefsCount > 0
-                      ? 'blue'
-                      : needsReviewCount > 0
-                      ? 'amber'
-                      : 'blue'
+                  badgeTone: 'blue'
               },
               { path: '/commandant/audit', icon: FileText, label: 'Attendance Audit' }
           ];
