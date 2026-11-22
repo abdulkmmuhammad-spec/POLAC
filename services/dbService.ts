@@ -553,6 +553,61 @@ export const dbService = {
     }
   },
 
+  wipeApplicationData: async (payload: {
+    adminId: string;
+    currentPassword: string;
+    confirmationPhrase: string;
+    callerIdentity?: { email?: string; username?: string };
+  }): Promise<{ deletedCadets?: number; deletedParadeRecords?: number; deletedOfficers?: number }> => {
+    const { adminId, currentPassword, confirmationPhrase, callerIdentity } = payload;
+    if (!adminId) {
+      throw new Error('Missing administrator identifier.');
+    }
+    if (confirmationPhrase.trim().toUpperCase() !== 'WIPE ALL DATA') {
+      throw new Error('Please type WIPE ALL DATA exactly to confirm.');
+    }
+
+    const resolvedAdminId = await resolveActiveAdminId(adminId, callerIdentity);
+
+    // Strictly rely on the atomic SECURITY DEFINER RPC (never attempt partial client-side deletes)
+    const { data: rpcData, error: rpcError } = await supabase.rpc('admin_wipe_application_data', {
+      p_admin_id: resolvedAdminId,
+      p_current_password: currentPassword,
+      p_confirmation_phrase: confirmationPhrase.trim()
+    });
+
+    if (rpcError) {
+      const msg = rpcError.message || '';
+      if (
+        rpcError.code === 'PGRST202' ||
+        rpcError.code === '42883' ||
+        msg.toLowerCase().includes('could not find the function')
+      ) {
+        throw new Error(
+          'Database migration 20261122_01_admin_wipe_application_data is required to execute a full wipe.'
+        );
+      }
+      throw new Error(msg.replace(/^[A-Z_]+:\s*/, '') || 'Failed to wipe application data.');
+    }
+
+    // Flush all cached SWR snapshots immediately so stale counts never linger
+    if (typeof window !== 'undefined') {
+      try {
+        Object.keys(localStorage)
+          .filter(key => key.startsWith('polac_swr_'))
+          .forEach(key => localStorage.removeItem(key));
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    return {
+      deletedCadets: rpcData?.deletedCadets,
+      deletedParadeRecords: rpcData?.deletedParadeRecords,
+      deletedOfficers: rpcData?.deletedOfficers
+    };
+  },
+
   // ─── Parade Records ───────────────────────────────────────────────────────
 
   getRecords: async ({
@@ -1200,14 +1255,61 @@ export const dbService = {
 
       if (from !== undefined && to !== undefined) {
         query = query.range(from, to);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      // Paginate in 1,000-row chunks when no explicit range is provided so large cohorts aren't truncated
+      const pageSize = 1000;
+      const allRows: any[] = [];
+      let offset = 0;
+      while (true) {
+        const { data, error } = await query.range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allRows.push(...data);
+        if (data.length < pageSize) break;
+        offset += pageSize;
+      }
+      return allRows;
     } catch (err) {
       console.error('Supabase Error (getCadetRegistry):', err);
       return [];
+    }
+  },
+
+  /**
+   * Fetches every cadet record across all Regular Courses and statuses in 1,000-row chunks
+   * for complete pre-wipe CSV backups.
+   */
+  getAllCadetsForBackup: async (): Promise<any[]> => {
+    try {
+      const pageSize = 1000;
+      const allRows: any[] = [];
+      let offset = 0;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from('cadet_registry')
+          .select('id, name, squad, course_number, year_group, status, npa_number, admission_year')
+          .order('course_number', { ascending: true })
+          .order('squad', { ascending: true })
+          .order('name', { ascending: true })
+          .order('id', { ascending: true })
+          .range(offset, offset + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allRows.push(...data);
+        if (data.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      return allRows;
+    } catch (err) {
+      console.error('Supabase Error (getAllCadetsForBackup):', err);
+      throw err;
     }
   },
 

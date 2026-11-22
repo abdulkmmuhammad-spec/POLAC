@@ -270,23 +270,23 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                         </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                        {/* New NPA Format Download (CSV) */}
+                        {/* NPA Format Download (CSV) */}
                         <button
                             type="button"
                             onClick={downloadNPACSVTemplate}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold shadow-2xs transition-all group"
-                            title="2 Columns: NPA Number, Name"
+                            title="4 Columns: NPA Number, Name, Squad, RC"
                         >
                             <Download size={13} className="group-hover:translate-y-0.5 transition-transform" />
                             <span>NPA Format (CSV)</span>
                         </button>
 
-                        {/* New NPA Format Download (Excel) */}
+                        {/* NPA Format Download (Excel) */}
                         <button
                             type="button"
                             onClick={downloadNPAExcelTemplate}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-blue-50 text-blue-800 border border-blue-200 rounded-lg text-xs font-semibold shadow-2xs transition-all group"
-                            title="2 Columns: NPA Number, Name (.xlsx)"
+                            title="4 Columns: NPA Number, Name, Squad, RC (.xlsx)"
                         >
                             <Download size={13} className="group-hover:translate-y-0.5 transition-transform" />
                             <span>NPA Format (XLSX)</span>
@@ -309,7 +309,7 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                         <div className="flex bg-white p-1 rounded-lg border border-slate-200 shadow-2xs shrink-0">
                             {[
                                 { id: 'AUTO', label: 'Auto-Detect' },
-                                { id: 'NPA_FORMAT', label: 'NPA Format (2-Col)' }
+                                { id: 'NPA_FORMAT', label: 'NPA Format (4-Col)' }
                             ].map(opt => (
                                 <button
                                     key={opt.id}
@@ -354,7 +354,7 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                                 Drop Cadet Enrollment File Here, or Click to Browse
                             </h4>
                             <p className="text-xs text-slate-500 max-w-md mx-auto mb-3">
-                                Supports CSV, XLSX, and XLS formats. Accepts either the <span className="font-bold text-slate-700">New NPA Template</span> (NPA Number, Name) or <span className="font-bold text-slate-700">Legacy Template</span> (Name, Squad, RC_Number).
+                                Supports CSV, XLSX, and XLS formats. Required columns: <span className="font-bold text-slate-700">NPA Number, Name, Squad, RC</span>.
                             </p>
                             <div className="inline-flex items-center gap-2 px-3 py-1 bg-white border border-slate-200 rounded-full text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm">
                                 <span>Accepted extensions: .csv, .xlsx, .xls</span>
@@ -386,8 +386,8 @@ export const CadetUploadModal: React.FC<CadetUploadModalProps> = ({
                                                         ? 'bg-blue-100 text-blue-800 border border-blue-300'
                                                         : 'bg-rose-100 text-rose-800 border border-rose-300'
                                                 }`}>
-                                                    {parseResult.detectedFormat === 'NPA_FORMAT' && '⚡ Detected: New NPA 2-Column Template'}
-                                                    {parseResult.detectedFormat === 'LEGACY_FORMAT' && '📋 Detected: Legacy 3-Column Template'}
+                                                    {parseResult.detectedFormat === 'NPA_FORMAT' && '⚡ Detected: NPA Template'}
+                                                    {parseResult.detectedFormat === 'LEGACY_FORMAT' && '📋 Detected: Legacy Template'}
                                                     {parseResult.detectedFormat === 'UNKNOWN' && '⚠️ Unknown Schema Format'}
                                                 </span>
                                             </div>

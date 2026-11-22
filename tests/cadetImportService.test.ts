@@ -182,6 +182,31 @@ describe('Concurrent Ingestion Pipeline & Row Validation', () => {
         assert.equal(result.validRows[2].year_group, 4); // (12 - 9) + 1 = 4
     });
 
+    it('should parse 4-column NPA template (NPA Number, Name, Squad, RC) using explicit Squad and RC', () => {
+        const rows = [
+            { 'NPA Number': 'NPA/03/04/2023/0395', Name: 'MANI UMAR DAHIRU', Squad: 'SQUAD 4', RC: 12 },
+            { 'NPA Number': 'NPA/03/08/2024/0112', Name: 'ABDULSHAKUR MAI GANDI', Squad: '08', RC: 'RC 11' },
+            { 'NPA Number': 'NPA/03/02/2022/0451', Name: 'BAD RC CADET', Squad: '02', RC: 'INVALID' }
+        ];
+
+        const result = parseCadetImportData(rows, { activeRC: 12 });
+
+        assert.equal(result.detectedFormat, 'NPA_FORMAT');
+        assert.equal(result.totalRows, 3);
+        assert.equal(result.validRows.length, 2);
+        assert.equal(result.invalidRows.length, 1);
+
+        assert.equal(result.validRows[0].squad, 'SQUAD 4');
+        assert.equal(result.validRows[0].course_number, 12);
+        assert.equal(result.validRows[0].year_group, 1);
+
+        assert.equal(result.validRows[1].squad, '08');
+        assert.equal(result.validRows[1].course_number, 11);
+        assert.equal(result.validRows[1].year_group, 2);
+
+        assert.match(result.invalidRows[0].errors[0], /Invalid Regular Course \(RC\) number/);
+    });
+
     it('should highlight format errors and invalid admission years without failing the entire batch', () => {
         const rows = [
             { 'NPA Number': 'NPA/03/04/2023/0395', Name: 'VALID CADET' },

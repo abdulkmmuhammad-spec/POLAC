@@ -1,81 +1,182 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
-    ShieldAlert,
-    Trash2,
-    Download,
-    CheckCircle2,
-    AlertTriangle,
-    RefreshCw,
-    Upload,
-    FileSpreadsheet,
-    FileText,
-    RotateCcw,
-    Lock,
-    Unlock,
-    Layers,
-    Users,
-    ClipboardList,
-    BellRing,
-    ArrowRight,
-    ArrowLeft,
-    X,
-    CheckSquare,
-    Square,
-    Database,
-    History
+  X,
+  ArrowLeft,
+  Download,
+  Check,
+  AlertTriangle,
+  History,
+  RotateCcw,
+  Upload,
+  Trash2,
+  Loader2
 } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { dbService } from '../../services/dbService';
 import {
-    parseCadetImportFile,
-    downloadNPACSVTemplate,
-    downloadNPAExcelTemplate,
-    downloadLegacyExcelTemplate,
-    buildCoursePurgeConfirmationPhrase,
-    downloadCourseBackupCSV
+  parseCadetImportFile,
+  downloadNPACSVTemplate,
+  downloadNPAExcelTemplate,
+  buildCoursePurgeConfirmationPhrase,
+  downloadCourseBackupCSV
 } from '../../services/cadetImportService';
 import {
-    CourseImpactSummary,
-    CourseImpactBreakdownItem,
-    CoursePurgeMode,
-    CoursePurgeSnapshot,
-    BulkCoursePurgeResult,
-    CadetImportParseResult,
-    TemplateImportFormat
+  CourseImpactSummary,
+  CourseImpactBreakdownItem,
+  CoursePurgeMode,
+  CoursePurgeSnapshot,
+  BulkCoursePurgeResult,
+  CadetImportParseResult
 } from '../../types';
-import { formatRC, calculateCurrentLevel, calculateAdmissionYearFromRC } from '../../utils/rcHelpers';
+import { calculateCurrentLevel } from '../../utils/rcHelpers';
 import { useAuth } from '../../context/AuthContext';
 
 interface BulkCoursePurgeModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    activeRC: number;
-    initialSelectedRC?: number;
-    onPurgeAndSeedComplete: () => void;
+  isOpen: boolean;
+  onClose: () => void;
+  activeRC: number;
+  initialSelectedRC?: number;
+  onPurgeAndSeedComplete: () => void;
 }
 
-type WorkflowStep = 'SELECT_AND_AUDIT' | 'CONFIRM_DESTRUCTIVE' | 'RE_ENROLL_SEED';
+type ModalView = 'SELECT' | 'CONFIRM' | 'RE_ENROLL' | 'RESTORE';
 
 export const BulkCoursePurgeModal: React.FC<BulkCoursePurgeModalProps> = ({
-    isOpen,
-    onClose,
-    activeRC,
-    initialSelectedRC,
-    onPurgeAndSeedComplete
+  isOpen,
+  onClose,
+  activeRC,
+  initialSelectedRC,
+  onPurgeAndSeedComplete
 }) => {
-    const { currentUser } = useAuth();
+  const { currentUser } = useAuth();
+  const shouldReduceMotion = useReducedMotion();
 
-    // Workflow Navigation State
-    const [step, setStep] = useState<WorkflowStep>('SELECT_AND_AUDIT');
-    const [showSnapshotsDrawer, setShowSnapshotsDrawer] = useState(false);
+  const [view, setView] = useState<ModalView>('SELECT');
 
-    // Step 1: Course Selection & Impact Preview State
-    const [availableCourses, setAvailableCourses] = useState<CourseImpactBreakdownItem[]>([]);
-    const [selectedRCs, setSelectedRCs] = useState<number[]>(
-        initialSelectedRC && initialSelectedRC > 0 ? [initialSelectedRC] : [10]
-    );
-    const [customRCInput, setCustomRCInput] = useState('');
-    const [impactSummary, setImpactSummary] = useState<CourseImpactSummary>({
+  // Step 1: Course Selection & Impact
+  const [availableCourses, setAvailableCourses] = useState<CourseImpactBreakdownItem[]>([]);
+  const [selectedRCs, setSelectedRCs] = useState<number[]>(
+    initialSelectedRC && initialSelectedRC > 0 ? [initialSelectedRC] : [10]
+  );
+  const [impactSummary, setImpactSummary] = useState<CourseImpactSummary>({
+    totalCadets: 0,
+    activeCadets: 0,
+    paradeRecordsCount: 0,
+    attendanceLogsCount: 0,
+    disciplinaryLogsCount: 0,
+    assignedOfficersCount: 0,
+    pushSubscriptionsCount: 0,
+    courseBreakdown: []
+  });
+  const [isLoadingCourses, setIsLoadingCourses] = useState(false);
+  const [isLoadingImpact, setIsLoadingImpact] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [hasExportedBackup, setHasExportedBackup] = useState(false);
+  const [lastBackupFilename, setLastBackupFilename] = useState<string | null>(null);
+
+  // Restore Snapshots
+  const [snapshots, setSnapshots] = useState<CoursePurgeSnapshot[]>([]);
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
+  const [restoringSnapshotId, setRestoringSnapshotId] = useState<string | null>(null);
+
+  // Step 2: Confirm Removal
+  const [purgeMode, setPurgeMode] = useState<CoursePurgeMode>('SOFT_DELETE');
+  const [purgeAttendance, setPurgeAttendance] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [typedPhrase, setTypedPhrase] = useState('');
+  const [isExecutingPurge, setIsExecutingPurge] = useState(false);
+
+  // Step 3: Optional Re-Enrollment
+  const [purgeResult, setPurgeResult] = useState<BulkCoursePurgeResult | null>(null);
+  const [seedFileName, setSeedFileName] = useState<string | null>(null);
+  const [isParsingSeed, setIsParsingSeed] = useState(false);
+  const [isCommittingSeed, setIsCommittingSeed] = useState(false);
+  const [seedParseResult, setSeedParseResult] = useState<CadetImportParseResult | null>(null);
+  const seedFileInputRef = useRef<HTMLInputElement>(null);
+
+  const requiredPhrase = useMemo(
+    () => buildCoursePurgeConfirmationPhrase(selectedRCs),
+    [selectedRCs]
+  );
+
+  const isPhraseMatched = useMemo(
+    () => typedPhrase.trim().toUpperCase() === requiredPhrase.toUpperCase(),
+    [typedPhrase, requiredPhrase]
+  );
+
+  const canExecutePurge =
+    selectedRCs.length > 0 && acknowledged && isPhraseMatched && !isExecutingPurge;
+
+  const isBusy = isExecutingPurge || isCommittingSeed || isExportingBackup || !!restoringSnapshotId;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setView('SELECT');
+    setPurgeResult(null);
+    setSeedFileName(null);
+    setSeedParseResult(null);
+    loadAvailableCourses();
+    loadSnapshots();
+  }, [isOpen, activeRC]);
+
+  useEffect(() => {
+    if (isOpen && initialSelectedRC && initialSelectedRC > 0) {
+      setSelectedRCs([initialSelectedRC]);
+    }
+  }, [isOpen, initialSelectedRC]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetchImpactSummary(selectedRCs);
+    setHasExportedBackup(false);
+    setLastBackupFilename(null);
+    setAcknowledged(false);
+    setTypedPhrase('');
+  }, [selectedRCs, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isBusy) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [isOpen, isBusy, onClose]);
+
+  const loadAvailableCourses = async () => {
+    setIsLoadingCourses(true);
+    try {
+      const summary = await dbService.getAvailableCoursesSummary(activeRC);
+      setAvailableCourses(summary);
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingCourses(false);
+    }
+  };
+
+  const loadSnapshots = async () => {
+    setIsLoadingSnapshots(true);
+    try {
+      const list = await dbService.getCoursePurgeSnapshots();
+      setSnapshots(list);
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingSnapshots(false);
+    }
+  };
+
+  const fetchImpactSummary = async (rcs: number[]) => {
+    if (!rcs || rcs.length === 0) {
+      setImpactSummary({
         totalCadets: 0,
         activeCadets: 0,
         paradeRecordsCount: 0,
@@ -84,1447 +185,679 @@ export const BulkCoursePurgeModal: React.FC<BulkCoursePurgeModalProps> = ({
         assignedOfficersCount: 0,
         pushSubscriptionsCount: 0,
         courseBreakdown: []
-    });
-    const [isLoadingCourses, setIsLoadingCourses] = useState(false);
-    const [isLoadingImpact, setIsLoadingImpact] = useState(false);
-    const [isExportingBackup, setIsExportingBackup] = useState(false);
-    const [hasExportedBackup, setHasExportedBackup] = useState(false);
-    const [lastBackupFilename, setLastBackupFilename] = useState<string | null>(null);
+      });
+      return;
+    }
+    setIsLoadingImpact(true);
+    try {
+      const impact = await dbService.getCoursesImpactSummary(rcs);
+      setImpactSummary(impact);
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingImpact(false);
+    }
+  };
 
-    // Emergency Recovery Snapshots State
-    const [snapshots, setSnapshots] = useState<CoursePurgeSnapshot[]>([]);
-    const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
-    const [restoringSnapshotId, setRestoringSnapshotId] = useState<string | null>(null);
+  if (!isOpen || typeof document === 'undefined') return null;
 
-    // Step 2: High-Friction Confirmation Guardrail State
-    const [purgeMode, setPurgeMode] = useState<CoursePurgeMode>('SOFT_DELETE');
-    const [purgeAttendance, setPurgeAttendance] = useState(false);
-    const [hazardAckBackup, setHazardAckBackup] = useState(false);
-    const [hazardAckDestructive, setHazardAckDestructive] = useState(false);
-    const [typedPhrase, setTypedPhrase] = useState('');
-    const [isExecutingPurge, setIsExecutingPurge] = useState(false);
-
-    // Step 3: Immediate Re-Enrollment / Seeding State
-    const [purgeResult, setPurgeResult] = useState<BulkCoursePurgeResult | null>(null);
-    const [selectedFormatMode, setSelectedFormatMode] = useState<'AUTO' | TemplateImportFormat>('AUTO');
-    const [seedFileName, setSeedFileName] = useState<string | null>(null);
-    const [isParsingSeed, setIsParsingSeed] = useState(false);
-    const [ isCommittingSeed, setIsCommittingSeed] = useState(false);
-    const [seedParseResult, setSeedParseResult] = useState<CadetImportParseResult | null>(null);
-    const [seedPreviewTab, setSeedPreviewTab] = useState<'ALL' | 'VALID' | 'INVALID'>('ALL');
-    const seedFileInputRef = useRef<HTMLInputElement>(null);
-
-    const requiredPhrase = useMemo(
-        () => buildCoursePurgeConfirmationPhrase(selectedRCs),
-        [selectedRCs]
+  const toggleCourse = (rc: number) => {
+    setSelectedRCs(prev =>
+      prev.includes(rc) ? prev.filter(item => item !== rc) : [...prev, rc].sort((a, b) => a - b)
     );
+  };
 
-    const isPhraseMatched = useMemo(
-        () => typedPhrase.trim().toUpperCase() === requiredPhrase.toUpperCase(),
-        [typedPhrase, requiredPhrase]
-    );
+  const handleExportBackup = async () => {
+    if (selectedRCs.length === 0) return;
+    setIsExportingBackup(true);
+    try {
+      const cadets = await dbService.getCadetsByCourses(selectedRCs);
+      const filename = downloadCourseBackupCSV(cadets, selectedRCs);
+      setHasExportedBackup(true);
+      setLastBackupFilename(filename);
+      toast.success(`Backup saved (${cadets.length.toLocaleString()} cadets)`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Backup download failed.');
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
 
-    const canExecutePurge = useMemo(
-        () =>
-            selectedRCs.length > 0 &&
-            hazardAckBackup &&
-            hazardAckDestructive &&
-            isPhraseMatched &&
-            !isExecutingPurge,
-        [selectedRCs, hazardAckBackup, hazardAckDestructive, isPhraseMatched, isExecutingPurge]
-    );
+  const handleContinueToConfirm = () => {
+    if (selectedRCs.length === 0) {
+      toast.error('Select at least one Regular Course.');
+      return;
+    }
+    if (impactSummary.totalCadets > 0 && !hasExportedBackup) {
+      toast.error('Please download a CSV backup before continuing.');
+      return;
+    }
+    setView('CONFIRM');
+  };
 
-    // Load courses and snapshots when modal opens
-    useEffect(() => {
-        if (!isOpen) return;
-        loadAvailableCourses();
-        loadSnapshots();
-    }, [isOpen, activeRC]);
+  const handleExecutePurge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canExecutePurge) return;
 
-    // Sync initialSelectedRC when opened
-    useEffect(() => {
-        if (isOpen && initialSelectedRC && initialSelectedRC > 0) {
-            setSelectedRCs([initialSelectedRC]);
-        }
-    }, [isOpen, initialSelectedRC]);
+    const actorId = currentUser?.id ? String(currentUser.id) : '';
+    const actorName = currentUser?.fullName || currentUser?.username || 'COMMANDANT';
+    if (!actorId) {
+      toast.error('Missing administrator session.');
+      return;
+    }
 
-    // Refresh impact summary whenever selectedRCs changes
-    useEffect(() => {
-        if (!isOpen) return;
-        fetchImpactSummary(selectedRCs);
-        // Reset backup & confirmation state when course selection changes
-        setHasExportedBackup(false);
-        setLastBackupFilename(null);
-        setHazardAckBackup(false);
-        setHazardAckDestructive(false);
-        setTypedPhrase('');
-    }, [selectedRCs, isOpen]);
+    setIsExecutingPurge(true);
+    try {
+      const result = await dbService.executeBulkCoursePurge({
+        courseNumbers: selectedRCs,
+        actorId,
+        actorName,
+        purgeMode,
+        purgeAttendance,
+        confirmationPhrase: requiredPhrase
+      });
 
-    if (!isOpen) return null;
+      setPurgeResult(result);
+      toast.success(`Removed ${result.purgedCadetCount.toLocaleString()} cadets`);
+      onPurgeAndSeedComplete();
+      await loadAvailableCourses();
+      await loadSnapshots();
+      setView('RE_ENROLL');
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not remove course records.');
+    } finally {
+      setIsExecutingPurge(false);
+    }
+  };
 
-    const loadAvailableCourses = async () => {
-        setIsLoadingCourses(true);
-        try {
-            const summary = await dbService.getAvailableCoursesSummary(activeRC);
-            setAvailableCourses(summary);
-        } catch (err) {
-            console.error('Error loading available courses:', err);
-        } finally {
-            setIsLoadingCourses(false);
-        }
-    };
+  const handleRestoreSnapshot = async (snapshot: CoursePurgeSnapshot) => {
+    const actorId = currentUser?.id ? String(currentUser.id) : '';
+    const actorName = currentUser?.fullName || currentUser?.username || 'COMMANDANT';
+    if (!actorId) return;
 
-    const loadSnapshots = async () => {
-        setIsLoadingSnapshots(true);
-        try {
-            const list = await dbService.getCoursePurgeSnapshots();
-            setSnapshots(list);
-        } catch (err) {
-            console.error('Error loading purge snapshots:', err);
-        } finally {
-            setIsLoadingSnapshots(false);
-        }
-    };
+    setRestoringSnapshotId(snapshot.id);
+    try {
+      const res = await dbService.restoreCoursePurgeSnapshot(snapshot.id, actorId, actorName);
+      toast.success(`Restored ${res.restoredCadetCount.toLocaleString()} cadets`);
+      onPurgeAndSeedComplete();
+      await loadAvailableCourses();
+      await loadSnapshots();
+      await fetchImpactSummary(selectedRCs);
+      setView('SELECT');
+    } catch (err: any) {
+      toast.error(err?.message || 'Restore failed.');
+    } finally {
+      setRestoringSnapshotId(null);
+    }
+  };
 
-    const fetchImpactSummary = async (rcs: number[]) => {
-        if (!rcs || rcs.length === 0) {
-            setImpactSummary({
-                totalCadets: 0,
-                activeCadets: 0,
-                paradeRecordsCount: 0,
-                attendanceLogsCount: 0,
-                disciplinaryLogsCount: 0,
-                assignedOfficersCount: 0,
-                pushSubscriptionsCount: 0,
-                courseBreakdown: []
-            });
-            return;
-        }
-        setIsLoadingImpact(true);
-        try {
-            const impact = await dbService.getCoursesImpactSummary(rcs);
-            setImpactSummary(impact);
-        } catch (err) {
-            console.error('Failed to fetch course impact summary:', err);
-        } finally {
-            setIsLoadingImpact(false);
-        }
-    };
+  const handleSeedFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSeedFileName(file.name);
+    setIsParsingSeed(true);
+    try {
+      const res = await parseCadetImportFile(file, { activeRC, formatMode: 'AUTO' });
+      setSeedParseResult(res);
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not read spreadsheet.');
+    } finally {
+      setIsParsingSeed(false);
+      e.target.value = '';
+    }
+  };
 
-    const toggleCourseSelection = (rc: number) => {
-        setSelectedRCs(prev =>
-            prev.includes(rc) ? prev.filter(item => item !== rc) : [...prev, rc].sort((a, b) => a - b)
-        );
-    };
+  const handleCommitReEnrollment = async () => {
+    if (!seedParseResult || seedParseResult.validRows.length === 0) return;
 
-    const handleAddCustomRC = (e: React.FormEvent) => {
-        e.preventDefault();
-        const parsed = parseInt(customRCInput.trim(), 10);
-        if (isNaN(parsed) || parsed < 1 || parsed > 50) {
-            toast.error('Please enter a valid Regular Course number (1 - 50).');
-            return;
-        }
-        if (!selectedRCs.includes(parsed)) {
-            setSelectedRCs(prev => [...prev, parsed].sort((a, b) => a - b));
-        }
-        if (!availableCourses.some(c => c.courseNumber === parsed)) {
-            setAvailableCourses(prev =>
-                [...prev, { courseNumber: parsed, totalCadets: 0, activeCadets: 0, squadCount: 0 }].sort(
-                    (a, b) => b.courseNumber - a.courseNumber
-                )
-            );
-        }
-        setCustomRCInput('');
-    };
+    setIsCommittingSeed(true);
+    try {
+      const payloadMap = new Map<string, any>();
+      for (const row of seedParseResult.validRows) {
+        const key = row.npa_number
+          ? `NPA:${row.npa_number.trim().toUpperCase()}`
+          : `LEG:${row.name.trim().toUpperCase()}|${row.course_number}|${row.rowNumber}`;
 
-    const handleExportCSVBackup = async () => {
-        if (selectedRCs.length === 0) {
-            toast.error('Select at least one Regular Course to export a backup.');
-            return;
-        }
+        payloadMap.set(key, {
+          name: row.name,
+          squad: row.squad,
+          course_number: row.course_number,
+          year_group: row.year_group ?? calculateCurrentLevel(row.course_number, activeRC),
+          npa_number: row.npa_number || undefined,
+          admission_year: row.admission_year || undefined,
+          status: 'ACTIVE'
+        });
+      }
 
-        setIsExportingBackup(true);
-        const toastId = toast.loading(
-            `Generating CSV backup for ${selectedRCs.map(rc => `RC ${rc}`).join(', ')}...`
-        );
-        try {
-            const cadets = await dbService.getCadetsByCourses(selectedRCs);
-            const filename = downloadCourseBackupCSV(cadets, selectedRCs);
-            setHasExportedBackup(true);
-            setLastBackupFilename(filename);
-            setHazardAckBackup(true);
-            toast.success(
-                `Backup downloaded (${cadets.length.toLocaleString()} records -> ${filename})`,
-                { id: toastId }
-            );
-        } catch (err: any) {
-            toast.error(`Backup export failed: ${err.message || 'Unknown error'}`, { id: toastId });
-        } finally {
-            setIsExportingBackup(false);
-        }
-    };
+      const payload = Array.from(payloadMap.values());
+      const actorId = currentUser?.id ? String(currentUser.id) : undefined;
+      await dbService.bulkAddCadetsToRegistry(payload, actorId);
 
-    const handleProceedToConfirmation = () => {
-        if (selectedRCs.length === 0) {
-            toast.error('Please select at least one Regular Course (RC) to continue.');
-            return;
-        }
-        if (impactSummary.totalCadets > 0 && !hasExportedBackup) {
-            toast.error('Mandatory Safety Step: Please download a CSV backup of the targeted course(s) before proceeding to deletion.');
-            return;
-        }
-        setStep('CONFIRM_DESTRUCTIVE');
-    };
+      toast.success(`Enrolled ${payload.length.toLocaleString()} cadets`);
+      onPurgeAndSeedComplete();
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to enroll cadets.');
+    } finally {
+      setIsCommittingSeed(false);
+    }
+  };
 
-    const handleExecutePurge = async () => {
-        if (!canExecutePurge) return;
+  const springTransition = shouldReduceMotion
+    ? { duration: 0.12 }
+    : { type: 'spring' as const, stiffness: 380, damping: 34 };
 
-        const actorId = currentUser?.id ? String(currentUser.id) : '';
-        const actorName = currentUser?.fullName || currentUser?.username || 'COMMANDANT';
+  const selectedLabel = selectedRCs.map(rc => `RC ${rc}`).join(', ') || 'None';
+  const needsBackup = impactSummary.totalCadets > 0 && !hasExportedBackup;
 
-        if (!actorId) {
-            toast.error('Session verification failed: Missing Commandant security identifier.');
-            return;
-        }
+  return createPortal(
+    <AnimatePresence>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Course Purge and Re-Enrollment"
+        data-drawer-open="true"
+        className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center"
+      >
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={() => !isBusy && onClose()}
+          className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs"
+        />
 
-        setIsExecutingPurge(true);
-        const toastId = toast.loading(
-            `Executing atomic ${purgeMode === 'SOFT_DELETE' ? 'Soft-Delete & Snapshot Archive' : 'Hard-Delete Purge'} for ${selectedRCs.map(rc => `RC ${rc}`).join(', ')}...`
-        );
+        <motion.div
+          initial={shouldReduceMotion ? { opacity: 0 } : { y: '100%', opacity: 0.96 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={shouldReduceMotion ? { opacity: 0 } : { y: '100%', opacity: 0.96 }}
+          transition={springTransition}
+          className="relative z-10 w-full sm:max-w-xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border-t sm:border border-slate-200 max-h-[88dvh] flex flex-col overflow-hidden"
+        >
+          {/* Mobile Grabber */}
+          <div className="pt-2.5 pb-1 sm:hidden flex justify-center shrink-0">
+            <div className="w-10 h-1 bg-slate-300 rounded-full" />
+          </div>
 
-        try {
-            const result = await dbService.executeBulkCoursePurge({
-                courseNumbers: selectedRCs,
-                actorId,
-                actorName,
-                purgeMode,
-                purgeAttendance,
-                confirmationPhrase: requiredPhrase
-            });
+          {/* Clean Sheet Header */}
+          <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              {(view === 'CONFIRM' || view === 'RESTORE') && (
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => setView('SELECT')}
+                  className="min-w-[40px] min-h-[40px] -ml-2 px-2 inline-flex items-center gap-1 rounded-full text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-xs font-semibold transition-colors"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back</span>
+                </button>
+              )}
+              <h3 className="text-base font-bold text-slate-900 truncate">
+                {view === 'SELECT'
+                  ? 'Remove & Replace Course'
+                  : view === 'CONFIRM'
+                  ? `Confirm Removal (${selectedLabel})`
+                  : view === 'RE_ENROLL'
+                  ? 'Re-Enroll Cadets'
+                  : 'Restore Removed Course'}
+              </h3>
+            </div>
 
-            setPurgeResult(result);
-            toast.success(
-                `Successfully purged ${result.purgedCadetCount.toLocaleString()} cadet record(s) across ${selectedRCs.map(rc => `RC ${rc}`).join(', ')}. Ready for immediate re-enrollment.`,
-                { id: toastId, duration: 5000 }
-            );
+            <div className="flex items-center gap-1.5 shrink-0">
+              {view === 'SELECT' && snapshots.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setView('RESTORE')}
+                  className="min-h-[36px] px-3 rounded-full bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <History size={14} />
+                  <span>Restore ({snapshots.length})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={onClose}
+                aria-label="Close"
+                className="min-w-[44px] min-h-[44px] -mr-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
 
-            // Refresh background data
-            onPurgeAndSeedComplete();
-            await loadAvailableCourses();
-            await loadSnapshots();
+          {/* Scrollable Body */}
+          <div className="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] overflow-y-auto">
+            <AnimatePresence mode="wait" initial={false}>
+              {/* ── STEP 1: SELECT COURSES & BACKUP ── */}
+              {view === 'SELECT' && (
+                <motion.div
+                  key="select"
+                  initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: -10 }}
+                  transition={{ duration: 0.16 }}
+                  className="space-y-5"
+                >
+                  {/* Course Pills */}
+                  <div className="space-y-2.5">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Select Regular Courses to Remove
+                    </label>
+                    {isLoadingCourses ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-500 py-2">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Loading courses...</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {availableCourses.map(course => {
+                          const isSelected = selectedRCs.includes(course.courseNumber);
+                          return (
+                            <button
+                              key={course.courseNumber}
+                              type="button"
+                              onClick={() => toggleCourse(course.courseNumber)}
+                              className={`min-h-[40px] px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all tabular-nums ${
+                                isSelected
+                                  ? 'bg-slate-900 text-white border-slate-900'
+                                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              RC {course.courseNumber}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
 
-            // Seamless transition to Step 3: Immediate Re-Enrollment / Seeding Workflow
-            setStep('RE_ENROLL_SEED');
-        } catch (err: any) {
-            console.error('Bulk Course Purge Error:', err);
-            toast.error(`Course purge aborted (Transaction Rolled Back): ${err.message || 'Database error'}`, {
-                id: toastId,
-                duration: 6000
-            });
-        } finally {
-            setIsExecutingPurge(false);
-        }
-    };
-
-    const handleRestoreSnapshot = async (snapshot: CoursePurgeSnapshot) => {
-        const actorId = currentUser?.id ? String(currentUser.id) : '';
-        const actorName = currentUser?.fullName || currentUser?.username || 'COMMANDANT';
-
-        if (!actorId) {
-            toast.error('Missing Commandant credentials for snapshot restoration.');
-            return;
-        }
-
-        setRestoringSnapshotId(snapshot.id);
-        const toastId = toast.loading(
-            `Restoring ${snapshot.cadetCount.toLocaleString()} cadets for ${snapshot.courseNumbers.map(rc => `RC ${rc}`).join(', ')}...`
-        );
-
-        try {
-            const res = await dbService.restoreCoursePurgeSnapshot(snapshot.id, actorId, actorName);
-            toast.success(
-                `Snapshot restored! ${res.restoredCadetCount.toLocaleString()} cadets returned to ${res.courseNumbers.map(rc => `RC ${rc}`).join(', ')}.`,
-                { id: toastId, duration: 5000 }
-            );
-            onPurgeAndSeedComplete();
-            await loadAvailableCourses();
-            await loadSnapshots();
-            await fetchImpactSummary(selectedRCs);
-        } catch (err: any) {
-            toast.error(`Snapshot restore failed: ${err.message || 'Unknown error'}`, { id: toastId });
-        } finally {
-            setRestoringSnapshotId(null);
-        }
-    };
-
-    // Step 3: Re-Enrollment File Processing Handlers
-    const processSeedFile = async (file: File) => {
-        setSeedFileName(file.name);
-        setIsParsingSeed(true);
-        try {
-            const res = await parseCadetImportFile(file, {
-                activeRC,
-                formatMode: selectedFormatMode === 'UNKNOWN' ? 'AUTO' : selectedFormatMode
-            });
-            setSeedParseResult(res);
-            if (res.invalidRows.length > 0 && res.validRows.length === 0) {
-                setSeedPreviewTab('INVALID');
-            } else {
-                setSeedPreviewTab('ALL');
-            }
-        } catch (err: any) {
-            toast.error(`Failed to parse replacement roster: ${err.message || 'Unknown error'}`);
-        } finally {
-            setIsParsingSeed(false);
-        }
-    };
-
-    const handleSeedFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        await processSeedFile(file);
-        e.target.value = '';
-    };
-
-    const handleCommitReEnrollment = async () => {
-        if (!seedParseResult || seedParseResult.validRows.length === 0) {
-            toast.error('No valid cadet rows ready to seed.');
-            return;
-        }
-
-        setIsCommittingSeed(true);
-        const toastId = toast.loading(
-            `Seeding ${seedParseResult.validRows.length.toLocaleString()} fresh cadet records into registry...`
-        );
-
-        try {
-            const payloadMap = new Map<string, {
-                name: string;
-                squad: string;
-                course_number: number;
-                year_group: number;
-                npa_number?: string;
-                admission_year?: number;
-                status: string;
-            }>();
-
-            for (const row of seedParseResult.validRows) {
-                const key = row.npa_number
-                    ? `NPA:${row.npa_number.trim().toUpperCase()}`
-                    : `LEG:${row.name.trim().toUpperCase()}|${row.course_number}|${row.rowNumber}`;
-
-                payloadMap.set(key, {
-                    name: row.name,
-                    squad: row.squad,
-                    course_number: row.course_number,
-                    year_group: row.year_group ?? calculateCurrentLevel(row.course_number, activeRC),
-                    npa_number: row.npa_number || undefined,
-                    admission_year: row.admission_year || undefined,
-                    status: 'ACTIVE'
-                });
-            }
-
-            const payload = Array.from(payloadMap.values());
-            const actorId = currentUser?.id ? String(currentUser.id) : undefined;
-            await dbService.bulkAddCadetsToRegistry(payload, actorId);
-
-            toast.success(
-                `Course Re-Enrollment Complete! ${payload.length.toLocaleString()} cadets enrolled.`,
-                { id: toastId, duration: 5000 }
-            );
-            onPurgeAndSeedComplete();
-            onClose();
-        } catch (err: any) {
-            console.error('Re-Enrollment Commit Error:', err);
-            toast.error(`Re-enrollment failed: ${err.message || 'Check console for details.'}`, { id: toastId });
-        } finally {
-            setIsCommittingSeed(false);
-        }
-    };
-
-    const displayedSeedRows = seedParseResult
-        ? seedPreviewTab === 'VALID'
-            ? seedParseResult.validRows
-            : seedPreviewTab === 'INVALID'
-            ? seedParseResult.invalidRows
-            : seedParseResult.allRows
-        : [];
-
-    return (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 md:p-6 overflow-y-auto animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
-                {/* Top Security Header */}
-                <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-slate-900 to-rose-950 text-white flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-3.5">
-                        <div className="w-11 h-11 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shadow-inner">
-                            <ShieldAlert size={22} />
+                  {/* Clean 3-Stat Impact Summary */}
+                  <div className="rounded-2xl bg-slate-50 border border-slate-200/80 p-4 space-y-2">
+                    <p className="text-xs font-semibold text-slate-700">
+                      What will be affected ({selectedLabel})
+                    </p>
+                    {isLoadingImpact ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-500 py-1">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Checking records...</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-3 pt-1">
+                        <div>
+                          <p className="text-lg font-bold text-slate-900 tabular-nums">
+                            {impactSummary.totalCadets.toLocaleString()}
+                          </p>
+                          <p className="text-[11px] text-slate-500">Cadets</p>
                         </div>
                         <div>
-                            <div className="flex items-center gap-2.5">
-                                <h3 className="font-black text-base md:text-lg tracking-tight">
-                                    Bulk Course Purge & Re-Enrollment Console
-                                </h3>
-                                <span className="px-2.5 py-0.5 text-[10px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-300 rounded-full border border-rose-500/30">
-                                    Commandant Guardrail
-                                </span>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                Atomic Regular Course (RC) roster purge, mandatory CSV backup, snapshot recovery & dual-format re-seeding
-                            </p>
+                          <p className="text-lg font-bold text-slate-900 tabular-nums">
+                            {impactSummary.paradeRecordsCount.toLocaleString()}
+                          </p>
+                          <p className="text-[11px] text-slate-500">Parade logs</p>
                         </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setShowSnapshotsDrawer(prev => !prev)}
-                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
-                                showSnapshotsDrawer
-                                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
-                                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
-                            }`}
-                            title="View Emergency Audit Window Snapshots"
-                        >
-                            <History size={15} />
-                            <span className="hidden sm:inline">Recovery Snapshots</span>
-                            {snapshots.filter(s => s.isRecoverable && !s.restoredAt).length > 0 && (
-                                <span className="px-1.5 py-0.2 bg-amber-400/20 text-amber-200 rounded-full text-[10px] font-black">
-                                    {snapshots.filter(s => s.isRecoverable && !s.restoredAt).length}
-                                </span>
-                            )}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
-                        >
-                            <X size={20} />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Step Progress Bar */}
-                <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-2 md:gap-4 text-xs font-black uppercase tracking-wider overflow-x-auto">
-                        <button
-                            type="button"
-                            onClick={() => step !== 'RE_ENROLL_SEED' && setStep('SELECT_AND_AUDIT')}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all ${
-                                step === 'SELECT_AND_AUDIT'
-                                    ? 'bg-slate-900 text-white shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-800'
-                            }`}
-                        >
-                            <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
-                                1
-                            </span>
-                            <span>Select RC & Impact Audit</span>
-                        </button>
-
-                        <ArrowRight size={14} className="text-slate-300 shrink-0" />
-
-                        <button
-                            type="button"
-                            disabled={step === 'SELECT_AND_AUDIT' && (!hasExportedBackup && impactSummary.totalCadets > 0)}
-                            onClick={() => {
-                                if (step === 'CONFIRM_DESTRUCTIVE') return;
-                                if (step === 'SELECT_AND_AUDIT') handleProceedToConfirmation();
-                            }}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all ${
-                                step === 'CONFIRM_DESTRUCTIVE'
-                                    ? 'bg-rose-600 text-white shadow-sm'
-                                    : 'text-slate-500 disabled:opacity-40'
-                            }`}
-                        >
-                            <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
-                                2
-                            </span>
-                            <span>Safety Verification Guardrail</span>
-                        </button>
-
-                        <ArrowRight size={14} className="text-slate-300 shrink-0" />
-
-                        <div
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all ${
-                                step === 'RE_ENROLL_SEED'
-                                    ? 'bg-emerald-600 text-white shadow-sm'
-                                    : 'text-slate-400'
-                            }`}
-                        >
-                            <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
-                                3
-                            </span>
-                            <span>Immediate Re-Enrollment</span>
+                        <div>
+                          <p className="text-lg font-bold text-slate-900 tabular-nums">
+                            {impactSummary.assignedOfficersCount.toLocaleString()}
+                          </p>
+                          <p className="text-[11px] text-slate-500">Officers</p>
                         </div>
-                    </div>
+                      </div>
+                    )}
+                  </div>
 
-                    <div className="hidden lg:flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                        <span>Target:</span>
-                        <span className="px-2.5 py-0.5 bg-slate-200/80 text-slate-800 rounded-lg font-black">
-                            {selectedRCs.length > 0
-                                ? selectedRCs.map(rc => `RC ${rc}`).join(', ')
-                                : 'None Selected'}
+                  {/* Mandatory CSV Backup */}
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      disabled={selectedRCs.length === 0 || isExportingBackup}
+                      onClick={handleExportBackup}
+                      className={`w-full min-h-[46px] px-4 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${
+                        hasExportedBackup
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      {isExportingBackup ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : hasExportedBackup ? (
+                        <Check size={15} />
+                      ) : (
+                        <Download size={15} />
+                      )}
+                      <span>
+                        {hasExportedBackup
+                          ? `Backup Saved (${lastBackupFilename})`
+                          : 'Download CSV Backup Before Removing'}
+                      </span>
+                    </button>
+                    {needsBackup && (
+                      <p className="text-[11px] text-slate-500 text-center">
+                        A backup download is required before you can remove cadets.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="flex items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="flex-1 min-h-[46px] rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-sm font-semibold transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedRCs.length === 0 || needsBackup}
+                      onClick={handleContinueToConfirm}
+                      className="flex-1 min-h-[46px] rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-bold transition-colors"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ── STEP 2: CONFIRM REMOVAL ── */}
+              {view === 'CONFIRM' && (
+                <motion.form
+                  key="confirm"
+                  onSubmit={handleExecutePurge}
+                  initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
+                  transition={{ duration: 0.16 }}
+                  className="space-y-4"
+                >
+                  {/* Simple Removal Mode Choice */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Removal Option
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPurgeMode('SOFT_DELETE')}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          purgeMode === 'SOFT_DELETE'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">Keep Restore Copy</p>
+                        <p
+                          className={`text-[11px] mt-0.5 ${
+                            purgeMode === 'SOFT_DELETE' ? 'text-slate-300' : 'text-slate-500'
+                          }`}
+                        >
+                          Recommended • Can undo later
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPurgeMode('HARD_DELETE')}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          purgeMode === 'HARD_DELETE'
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">Delete Permanently</p>
+                        <p
+                          className={`text-[11px] mt-0.5 ${
+                            purgeMode === 'HARD_DELETE' ? 'text-rose-100' : 'text-slate-500'
+                          }`}
+                        >
+                          Cannot be restored
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Optional Parade History Toggle */}
+                  <label className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={purgeAttendance}
+                      onChange={e => setPurgeAttendance(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 shrink-0"
+                    />
+                    <span className="text-xs text-slate-700 leading-relaxed">
+                      Also delete past parade attendance records for {selectedLabel}
+                    </span>
+                  </label>
+
+                  {/* Acknowledgment */}
+                  <label className="flex items-start gap-3 p-3.5 rounded-xl bg-rose-50/70 border border-rose-200/80 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={acknowledged}
+                      onChange={e => setAcknowledged(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-rose-300 text-rose-600 shrink-0"
+                    />
+                    <span className="text-xs text-rose-900 leading-relaxed font-medium">
+                      I have saved a backup and want to remove {impactSummary.totalCadets.toLocaleString()} cadets from {selectedLabel}.
+                    </span>
+                  </label>
+
+                  {/* Typed Phrase */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-semibold text-slate-700">
+                        Type <span className="font-mono font-bold text-slate-900">{requiredPhrase}</span>
+                      </label>
+                      {isPhraseMatched && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                          <Check size={12} /> Matched
                         </span>
+                      )}
                     </div>
-                </div>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={typedPhrase}
+                      onChange={e => setTypedPhrase(e.target.value)}
+                      placeholder={requiredPhrase}
+                      className="w-full min-h-[44px] bg-slate-50 focus:bg-white border border-slate-200 focus:border-rose-500 rounded-xl px-3.5 py-2 text-base sm:text-sm font-mono text-slate-900 placeholder:text-slate-400 outline-none"
+                    />
+                  </div>
 
-                {/* Collapsible Emergency Recovery Snapshots Drawer */}
-                {showSnapshotsDrawer && (
-                    <div className="bg-amber-50/90 border-b border-amber-200 px-6 py-4 shrink-0 max-h-60 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
-                        <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-2">
-                                <RotateCcw size={16} className="text-amber-700" />
-                                <h4 className="text-xs font-black uppercase tracking-widest text-amber-900">
-                                    Emergency Audit Window — Soft-Delete Snapshots
-                                </h4>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={loadSnapshots}
-                                className="text-[11px] font-bold text-amber-800 hover:underline flex items-center gap-1"
-                            >
-                                <RefreshCw size={12} className={isLoadingSnapshots ? 'animate-spin' : ''} />
-                                Refresh
-                            </button>
-                        </div>
+                  {/* Footer */}
+                  <div className="flex items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      disabled={isExecutingPurge}
+                      onClick={() => setView('SELECT')}
+                      className="flex-1 min-h-[46px] rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-sm font-semibold transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!canExecutePurge}
+                      className="flex-[1.3] min-h-[46px] flex items-center justify-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold shadow-sm transition-all"
+                    >
+                      {isExecutingPurge ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={16} />
+                      )}
+                      <span>{isExecutingPurge ? 'Removing...' : 'Remove Course'}</span>
+                    </button>
+                  </div>
+                </motion.form>
+              )}
 
-                        {snapshots.length === 0 ? (
-                            <p className="text-xs text-amber-800/80 py-2">
-                                No course purge snapshots recorded yet. Soft-deleted courses appear here for 1-click transactional restoration.
-                            </p>
+              {/* ── STEP 3: OPTIONAL RE-ENROLLMENT ── */}
+              {view === 'RE_ENROLL' && (
+                <motion.div
+                  key="re-enroll"
+                  initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98 }}
+                  transition={{ duration: 0.18 }}
+                  className="space-y-4"
+                >
+                  <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200/80 flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Check size={16} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-emerald-950">
+                        {selectedLabel} Removed
+                      </p>
+                      <p className="text-xs text-emerald-800/90 mt-0.5">
+                        Cleared {purgeResult?.purgedCadetCount.toLocaleString() ?? 0} cadets. You can upload a replacement roster below or click Done to finish.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Template Download */}
+                  <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                    <span className="font-semibold text-slate-700">Replacement Template:</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={downloadNPACSVTemplate}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 font-semibold text-slate-700"
+                      >
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={downloadNPAExcelTemplate}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 font-semibold text-slate-700"
+                      >
+                        Excel
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* File Upload */}
+                  <input
+                    ref={seedFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleSeedFileChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    disabled={isParsingSeed || isCommittingSeed}
+                    onClick={() => seedFileInputRef.current?.click()}
+                    className="w-full min-h-[84px] p-4 rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-600 bg-slate-50/60 hover:bg-blue-50/40 flex flex-col items-center justify-center gap-1.5 text-center transition-colors"
+                  >
+                    {isParsingSeed ? (
+                      <Loader2 size={20} className="animate-spin text-blue-700" />
+                    ) : (
+                      <Upload size={20} className="text-slate-500" />
+                    )}
+                    <span className="text-xs font-semibold text-slate-800">
+                      {seedFileName ? seedFileName : 'Upload Replacement Roster (.csv, .xlsx)'}
+                    </span>
+                    {seedParseResult && (
+                      <span className="text-[11px] text-slate-500 tabular-nums">
+                        {seedParseResult.validRows.length.toLocaleString()} valid •{' '}
+                        {seedParseResult.invalidRows.length.toLocaleString()} issues
+                      </span>
+                    )}
+                  </button>
+
+                  <div className="flex items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      disabled={isCommittingSeed}
+                      onClick={onClose}
+                      className="flex-1 min-h-[46px] rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-sm font-semibold transition-colors"
+                    >
+                      Done
+                    </button>
+                    {seedParseResult && seedParseResult.validRows.length > 0 && (
+                      <button
+                        type="button"
+                        disabled={isCommittingSeed}
+                        onClick={handleCommitReEnrollment}
+                        className="flex-[1.3] min-h-[46px] flex items-center justify-center gap-2 rounded-xl bg-blue-900 hover:bg-blue-800 disabled:opacity-50 text-white text-sm font-bold transition-all"
+                      >
+                        {isCommittingSeed ? (
+                          <Loader2 size={16} className="animate-spin" />
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                                {snapshots.map(snap => (
-                                    <div
-                                        key={snap.id}
-                                        className="bg-white rounded-xl p-3 border border-amber-200/80 shadow-sm flex items-center justify-between gap-3"
-                                    >
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <span className="font-black text-xs text-slate-900">
-                                                    {snap.courseNumbers.map(rc => `RC ${rc}`).join(', ')}
-                                                </span>
-                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-slate-100 text-slate-700">
-                                                    {snap.cadetCount.toLocaleString()} Cadets
-                                                </span>
-                                                <span
-                                                    className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
-                                                        snap.restoredAt
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : snap.isRecoverable
-                                                            ? 'bg-amber-100 text-amber-800'
-                                                            : 'bg-rose-100 text-rose-700'
-                                                    }`}
-                                                >
-                                                    {snap.restoredAt
-                                                        ? 'Restored'
-                                                        : snap.isRecoverable
-                                                        ? 'Soft-Delete Archive'
-                                                        : 'Hard-Deleted'}
-                                                </span>
-                                            </div>
-                                            <p className="text-[11px] text-slate-500 mt-1 truncate">
-                                                By <span className="font-semibold text-slate-700">{snap.actorName}</span> •{' '}
-                                                {new Date(snap.createdAt).toLocaleString()}
-                                            </p>
-                                        </div>
-
-                                        {snap.isRecoverable && (
-                                            <button
-                                                type="button"
-                                                disabled={restoringSnapshotId === snap.id}
-                                                onClick={() => handleRestoreSnapshot(snap)}
-                                                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 shadow-sm transition-all"
-                                            >
-                                                {restoringSnapshotId === snap.id ? (
-                                                    <RefreshCw size={13} className="animate-spin" />
-                                                ) : (
-                                                    <RotateCcw size={13} />
-                                                )}
-                                                <span>{snap.restoredAt ? 'Re-Restore' : 'Restore'}</span>
-                                            </button>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
+                          <Check size={16} />
                         )}
+                        <span>
+                          {isCommittingSeed
+                            ? 'Enrolling...'
+                            : `Enroll ${seedParseResult.validRows.length.toLocaleString()} Cadets`}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ── RESTORE REMOVED COURSE SNAPSHOTS ── */}
+              {view === 'RESTORE' && (
+                <motion.div
+                  key="restore"
+                  initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
+                  transition={{ duration: 0.16 }}
+                  className="space-y-3"
+                >
+                  {isLoadingSnapshots ? (
+                    <div className="py-8 flex justify-center">
+                      <Loader2 size={20} className="animate-spin text-slate-400" />
                     </div>
-                )}
-
-                {/* Modal Body */}
-                <div className="p-6 overflow-y-auto space-y-6 flex-1">
-                    {/* =====================================================================
-                        STEP 1: COURSE SELECTION & IMPACT PREVIEW DASHBOARD
-                       ===================================================================== */}
-                    {step === 'SELECT_AND_AUDIT' && (
-                        <>
-                            {/* 1A. Multi-Select Regular Course Grid */}
-                            <div className="space-y-3">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    <div>
-                                        <label className="text-xs font-black uppercase tracking-widest text-slate-500 block">
-                                            1. Select Target Regular Course(s) for Bulk Purge / Replacement
-                                        </label>
-                                        <p className="text-xs text-slate-500 mt-0.5">
-                                            Click one or multiple Regular Courses (e.g., RC 9, RC 10, RC 11) to inspect their real-time registry impact.
-                                        </p>
-                                    </div>
-
-                                    {/* Add Custom RC Number */}
-                                    <form onSubmit={handleAddCustomRC} className="flex items-center gap-1.5">
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            max={50}
-                                            placeholder="Other RC #..."
-                                            value={customRCInput}
-                                            onChange={e => setCustomRCInput(e.target.value)}
-                                            className="w-28 px-2.5 py-1.5 text-xs font-bold border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-                                        />
-                                        <button
-                                            type="submit"
-                                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black transition-all"
-                                        >
-                                            + Add RC
-                                        </button>
-                                    </form>
-                                </div>
-
-                                {isLoadingCourses ? (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-                                        {[1, 2, 3, 4, 5, 6].map(n => (
-                                            <div
-                                                key={n}
-                                                className="h-24 rounded-2xl bg-slate-100 animate-pulse border border-slate-200"
-                                            />
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-                                        {availableCourses.map(course => {
-                                            const isSelected = selectedRCs.includes(course.courseNumber);
-                                            const admissionYear = calculateAdmissionYearFromRC(course.courseNumber);
-                                            const level = calculateCurrentLevel(course.courseNumber, activeRC);
-
-                                            return (
-                                                <button
-                                                    key={course.courseNumber}
-                                                    type="button"
-                                                    onClick={() => toggleCourseSelection(course.courseNumber)}
-                                                    className={`p-3.5 rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between ${
-                                                        isSelected
-                                                            ? 'border-rose-600 bg-rose-50/70 shadow-sm ring-2 ring-rose-500/20'
-                                                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                                                    }`}
-                                                >
-                                                    <div className="flex items-center justify-between w-full">
-                                                        <span
-                                                            className={`px-2 py-0.5 rounded-lg text-xs font-black ${
-                                                                isSelected
-                                                                    ? 'bg-rose-600 text-white'
-                                                                    : 'bg-slate-100 text-slate-800'
-                                                            }`}
-                                                        >
-                                                            RC {course.courseNumber}
-                                                        </span>
-                                                        {isSelected ? (
-                                                            <CheckSquare size={16} className="text-rose-600" />
-                                                        ) : (
-                                                            <Square size={16} className="text-slate-300" />
-                                                        )}
-                                                    </div>
-
-                                                    <div className="mt-3">
-                                                        <p className="text-lg font-black text-slate-900 leading-none">
-                                                            {course.totalCadets.toLocaleString()}
-                                                        </p>
-                                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">
-                                                            Cadets • {course.squadCount} Squads
-                                                        </p>
-                                                    </div>
-
-                                                    <div className="mt-2 pt-2 border-t border-slate-200/70 flex items-center justify-between text-[10px] font-bold text-slate-400">
-                                                        <span>Yr {level}</span>
-                                                        <span>Adm {admissionYear}</span>
-                                                    </div>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* 1B. Real-Time Impact Audit Counter Dashboard */}
-                            <div className="bg-slate-900 text-white rounded-3xl p-5 md:p-6 border border-slate-800 shadow-lg space-y-5">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-4">
-                                    <div className="flex items-center gap-2.5">
-                                        <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400">
-                                            <Layers size={18} />
-                                        </div>
-                                        <div>
-                                            <h4 className="text-sm font-black uppercase tracking-wider text-white">
-                                                2. Real-Time Impact Audit Counter
-                                            </h4>
-                                            <p className="text-xs text-slate-400">
-                                                Live blast-radius assessment across{' '}
-                                                <span className="text-rose-300 font-bold">
-                                                    {selectedRCs.length > 0
-                                                        ? selectedRCs.map(rc => formatRC(rc)).join(', ')
-                                                        : 'No courses selected'}
-                                                </span>
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {isLoadingImpact && (
-                                        <span className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
-                                            <RefreshCw size={13} className="animate-spin" />
-                                            Auditing database records...
-                                        </span>
-                                    )}
-                                </div>
-
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-                                    {/* Total Cadets Card */}
-                                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4">
-                                        <div className="flex items-center justify-between text-rose-400 mb-2">
-                                            <span className="text-[10px] font-black uppercase tracking-widest">
-                                                Targeted Cadets
-                                            </span>
-                                            <Users size={16} />
-                                        </div>
-                                        <p className="text-2xl md:text-3xl font-black text-white">
-                                            {impactSummary.totalCadets.toLocaleString()}
-                                        </p>
-                                        <p className="text-[11px] text-slate-400 mt-1">
-                                            {impactSummary.activeCadets.toLocaleString()} Active in Nominal Roll
-                                        </p>
-                                    </div>
-
-                                    {/* Parade Records Card */}
-                                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4">
-                                        <div className="flex items-center justify-between text-amber-400 mb-2">
-                                            <span className="text-[10px] font-black uppercase tracking-widest">
-                                                Parade Submissions
-                                            </span>
-                                            <ClipboardList size={16} />
-                                        </div>
-                                        <p className="text-2xl md:text-3xl font-black text-white">
-                                            {impactSummary.paradeRecordsCount.toLocaleString()}
-                                        </p>
-                                        <p className="text-[11px] text-slate-400 mt-1">
-                                            Muster, Tattoo & Special Parades
-                                        </p>
-                                    </div>
-
-                                    {/* Disciplinary & Attendance Logs Card */}
-                                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4">
-                                        <div className="flex items-center justify-between text-blue-400 mb-2">
-                                            <span className="text-[10px] font-black uppercase tracking-widest">
-                                                Disciplinary / Status Logs
-                                            </span>
-                                            <Database size={16} />
-                                        </div>
-                                        <p className="text-2xl md:text-3xl font-black text-white">
-                                            {impactSummary.disciplinaryLogsCount.toLocaleString()}
-                                        </p>
-                                        <p className="text-[11px] text-slate-400 mt-1">
-                                            Absent, Detention, Sick & Pass entries
-                                        </p>
-                                    </div>
-
-                                    {/* Assigned Officers & Push Subscriptions Card */}
-                                    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4">
-                                        <div className="flex items-center justify-between text-emerald-400 mb-2">
-                                            <span className="text-[10px] font-black uppercase tracking-widest">
-                                                Officers & Webhooks
-                                            </span>
-                                            <BellRing size={16} />
-                                        </div>
-                                        <p className="text-2xl md:text-3xl font-black text-white">
-                                            {impactSummary.assignedOfficersCount}{' '}
-                                            <span className="text-sm font-bold text-slate-400">
-                                                / {impactSummary.pushSubscriptionsCount} Push
-                                            </span>
-                                        </p>
-                                        <p className="text-[11px] text-slate-400 mt-1">
-                                            Course Officers & Push Subscriptions
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* 1C. Mandatory Export Backup Prompt */}
-                            <div
-                                className={`rounded-3xl p-5 border-2 transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
-                                    hasExportedBackup
-                                        ? 'bg-emerald-50/70 border-emerald-300'
-                                        : 'bg-amber-50/80 border-amber-300'
-                                }`}
-                            >
-                                <div className="flex items-start gap-3.5">
-                                    <div
-                                        className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
-                                            hasExportedBackup
-                                                ? 'bg-emerald-600 text-white'
-                                                : 'bg-amber-500 text-white'
-                                        }`}
-                                    >
-                                        {hasExportedBackup ? <CheckCircle2 size={22} /> : <Download size={22} />}
-                                    </div>
-                                    <div>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <h4 className="text-sm font-black text-slate-900">
-                                                3. Mandatory Pre-Purge CSV Roster Backup
-                                            </h4>
-                                            <span
-                                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                                    hasExportedBackup
-                                                        ? 'bg-emerald-200 text-emerald-900'
-                                                        : 'bg-amber-200 text-amber-900'
-                                                }`}
-                                            >
-                                                {hasExportedBackup ? 'Backup Verified ✓' : 'Required Before Deletion'}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                                            Download a timestamped CSV archive of all{' '}
-                                            <span className="font-bold text-slate-900">
-                                                {impactSummary.totalCadets.toLocaleString()}
-                                            </span>{' '}
-                                            cadet records in{' '}
-                                            <span className="font-bold text-slate-900">
-                                                {selectedRCs.map(rc => `RC ${rc}`).join(', ') || 'selected courses'}
-                                            </span>
-                                            . The exported CSV is 100% compatible with the Dual-Format Enrollment Engine for instant re-import.
-                                        </p>
-                                        {lastBackupFilename && (
-                                            <p className="text-[11px] font-mono font-bold text-emerald-800 mt-1.5">
-                                                Saved: {lastBackupFilename}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    disabled={isExportingBackup || selectedRCs.length === 0}
-                                    onClick={handleExportCSVBackup}
-                                    className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 shrink-0 shadow-md transition-all ${
-                                        hasExportedBackup
-                                            ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                                            : 'bg-slate-900 hover:bg-slate-800 text-white'
-                                    } disabled:opacity-50`}
-                                >
-                                    {isExportingBackup ? (
-                                        <RefreshCw size={15} className="animate-spin" />
-                                    ) : (
-                                        <Download size={15} />
-                                    )}
-                                    <span>
-                                        {hasExportedBackup
-                                            ? 'Download Backup Again (.CSV)'
-                                            : `Export ${selectedRCs.map(rc => `RC-${rc}`).join('/')} Backup (.CSV)`}
-                                    </span>
-                                </button>
-                            </div>
-                        </>
-                    )}
-
-                    {/* =====================================================================
-                        STEP 2: MULTI-STEP SAFETY CONFIRMATION GUARDRAIL
-                       ===================================================================== */}
-                    {step === 'CONFIRM_DESTRUCTIVE' && (
-                        <div className="space-y-6 animate-in fade-in duration-200">
-                            {/* High-Friction Warning Banner */}
-                            <div className="bg-rose-50 border-2 border-rose-200 rounded-3xl p-5 flex items-start gap-4">
-                                <div className="w-12 h-12 rounded-2xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-md">
-                                    <AlertTriangle size={24} />
-                                </div>
-                                <div className="space-y-1">
-                                    <h4 className="text-base font-black text-rose-950">
-                                        High-Friction Destructive Action Verification
-                                    </h4>
-                                    <p className="text-xs text-rose-800 leading-relaxed">
-                                        You are preparing to purge{' '}
-                                        <span className="font-black underline">
-                                            {impactSummary.totalCadets.toLocaleString()} cadet record(s)
-                                        </span>{' '}
-                                        registered under{' '}
-                                        <span className="font-black">
-                                            {selectedRCs.map(rc => `Regular Course ${rc} (RC-${rc})`).join(', ')}
-                                        </span>
-                                        . Complete the transaction mode selection, hazard acknowledgments, and phrase verification below to unlock execution.
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Purge Mode & Historical Logs Options */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {/* Soft-Delete vs Hard-Delete */}
-                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                                    <label className="text-[11px] font-black uppercase tracking-widest text-slate-500 block">
-                                        Transaction Recovery Mode
-                                    </label>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setPurgeMode('SOFT_DELETE')}
-                                        className={`w-full p-3.5 rounded-xl border-2 text-left transition-all flex items-start gap-3 ${
-                                            purgeMode === 'SOFT_DELETE'
-                                                ? 'border-blue-600 bg-blue-50/60'
-                                                : 'border-slate-200 bg-white hover:border-slate-300'
-                                        }`}
-                                    >
-                                        <RotateCcw
-                                            size={18}
-                                            className={
-                                                purgeMode === 'SOFT_DELETE' ? 'text-blue-600 mt-0.5' : 'text-slate-400 mt-0.5'
-                                            }
-                                        />
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-black text-xs text-slate-900">
-                                                    Soft-Delete with Snapshot Recovery
-                                                </span>
-                                                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-black">
-                                                    Recommended
-                                                </span>
-                                            </div>
-                                            <p className="text-[11px] text-slate-600 mt-1">
-                                                Archives full course JSONB snapshot into <code className="font-mono">course_purge_snapshots</code> before clearing the active roster so you can roll back with 1 click.
-                                            </p>
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setPurgeMode('HARD_DELETE')}
-                                        className={`w-full p-3.5 rounded-xl border-2 text-left transition-all flex items-start gap-3 ${
-                                            purgeMode === 'HARD_DELETE'
-                                                ? 'border-rose-600 bg-rose-50/60'
-                                                : 'border-slate-200 bg-white hover:border-slate-300'
-                                        }`}
-                                    >
-                                        <Trash2
-                                            size={18}
-                                            className={
-                                                purgeMode === 'HARD_DELETE' ? 'text-rose-600 mt-0.5' : 'text-slate-400 mt-0.5'
-                                            }
-                                        />
-                                        <div>
-                                            <span className="font-black text-xs text-slate-900">
-                                                Hard-Delete (Permanent Wipe)
-                                            </span>
-                                            <p className="text-[11px] text-slate-600 mt-1">
-                                                Permanently deletes targeted course records from PostgreSQL without storing a recoverable roster payload. Rely on exported CSV backup only.
-                                            </p>
-                                        </div>
-                                    </button>
-                                </div>
-
-                                {/* Attendance History & Hazard Acknowledgments */}
-                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-4">
-                                    <div className="space-y-2.5">
-                                        <label className="text-[11px] font-black uppercase tracking-widest text-slate-500 block">
-                                            Associated Parade & Disciplinary History
-                                        </label>
-                                        <label className="flex items-start gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-slate-300">
-                                            <input
-                                                type="checkbox"
-                                                checked={purgeAttendance}
-                                                onChange={e => setPurgeAttendance(e.target.checked)}
-                                                className="mt-1 rounded text-rose-600 focus:ring-rose-500"
-                                            />
-                                            <div>
-                                                <span className="text-xs font-black text-slate-800 block">
-                                                    Also Purge Historical Parade & Disciplinary Logs ({impactSummary.paradeRecordsCount} parades)
-                                                </span>
-                                                <span className="text-[11px] text-slate-500 block mt-0.5">
-                                                    Leave unchecked to preserve historical parade statistics while replacing only the nominal cadet roster.
-                                                </span>
-                                            </div>
-                                        </label>
-                                    </div>
-
-                                    <div className="space-y-2.5 pt-2 border-t border-slate-200">
-                                        <label className="text-[11px] font-black uppercase tracking-widest text-rose-700 block">
-                                            Mandatory Hazard Acknowledgments
-                                        </label>
-
-                                        <label className="flex items-start gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-rose-300">
-                                            <input
-                                                type="checkbox"
-                                                checked={hazardAckBackup}
-                                                onChange={e => setHazardAckBackup(e.target.checked)}
-                                                className="mt-0.5 rounded text-rose-600 focus:ring-rose-500"
-                                            />
-                                            <span className="text-xs font-semibold text-slate-700">
-                                                I confirm that I have exported and verified the CSV backup for{' '}
-                                                <strong className="text-slate-900">
-                                                    {selectedRCs.map(rc => `RC-${rc}`).join(', ')}
-                                                </strong>
-                                                .
-                                            </span>
-                                        </label>
-
-                                        <label className="flex items-start gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-rose-300">
-                                            <input
-                                                type="checkbox"
-                                                checked={hazardAckDestructive}
-                                                onChange={e => setHazardAckDestructive(e.target.checked)}
-                                                className="mt-0.5 rounded text-rose-600 focus:ring-rose-500"
-                                            />
-                                            <span className="text-xs font-semibold text-slate-700">
-                                                I authorize purging{' '}
-                                                <strong className="text-rose-700">
-                                                    {impactSummary.totalCadets.toLocaleString()} cadet records
-                                                </strong>{' '}
-                                                and logging this operation under{' '}
-                                                <strong className="text-slate-900">
-                                                    {currentUser?.fullName || 'Commandant'}
-                                                </strong>{' '}
-                                                in the Forensic Audit Archive.
-                                            </span>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Typing Verification Input Box */}
-                            <div className="bg-slate-900 text-white rounded-3xl p-5 border border-slate-800 space-y-3">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    <label className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                                        {isPhraseMatched ? (
-                                            <Unlock size={15} className="text-emerald-400" />
-                                        ) : (
-                                            <Lock size={15} className="text-rose-400" />
-                                        )}
-                                        <span>Type Confirmation Phrase to Unlock Execution:</span>
-                                    </label>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[11px] text-slate-400">Required phrase:</span>
-                                        <code className="px-3 py-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-xl font-mono text-xs font-black select-all">
-                                            {requiredPhrase}
-                                        </code>
-                                    </div>
-                                </div>
-
-                                <input
-                                    type="text"
-                                    value={typedPhrase}
-                                    onChange={e => setTypedPhrase(e.target.value)}
-                                    placeholder={`Type "${requiredPhrase}" exactly to unlock...`}
-                                    className={`w-full px-4 py-3.5 rounded-2xl font-mono text-sm font-black tracking-wider bg-slate-950 border-2 outline-none transition-all ${
-                                        isPhraseMatched
-                                            ? 'border-emerald-500 text-emerald-400 ring-4 ring-emerald-500/10'
-                                            : typedPhrase.length > 0
-                                            ? 'border-rose-500 text-rose-300'
-                                            : 'border-slate-700 text-white'
-                                    }`}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {/* =====================================================================
-                        STEP 3: IMMEDIATE RE-ENROLLMENT / SEEDING WORKFLOW
-                       ===================================================================== */}
-                    {step === 'RE_ENROLL_SEED' && (
-                        <div className="space-y-6 animate-in fade-in duration-200">
-                            {/* Purge Success & Snapshot Rollback Banner */}
-                            <div className="bg-emerald-50 border-2 border-emerald-200 rounded-3xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                                <div className="flex items-start gap-3.5">
-                                    <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
-                                        <CheckCircle2 size={22} />
-                                    </div>
-                                    <div>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <h4 className="text-base font-black text-emerald-950">
-                                                Purge Transaction Committed — Ready for Immediate Re-Enrollment
-                                            </h4>
-                                            {purgeResult?.snapshotId && (
-                                                <span className="px-2.5 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-full text-[10px] font-mono font-black">
-                                                    Snapshot ID: {String(purgeResult.snapshotId).slice(0, 8)}...
-                                                </span>
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-emerald-800 mt-1">
-                                            Cleared{' '}
-                                            <span className="font-black">
-                                                {purgeResult?.purgedCadetCount.toLocaleString() || 0} record(s)
-                                            </span>{' '}
-                                            from{' '}
-                                            <span className="font-black">
-                                                {(purgeResult?.courseNumbers || selectedRCs)
-                                                    .map(rc => `RC ${rc}`)
-                                                    .join(', ')}
-                                            </span>
-                                            . Upload the replacement CSV or Excel roster below using either the{' '}
-                                            <strong>New 2-Column NPA Format (`NPA Number, Name`)</strong> or the{' '}
-                                            <strong>Legacy Format</strong>.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {purgeResult?.isRecoverable && purgeResult?.snapshotId && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const snap = snapshots.find(s => s.id === purgeResult.snapshotId);
-                                            if (snap) handleRestoreSnapshot(snap);
-                                        }}
-                                        className="px-3.5 py-2 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 shadow-sm transition-all"
-                                    >
-                                        <RotateCcw size={14} />
-                                        <span>Undo & Restore Snapshot</span>
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Dual-Format Template Bar */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2.5">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                                        Ingestion Schema Mode
-                                    </label>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelectedFormatMode('AUTO')}
-                                            className={`px-3 py-2 rounded-xl text-xs font-bold border text-left transition-all ${
-                                                selectedFormatMode === 'AUTO'
-                                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                                            }`}
-                                        >
-                                            <div className="font-black">Auto-Detect</div>
-                                            <div className="text-[10px] opacity-80">Both formats</div>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelectedFormatMode('NPA_FORMAT')}
-                                            className={`px-3 py-2 rounded-xl text-xs font-bold border text-left transition-all ${
-                                                selectedFormatMode === 'NPA_FORMAT'
-                                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                                            }`}
-                                        >
-                                            <div className="font-black">New NPA Format</div>
-                                            <div className="text-[10px] opacity-80">NPA Number, Name</div>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelectedFormatMode('LEGACY_FORMAT')}
-                                            className={`px-3 py-2 rounded-xl text-xs font-bold border text-left transition-all ${
-                                                selectedFormatMode === 'LEGACY_FORMAT'
-                                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                                            }`}
-                                        >
-                                            <div className="font-black">Legacy Schema</div>
-                                            <div className="text-[10px] opacity-80">Name, Squad, RC</div>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2.5">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                                        Download Fresh Replacement Templates
-                                    </label>
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={downloadNPACSVTemplate}
-                                            className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                                        >
-                                            <FileText size={14} />
-                                            <span>NPA CSV (2-Col)</span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={downloadNPAExcelTemplate}
-                                            className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                                        >
-                                            <FileSpreadsheet size={14} />
-                                            <span>NPA Excel (.xlsx)</span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={downloadLegacyExcelTemplate}
-                                            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all"
-                                        >
-                                            <Download size={14} />
-                                            <span>Legacy (.xlsx)</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Upload Dropzone */}
-                            <div
-                                onClick={() => seedFileInputRef.current?.click()}
-                                onDragOver={e => e.preventDefault()}
-                                onDrop={async e => {
-                                    e.preventDefault();
-                                    const file = e.dataTransfer.files?.[0];
-                                    if (file) await processSeedFile(file);
-                                }}
-                                className="border-2 border-dashed border-blue-300 hover:border-blue-500 bg-blue-50/30 hover:bg-blue-50/60 rounded-2xl p-6 text-center cursor-pointer transition-all group"
-                            >
-                                <input
-                                    type="file"
-                                    ref={seedFileInputRef}
-                                    onChange={handleSeedFileChange}
-                                    accept=".csv,.xlsx,.xls"
-                                    className="hidden"
-                                />
-                                <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center mx-auto mb-3 shadow-md group-hover:scale-105 transition-transform">
-                                    <Upload size={22} />
-                                </div>
-                                <p className="text-sm font-black text-slate-800">
-                                    {seedFileName
-                                        ? `Loaded Replacement Roster: ${seedFileName}`
-                                        : `Drop replacement CSV or Excel roster for ${selectedRCs.map(rc => `RC ${rc}`).join(', ')}`}
-                                </p>
-                                <p className="text-xs text-slate-500 mt-1">
-                                    Supports <span className="font-bold text-slate-700">.csv, .xlsx, .xls</span> • Deduplicates intra-batch NPA numbers automatically
-                                </p>
-                            </div>
-
-                            {/* Validation Preview Table for Replacement Roster */}
-                            {seedParseResult && (
-                                <div className="space-y-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-100 p-3 rounded-2xl">
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setSeedPreviewTab('ALL')}
-                                                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                                                    seedPreviewTab === 'ALL'
-                                                        ? 'bg-slate-900 text-white'
-                                                        : 'bg-white text-slate-600'
-                                                }`}
-                                            >
-                                                All Rows ({seedParseResult.totalRows})
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setSeedPreviewTab('VALID')}
-                                                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                                                    seedPreviewTab === 'VALID'
-                                                        ? 'bg-emerald-600 text-white'
-                                                        : 'bg-white text-emerald-700'
-                                                }`}
-                                            >
-                                                Valid ({seedParseResult.validRows.length})
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setSeedPreviewTab('INVALID')}
-                                                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                                                    seedPreviewTab === 'INVALID'
-                                                        ? 'bg-rose-600 text-white'
-                                                        : 'bg-white text-rose-700'
-                                                }`}
-                                            >
-                                                Errors ({seedParseResult.invalidRows.length})
-                                            </button>
-                                        </div>
-
-                                        <span className="text-xs font-bold text-slate-600">
-                                            Schema:{' '}
-                                            <strong className="text-slate-900">
-                                                {seedParseResult.detectedFormat === 'NPA_FORMAT'
-                                                    ? 'New NPA 2-Column'
-                                                    : 'Legacy 3-Column'}
-                                            </strong>
-                                        </span>
-                                    </div>
-
-                                    <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-60 overflow-y-auto">
-                                        <table className="w-full text-left border-collapse">
-                                            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
-                                                <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                    <th className="py-2.5 px-3">Row</th>
-                                                    <th className="py-2.5 px-3">Status</th>
-                                                    <th className="py-2.5 px-3">NPA Number</th>
-                                                    <th className="py-2.5 px-3">Full Name</th>
-                                                    <th className="py-2.5 px-3">Squad</th>
-                                                    <th className="py-2.5 px-3">Derived RC</th>
-                                                    <th className="py-2.5 px-3">Diagnostics</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100 text-xs">
-                                                {displayedSeedRows.slice(0, 150).map(row => (
-                                                    <tr
-                                                        key={row.rowNumber}
-                                                        className={row.isValid ? 'hover:bg-slate-50/80' : 'bg-rose-50/60'}
-                                                    >
-                                                        <td className="py-2 px-3 font-mono text-slate-400 font-bold">
-                                                            #{row.rowNumber}
-                                                        </td>
-                                                        <td className="py-2 px-3">
-                                                            {row.isValid ? (
-                                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700">
-                                                                    READY
-                                                                </span>
-                                                            ) : (
-                                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700">
-                                                                    INVALID
-                                                                </span>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-2 px-3 font-mono font-bold text-slate-700">
-                                                            {row.npa_number || '—'}
-                                                        </td>
-                                                        <td className="py-2 px-3 font-bold text-slate-800">{row.name}</td>
-                                                        <td className="py-2 px-3 font-bold text-slate-600">{row.squad}</td>
-                                                        <td className="py-2 px-3">
-                                                            {row.course_number > 0 ? (
-                                                                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded font-black text-[10px]">
-                                                                    {formatRC(row.course_number)}
-                                                                </span>
-                                                            ) : (
-                                                                '—'
-                                                            )}
-                                                        </td>
-                                                        <td className="py-2 px-3">
-                                                            {row.isValid ? (
-                                                                <span className="text-[11px] text-emerald-600 font-semibold">
-                                                                    Verified
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-[11px] text-rose-600 font-bold">
-                                                                    {row.errors.join(' ')}
-                                                                </span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
+                  ) : snapshots.length === 0 ? (
+                    <p className="text-xs text-slate-500 text-center py-6">
+                      No restore snapshots available.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 overflow-hidden">
+                      {snapshots.map(snap => (
+                        <div
+                          key={snap.id}
+                          className="p-3.5 flex items-center justify-between gap-3 bg-white"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-900 truncate">
+                              {snap.courseNumbers.map(rc => `RC ${rc}`).join(', ')}
+                            </p>
+                            <p className="text-xs text-slate-500 tabular-nums mt-0.5">
+                              {snap.cadetCount.toLocaleString()} cadets •{' '}
+                              {new Date(snap.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={!!restoringSnapshotId}
+                            onClick={() => handleRestoreSnapshot(snap)}
+                            className="min-h-[38px] px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors"
+                          >
+                            {restoringSnapshotId === snap.id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <RotateCcw size={14} />
                             )}
+                            <span>Restore</span>
+                          </button>
                         </div>
-                    )}
-                </div>
-
-                {/* Modal Footer Controls */}
-                <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
-                    {step === 'SELECT_AND_AUDIT' && (
-                        <>
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200/70 transition-all text-xs"
-                            >
-                                Cancel
-                            </button>
-
-                            <div className="flex items-center gap-3">
-                                {!hasExportedBackup && impactSummary.totalCadets > 0 && (
-                                    <span className="hidden sm:inline text-xs font-bold text-amber-700">
-                                        Export CSV backup first to unlock deletion
-                                    </span>
-                                )}
-                                <button
-                                    type="button"
-                                    disabled={
-                                        selectedRCs.length === 0 ||
-                                        (impactSummary.totalCadets > 0 && !hasExportedBackup)
-                                    }
-                                    onClick={handleProceedToConfirmation}
-                                    className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs shadow-lg shadow-rose-600/20 transition-all flex items-center gap-2"
-                                >
-                                    <Trash2 size={15} />
-                                    <span>
-                                        Delete {selectedRCs.map(rc => `RC-${rc}`).join(', ')} Records (
-                                        {impactSummary.totalCadets.toLocaleString()})
-                                    </span>
-                                    <ArrowRight size={14} />
-                                </button>
-                            </div>
-                        </>
-                    )}
-
-                    {step === 'CONFIRM_DESTRUCTIVE' && (
-                        <>
-                            <button
-                                type="button"
-                                disabled={isExecutingPurge}
-                                onClick={() => setStep('SELECT_AND_AUDIT')}
-                                className="px-4 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200/70 transition-all text-xs flex items-center gap-1.5"
-                            >
-                                <ArrowLeft size={14} />
-                                <span>Back to Impact Audit</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                disabled={!canExecutePurge}
-                                onClick={handleExecutePurge}
-                                className="px-6 py-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs shadow-lg shadow-rose-600/25 transition-all flex items-center gap-2"
-                            >
-                                {isExecutingPurge ? (
-                                    <>
-                                        <RefreshCw size={15} className="animate-spin" />
-                                        <span>Executing Atomic Course Purge...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <ShieldAlert size={15} />
-                                        <span>
-                                            Execute {purgeMode === 'SOFT_DELETE' ? 'Soft-Delete & Archive' : 'Permanent Purge'} ({impactSummary.totalCadets.toLocaleString()} Cadets)
-                                        </span>
-                                    </>
-                                )}
-                            </button>
-                        </>
-                    )}
-
-                    {step === 'RE_ENROLL_SEED' && (
-                        <>
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200/70 transition-all text-xs"
-                            >
-                                Finish Without Seeding Now
-                            </button>
-
-                            <button
-                                type="button"
-                                disabled={
-                                    !seedParseResult ||
-                                    seedParseResult.validRows.length === 0 ||
-                                    isCommittingSeed ||
-                                    isParsingSeed
-                                }
-                                onClick={handleCommitReEnrollment}
-                                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-2"
-                            >
-                                {isCommittingSeed ? (
-                                    <>
-                                        <RefreshCw size={15} className="animate-spin" />
-                                        <span>Seeding Course Roster...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <CheckCircle2 size={15} />
-                                        <span>
-                                            Commit Fresh Course Roster (
-                                            {seedParseResult ? seedParseResult.validRows.length.toLocaleString() : 0}{' '}
-                                            Cadets)
-                                        </span>
-                                    </>
-                                )}
-                            </button>
-                        </>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>,
+    document.body
+  );
 };

@@ -12,7 +12,6 @@ import {
   BellRing,
   AlertTriangle,
   Clock,
-  ShieldAlert,
   RotateCcw,
   Check,
   Loader2
@@ -24,9 +23,7 @@ import { dbService } from '../../../services/dbService';
 import { UserRole } from '../../../types';
 import { PushNotificationManager } from '../../PushNotificationManager';
 import { CredentialSettings } from './CredentialSettings';
-import { GraduationPanel } from './GraduationPanel';
-import { HandoverWizard } from './HandoverWizard';
-import { BulkCoursePurgeModal } from '../../CadetRegistry/BulkCoursePurgeModal';
+import { CourseLifecycleView } from './CourseLifecycleView';
 import { AuditLogView } from '../../Settings/AuditLogView';
 import { HistoricalAlertsView } from '../../Settings/HistoricalAlertsView';
 import { toast } from 'react-hot-toast';
@@ -62,10 +59,10 @@ const CATEGORIES: CategoryDefinition[] = [
   {
     id: 'lifecycle',
     title: 'Course Lifecycle',
-    subtitle: 'Graduation, handover wizard, and course purge',
+    subtitle: 'Graduation, handover wizard, course purge, and full data wipe',
     icon: RefreshCw,
     iconBg: 'bg-amber-50 text-amber-700',
-    keywords: ['lifecycle', 'graduate', 'graduation', 'handover', 'purge', 'delete', 'backup', 'csv', 're-enroll', 'seed', 'intake']
+    keywords: ['lifecycle', 'graduate', 'graduation', 'handover', 'purge', 'delete', 'backup', 'csv', 're-enroll', 'seed', 'intake', 'wipe', 'reset', 'factory', 'erase']
   },
   {
     id: 'audit',
@@ -138,10 +135,6 @@ export const SystemSettingsCenter: React.FC = () => {
     submissionSettings.musterEndHour,
     submissionSettings.tattooStartHour
   ]);
-
-  // Lifecycle state
-  const [incomingRC, setIncomingRC] = useState<number | null>(null);
-  const [isBulkPurgeOpen, setIsBulkPurgeOpen] = useState(false);
 
   const hasUnsavedGeneralChanges =
     draftRC !== activeRC ||
@@ -422,60 +415,27 @@ export const SystemSettingsCenter: React.FC = () => {
 
     if (catId === 'lifecycle') {
       return (
-        <div className="space-y-6">
-          <GraduationPanel
-            onCommissionIncoming={newRC => {
-              setIncomingRC(newRC);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          />
-
-          <HandoverWizard
-            prefilledTargetRC={incomingRC}
-            onClearPrefill={() => setIncomingRC(null)}
-          />
-
-          {/* Danger Zone: Bulk Course Purge */}
-          <div className="bg-white rounded-2xl border border-rose-200 shadow-2xs overflow-hidden">
-            <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
-                  <ShieldAlert size={20} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">
-                      Bulk Course Purge & Re-Enrollment
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
-                      Danger Zone
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Remove one or more Regular Courses after downloading a mandatory CSV backup and typing <span className="font-mono font-bold text-rose-700">PURGE</span> to confirm.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsBulkPurgeOpen(true)}
-                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shrink-0 shadow-2xs transition-all flex items-center justify-center"
-              >
-                Launch Purge Console
-              </button>
-            </div>
-          </div>
-
-          <BulkCoursePurgeModal
-            isOpen={isBulkPurgeOpen}
-            onClose={() => setIsBulkPurgeOpen(false)}
-            activeRC={activeRC}
-            onPurgeAndSeedComplete={() => {
-              refreshData();
-              window.dispatchEvent(new Event('cadet-registry-updated'));
-            }}
-          />
-        </div>
+        <CourseLifecycleView
+          activeRC={activeRC}
+          onDataChanged={() => {
+            refreshData();
+            window.dispatchEvent(new Event('cadet-registry-updated'));
+          }}
+          onWipeComplete={() => {
+            if (typeof window !== 'undefined') {
+              try {
+                Object.keys(localStorage)
+                  .filter(key => key.startsWith('polac_swr_'))
+                  .forEach(key => localStorage.removeItem(key));
+              } catch {
+                // ignore storage errors
+              }
+            }
+            setActiveUsersCount(1);
+            refreshData();
+            window.dispatchEvent(new Event('cadet-registry-updated'));
+          }}
+        />
       );
     }
 

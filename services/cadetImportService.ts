@@ -277,13 +277,20 @@ export function parseCadetImportData(
 
         if (effectiveFormat === 'NPA_FORMAT') {
             // ==========================================
-            // NEW NPA TEMPLATE (2 Columns: NPA Number, Name)
+            // NPA TEMPLATE (4 Columns: NPA Number, Name, Squad, RC;
+            // also silently accepts former 2-Column: NPA Number, Name)
             // ==========================================
             const nameRaw = findRowValue(row, [
                 'Name', 'Full Name', 'Full_Name', 'name', 'full_name', 'Cadet Name', 'Cadet_Name', 'fullname'
             ]);
             const npaRaw = findRowValue(row, [
                 'NPA Number', 'NPA_Number', 'npa_number', 'NPA No', 'NPA No.', 'NPA', 'NPANumber', 'npanumber'
+            ]);
+            const squadRaw = findRowValue(row, [
+                'Squad', 'squad', 'SQUAD', 'unit', 'Unit', 'Company', 'Platoon', 'squad_name'
+            ]);
+            const rcRaw = findRowValue(row, [
+                'RC', 'rc', 'RC_Number', 'rc_number', 'Course', 'course_number', 'Course Number'
             ]);
 
             if (!nameRaw || String(nameRaw).trim() === '') {
@@ -309,15 +316,34 @@ export function parseCadetImportData(
                         seenNpaNumbers.set(normNpa, rowNumber);
                     }
 
-                    const courseNumber = npaResult.rcNumber!;
+                    // Resolve RC: prefer explicit RC column when provided, fall back to NPA-derived RC
+                    let courseNumber = npaResult.rcNumber!;
+                    let admissionYear = npaResult.admissionYear;
+                    if (rcRaw !== undefined && rcRaw !== null && String(rcRaw).trim() !== '') {
+                        const cleanedRc = String(rcRaw).trim().replace(/^RC\s*/i, '');
+                        const parsedRc = parseInt(cleanedRc, 10);
+                        if (isNaN(parsedRc) || parsedRc <= 0) {
+                            rowErrors.push(`Invalid Regular Course (RC) number '${String(rcRaw).trim()}'. Expected a positive number (e.g., 10).`);
+                        } else {
+                            courseNumber = parsedRc;
+                            admissionYear = calculateAdmissionYearFromRC(parsedRc) ?? npaResult.admissionYear;
+                        }
+                    }
+
+                    // Resolve Squad: prefer explicit Squad column when provided, fall back to NPA segment 3
+                    const resolvedSquad =
+                        squadRaw !== undefined && squadRaw !== null && String(squadRaw).trim() !== ''
+                            ? String(squadRaw).trim().toUpperCase()
+                            : npaResult.squad;
+
                     parsedCadet = {
                         ...parsedCadet,
                         name: String(nameRaw || '').trim().toUpperCase(),
-                        squad: npaResult.squad, // Segment 3 mapped directly
+                        squad: resolvedSquad,
                         course_number: courseNumber,
                         year_group: calculateCurrentLevel(courseNumber, activeRC),
                         npa_number: normNpa,
-                        admission_year: npaResult.admissionYear
+                        admission_year: admissionYear
                     };
                 }
             }
@@ -484,30 +510,31 @@ export function triggerFileDownload(blob: Blob, filename: string): void {
 }
 
 /**
- * Generates and triggers the download for the New NPA Format sample CSV template.
- * Headers: NPA Number, Name
+ * Generates and triggers the download for the NPA Format sample CSV template.
+ * Headers: NPA Number, Name, Squad, RC
  */
 export function downloadNPACSVTemplate(): void {
     const csvContent = 
-`NPA Number,Name
-NPA/03/04/2023/0395,MANI UMAR DAHIRU
-NPA/03/08/2024/0112,ABDULSHAKUR MAI GANDI
-NPA/03/02/2022/0451,CHUKWUDI EMMANUEL OKONKWO
-NPA/03/05/2021/0889,FATIMA BELLO SULEIMAN
+`NPA Number,Name,Squad,RC
+NPA/03/04/2023/0395,MANI UMAR DAHIRU,04,10
+NPA/03/08/2024/0112,ABDULSHAKUR MAI GANDI,08,11
+NPA/03/02/2022/0451,CHUKWUDI EMMANUEL OKONKWO,02,9
+NPA/03/05/2021/0889,FATIMA BELLO SULEIMAN,05,8
 `;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     triggerFileDownload(blob, 'NPA_Cadet_Enrollment_Template.csv');
 }
 
 /**
- * Generates and triggers the download for the New NPA Format sample Excel template.
+ * Generates and triggers the download for the NPA Format sample Excel template.
+ * Headers: NPA Number, Name, Squad, RC
  */
 export function downloadNPAExcelTemplate(): void {
     const sampleData = [
-        { 'NPA Number': 'NPA/03/04/2023/0395', Name: 'MANI UMAR DAHIRU' },
-        { 'NPA Number': 'NPA/03/08/2024/0112', Name: 'ABDULSHAKUR MAI GANDI' },
-        { 'NPA Number': 'NPA/03/02/2022/0451', Name: 'CHUKWUDI EMMANUEL OKONKWO' },
-        { 'NPA Number': 'NPA/03/05/2021/0889', Name: 'FATIMA BELLO SULEIMAN' },
+        { 'NPA Number': 'NPA/03/04/2023/0395', Name: 'MANI UMAR DAHIRU', Squad: '04', RC: 10 },
+        { 'NPA Number': 'NPA/03/08/2024/0112', Name: 'ABDULSHAKUR MAI GANDI', Squad: '08', RC: 11 },
+        { 'NPA Number': 'NPA/03/02/2022/0451', Name: 'CHUKWUDI EMMANUEL OKONKWO', Squad: '02', RC: 9 },
+        { 'NPA Number': 'NPA/03/05/2021/0889', Name: 'FATIMA BELLO SULEIMAN', Squad: '05', RC: 8 },
     ];
     const ws = XLSX.utils.json_to_sheet(sampleData);
     const wb = XLSX.utils.book_new();
