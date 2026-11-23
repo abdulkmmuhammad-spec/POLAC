@@ -13,6 +13,7 @@ import { GraduationPanel } from './GraduationPanel';
 import { HandoverWizard } from './HandoverWizard';
 import { BulkCoursePurgeModal } from '../../CadetRegistry/BulkCoursePurgeModal';
 import { FullWipeModal } from './FullWipeModal';
+import { acquireScrollLock, releaseScrollLock } from '../../../utils/scrollLock';
 
 type ActiveLifecycleSheet = 'graduation' | 'handover' | null;
 
@@ -35,14 +36,13 @@ export const CourseLifecycleView: React.FC<CourseLifecycleViewProps> = ({
 
   useEffect(() => {
     if (!activeSheet) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    acquireScrollLock();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setActiveSheet(null);
     };
     window.addEventListener('keydown', onKey);
     return () => {
-      document.body.style.overflow = prev;
+      releaseScrollLock();
       window.removeEventListener('keydown', onKey);
     };
   }, [activeSheet]);
@@ -132,7 +132,7 @@ export const CourseLifecycleView: React.FC<CourseLifecycleViewProps> = ({
                   Bulk Course Purge & Re-Enrollment
                 </p>
                 <p className="text-xs text-slate-500 truncate mt-0.5">
-                  Remove specific Regular Courses with mandatory CSV backup
+                  Clear a course roster and optionally upload a corrected list
                 </p>
               </div>
             </div>

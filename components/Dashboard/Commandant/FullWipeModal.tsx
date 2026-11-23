@@ -17,6 +17,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '../../../context/AuthContext';
 import { dbService } from '../../../services/dbService';
 import { downloadCourseBackupCSV } from '../../../services/cadetImportService';
+import { acquireScrollLock, releaseScrollLock } from '../../../utils/scrollLock';
 import { toast } from 'react-hot-toast';
 
 type WipeStep = 'overview' | 'confirm' | 'success';
@@ -61,14 +62,13 @@ export const FullWipeModal: React.FC<FullWipeModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    acquireScrollLock();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isWiping) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => {
-      document.body.style.overflow = prev;
+      releaseScrollLock();
       window.removeEventListener('keydown', onKey);
     };
   }, [isOpen, isWiping, onClose]);

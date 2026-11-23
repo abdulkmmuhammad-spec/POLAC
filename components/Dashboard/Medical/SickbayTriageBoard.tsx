@@ -15,6 +15,7 @@ import { dbService } from '../../../services/dbService';
 import { SickbayVerification } from '../../../types';
 import { formatRC } from '../../../utils/rcHelpers';
 import { SickbayChatDrawer } from './SickbayChatDrawer';
+import { acquireScrollLock, releaseScrollLock } from '../../../utils/scrollLock';
 import { toast } from 'react-hot-toast';
 
 const QUICK_NOTES = [
@@ -79,10 +80,9 @@ export const SickbayTriageBoard: React.FC = () => {
   // Body scroll lock while bottom sheet is open
   useEffect(() => {
     if (!sheetTarget) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    acquireScrollLock();
     return () => {
-      document.body.style.overflow = prevOverflow;
+      releaseScrollLock();
     };
   }, [sheetTarget]);
 

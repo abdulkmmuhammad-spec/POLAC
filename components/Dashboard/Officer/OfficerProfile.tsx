@@ -55,7 +55,6 @@ export const OfficerProfile: React.FC = () => {
         try {
             await dbService.updateUser(updatedUser);
             setCurrentUser(updatedUser);
-            localStorage.setItem('polac_session', JSON.stringify(updatedUser));
             setIsModalOpen(false);
             await refreshData();
             toast.success('Profile settings updated successfully.');

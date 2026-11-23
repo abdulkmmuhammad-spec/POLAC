@@ -31,6 +31,7 @@ import {
   CadetImportParseResult
 } from '../../types';
 import { calculateCurrentLevel } from '../../utils/rcHelpers';
+import { acquireScrollLock, releaseScrollLock } from '../../utils/scrollLock';
 import { useAuth } from '../../context/AuthContext';
 
 interface BulkCoursePurgeModalProps {
@@ -138,14 +139,13 @@ export const BulkCoursePurgeModal: React.FC<BulkCoursePurgeModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    acquireScrollLock();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isBusy) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => {
-      document.body.style.overflow = prev;
+      releaseScrollLock();
       window.removeEventListener('keydown', onKey);
     };
   }, [isOpen, isBusy, onClose]);
@@ -394,15 +394,26 @@ export const BulkCoursePurgeModal: React.FC<BulkCoursePurgeModalProps> = ({
                   <span>Back</span>
                 </button>
               )}
-              <h3 className="text-base font-bold text-slate-900 truncate">
-                {view === 'SELECT'
-                  ? 'Remove & Replace Course'
-                  : view === 'CONFIRM'
-                  ? `Confirm Removal (${selectedLabel})`
-                  : view === 'RE_ENROLL'
-                  ? 'Re-Enroll Cadets'
-                  : 'Restore Removed Course'}
-              </h3>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-900 truncate">
+                  {view === 'SELECT'
+                    ? 'Remove & Replace Course'
+                    : view === 'CONFIRM'
+                    ? `Confirm Removal (${selectedLabel})`
+                    : view === 'RE_ENROLL'
+                    ? 'Re-Enroll Cadets'
+                    : 'Restore Removed Course'}
+                </h3>
+                {view !== 'RESTORE' && (
+                  <p className="text-[11px] font-medium text-slate-500 mt-0.5">
+                    {view === 'SELECT'
+                      ? 'Step 1 of 3 • Select course & save backup'
+                      : view === 'CONFIRM'
+                      ? 'Step 2 of 3 • Confirm roster removal'
+                      : 'Step 3 of 3 • Upload replacement roster (optional)'}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
@@ -441,10 +452,30 @@ export const BulkCoursePurgeModal: React.FC<BulkCoursePurgeModalProps> = ({
                   transition={{ duration: 0.16 }}
                   className="space-y-5"
                 >
+                  {/* Plain-Language Orientation for First-Time Users */}
+                  <div className="rounded-2xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2.5">
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      Use this to <span className="font-semibold text-slate-900">clear a Regular Course's cadet list</span> (for example, to fix a wrong spreadsheet import) and <span className="font-semibold text-slate-900">upload a fresh list</span> right after.
+                    </p>
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 flex-wrap">
+                      <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-800">
+                        1. Save Backup
+                      </span>
+                      <span className="text-slate-400">→</span>
+                      <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200">
+                        2. Clear Roster
+                      </span>
+                      <span className="text-slate-400">→</span>
+                      <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200">
+                        3. Upload New List
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Course Pills */}
                   <div className="space-y-2.5">
                     <label className="block text-xs font-semibold text-slate-700">
-                      Select Regular Courses to Remove
+                      Which Regular Course(s) do you want to clear?
                     </label>
                     {isLoadingCourses ? (
                       <div className="flex items-center gap-2 text-xs text-slate-500 py-2">

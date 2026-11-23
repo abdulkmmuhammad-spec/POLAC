@@ -32,18 +32,18 @@ export const reportService = {
             r.grandTotal
         ]);
 
-        doc.autoTable({
+        autoTable(doc, {
             startY: 55,
             head: [['Date', 'Course', 'Year', 'Pres.', 'Abs.', 'Sick', 'Det.', 'Total']],
             body: tableData,
             theme: 'grid',
-            headStyles: { fillStyle: 'fill', fillColor: [30, 58, 138], textColor: 255, fontSize: 11 },
+            headStyles: { fillColor: [30, 58, 138], textColor: 255, fontSize: 11 },
             alternateRowStyles: { fillColor: [241, 245, 249] },
             styles: { fontSize: 10.8, cellPadding: 5 } // 8 * 1.35
         });
 
         // Sign-off (Upscaled)
-        const finalY = (doc as any).lastAutoTable.finalY + 30;
+        const finalY = ((doc as any).lastAutoTable?.finalY ?? 70) + 30;
         doc.setFontSize(13.5);
         doc.setTextColor(0);
         doc.text("__________________________", 30, finalY);
@@ -214,10 +214,16 @@ export const reportService = {
                                 else if (text === 'DETENTION') data.cell.styles.textColor = [67, 56, 202]; // Indigo 700
                             }
                         },
-                        margin: { left: 20, right: 20 }
+                        margin: { left: 20, right: 20 },
+                        didDrawPage: () => {
+                            doc.setDrawColor(30, 58, 138);
+                            doc.setLineWidth(1);
+                            doc.rect(5, 5, 200, 287);
+                            addWatermark(doc);
+                        }
                     });
                     
-                    currentY = (doc as any).lastAutoTable.finalY + 15;
+                    currentY = ((doc as any).lastAutoTable?.finalY ?? currentY + 15) + 15;
                 });
         }
 
@@ -473,13 +479,19 @@ export const reportService = {
                         2: { textColor: [159, 18, 57], fontStyle: 'bold', halign: 'right', font: 'courier' }
                     },
                     margin: { left: 20, right: 20 },
+                    didDrawPage: () => {
+                        doc.setDrawColor(30, 58, 138);
+                        doc.setLineWidth(1);
+                        doc.rect(5, 5, 200, 287);
+                        addWatermark(doc);
+                    },
                     didParseCell: (data) => {
                         if (data.section === 'body') {
                             data.cell.styles.minCellHeight = (data.cell.styles.fontSize * 1.5);
                         }
                     }
                 });
-                currentY = (doc as any).lastAutoTable.finalY + 15;
+                currentY = ((doc as any).lastAutoTable?.finalY ?? currentY + 15) + 15;
             }
 
             // Section Separation Rule

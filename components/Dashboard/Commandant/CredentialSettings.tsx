@@ -15,6 +15,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { dbService } from '../../../services/dbService';
 import { User, UserRole } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
+import { acquireScrollLock, releaseScrollLock } from '../../../utils/scrollLock';
 import { OfficerProfileSheet } from './OfficerProfileSheet';
 import { toast } from 'react-hot-toast';
 
@@ -105,10 +106,9 @@ export const CredentialSettings: React.FC = () => {
   // Body scroll lock while any sheet is open
   useEffect(() => {
     if (!isAddSheetOpen && !selectedUser) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    acquireScrollLock();
     return () => {
-      document.body.style.overflow = prev;
+      releaseScrollLock();
     };
   }, [isAddSheetOpen, selectedUser]);
 

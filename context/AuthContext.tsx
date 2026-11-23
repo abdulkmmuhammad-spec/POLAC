@@ -5,6 +5,33 @@ import { toast } from 'react-hot-toast';
 
 const SESSION_KEY = 'polac_session';
 
+const safeGetStorage = (key: string): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const safeSetStorage = (key: string, value: string): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore iOS Private Browsing / quota errors
+  }
+};
+
+const safeRemoveStorage = (key: string): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore storage errors
+  }
+};
+
 interface AuthState {
   status: 'initializing' | 'unauthenticated' | 'authenticated';
   user: User | null;
@@ -53,7 +80,7 @@ const normalizeCommandantIdentity = (user: User): User => {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(SESSION_KEY);
+      const stored = safeGetStorage(SESSION_KEY);
       if (!stored) {
         return { status: 'unauthenticated', user: null };
       }
@@ -64,7 +91,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = useCallback((reasonMessage?: string) => {
     setAuthState({ status: 'unauthenticated', user: null });
-    localStorage.removeItem(SESSION_KEY);
+    safeRemoveStorage(SESSION_KEY);
     if (reasonMessage) {
       toast.error(reasonMessage, { duration: 5000 });
     }
@@ -72,7 +99,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     const initializeSession = async () => {
-      const stored = localStorage.getItem(SESSION_KEY);
+      const stored = safeGetStorage(SESSION_KEY);
       if (stored && authState.status === 'initializing') {
         try {
           const rawUser: User = JSON.parse(stored);
@@ -83,7 +110,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           if (isValid) {
             if (user.fullName !== rawUser.fullName || user.designation !== rawUser.designation) {
-              localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+              safeSetStorage(SESSION_KEY, JSON.stringify(user));
               supabase
                 .from('users')
                 .update({ full_name: user.fullName })
@@ -93,7 +120,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setAuthState({ status: 'authenticated', user });
           } else {
             console.warn('[Auth] Invalidated or stale session detected. Purging session.');
-            localStorage.removeItem(SESSION_KEY);
+            safeRemoveStorage(SESSION_KEY);
             setAuthState({ status: 'unauthenticated', user: null });
           }
         } catch {
@@ -198,7 +225,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       setAuthState({ status: 'authenticated', user: adminUser });
-      localStorage.setItem(SESSION_KEY, JSON.stringify(adminUser));
+      safeSetStorage(SESSION_KEY, JSON.stringify(adminUser));
       return;
     }
 
@@ -250,16 +277,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setAuthState({ status: 'authenticated', user: sessionUser });
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+    safeSetStorage(SESSION_KEY, JSON.stringify(sessionUser));
   }, []);
 
   const setCurrentUser = useCallback((user: User | null) => {
     if (user) {
       setAuthState({ status: 'authenticated', user });
-      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      safeSetStorage(SESSION_KEY, JSON.stringify(user));
     } else {
       setAuthState({ status: 'unauthenticated', user: null });
-      localStorage.removeItem(SESSION_KEY);
+      safeRemoveStorage(SESSION_KEY);
     }
   }, []);
 
