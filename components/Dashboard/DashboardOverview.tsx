@@ -305,7 +305,7 @@ export const DashboardOverview: React.FC = () => {
                                                 {formatRC(c.courseNumber)}
                                             </span>
                                         </td>
-                                        <td className="px-4 py-3.5 text-slate-500 font-medium text-center font-sans text-xs">Terma {c.currentLevel}</td>
+                                        <td className="px-4 py-3.5 text-slate-500 font-medium text-center font-sans text-xs">Level {c.currentLevel}</td>
                                         <td className="px-4 py-3.5 text-emerald-700 font-semibold text-right">{c.present}</td>
                                         <td className={`px-4 py-3.5 text-right ${c.absent > 0 ? 'text-rose-600 font-bold' : mutedZero}`}>{c.absent}</td>
                                         <td className={`px-4 py-3.5 text-right ${c.sick > 0 ? 'text-amber-600 font-bold' : mutedZero}`}>{c.sick}</td>
@@ -398,7 +398,7 @@ export const DashboardOverview: React.FC = () => {
                                             <span className="bg-blue-900 text-white text-xs font-black px-2 py-0.5 rounded-sm uppercase tracking-tighter font-mono">
                                                 {rcLabel}
                                             </span>
-                                            <span className="text-xs font-black text-slate-500 tracking-widest">Terma {yearLabel}</span>
+                                            <span className="text-xs font-black text-slate-500 tracking-widest">Level {yearLabel}</span>
                                         </div>
                                         <div className="text-right">
                                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Strength</span>

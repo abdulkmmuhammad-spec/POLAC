@@ -76,7 +76,7 @@ export const CourseLifecycleView: React.FC<CourseLifecycleViewProps> = ({
                   Regular Course Graduation
                 </p>
                 <p className="text-xs text-slate-500 truncate mt-0.5">
-                  Archive a graduating cohort and advance remaining intakes
+                  Archive a graduating Regular Course and advance remaining intakes
                 </p>
               </div>
             </div>

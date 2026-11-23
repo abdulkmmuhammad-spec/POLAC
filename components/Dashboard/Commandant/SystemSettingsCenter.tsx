@@ -58,8 +58,8 @@ const CATEGORIES: CategoryDefinition[] = [
   },
   {
     id: 'lifecycle',
-    title: 'Course Lifecycle',
-    subtitle: 'Graduation, handover wizard, course purge, and full data wipe',
+    title: 'Courses & Data',
+    subtitle: 'Graduate courses, hand over command, clear rosters, or reset data',
     icon: RefreshCw,
     iconBg: 'bg-amber-50 text-amber-700',
     keywords: ['lifecycle', 'graduate', 'graduation', 'handover', 'purge', 'delete', 'backup', 'csv', 're-enroll', 'seed', 'intake', 'wipe', 'reset', 'factory', 'erase']
