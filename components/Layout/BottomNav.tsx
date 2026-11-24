@@ -18,7 +18,6 @@ import { UserRole } from '../../types';
 import { dbService, supabase } from '../../services/dbService';
 import { isExecutiveCommand, isDeputyCommandant, isDFS } from '../../utils/commandHierarchy';
 import { getUnreadExecutiveCount, getUnreadRemarkCount } from '../../utils/executiveChatState';
-import { triggerHaptic } from '../../utils/haptics';
 
 interface BottomNavItem {
     path: string;
@@ -212,9 +211,18 @@ export const BottomNav: React.FC = () => {
     return (
         <nav
             aria-label="Mobile Primary Navigation"
-            className="fixed bottom-0 inset-x-0 z-50 md:hidden bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] pt-1 pb-[env(safe-area-inset-bottom)]"
+            className={
+                isIOS
+                    ? 'fixed bottom-0 inset-x-0 z-50 md:hidden bg-white ios-liquid-glass pb-[env(safe-area-inset-bottom)]'
+                    : 'fixed bottom-0 inset-x-0 z-50 md:hidden bg-blue-900 border-t border-white/10 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_12px_rgba(0,0,0,0.2)]'
+            }
         >
-            <div className="flex items-center justify-around w-full max-w-lg mx-auto h-[48px] px-1.5">
+            {/* Apple HIG Scroll Edge Fade: content fades cleanly before meeting the bar */}
+            <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -top-5 inset-x-0 h-5 bg-gradient-to-t from-slate-50/95 to-transparent"
+            />
+            <div className="flex items-stretch justify-around w-full max-w-lg mx-auto h-[52px] px-1">
                 {navItems.map(item => {
                     const IconComponent = item.icon;
                     return (
@@ -222,40 +230,48 @@ export const BottomNav: React.FC = () => {
                             key={item.path}
                             to={item.path}
                             end={item.end}
-                            onClick={() => triggerHaptic('selection')}
                             className={({ isActive }) =>
-                                `relative flex-1 min-w-[48px] h-full py-0.5 px-1 flex flex-col items-center justify-center select-none active:scale-[0.96] transition-transform duration-100 ${
-                                    isActive
-                                        ? 'text-blue-900'
-                                        : 'text-slate-400 hover:text-slate-600'
+                                `relative flex-1 min-w-[48px] h-full py-1 px-1 flex flex-col items-center justify-center gap-0.5 select-none active:scale-95 transition-all duration-150 ${
+                                    isIOS
+                                        ? isActive
+                                            ? 'text-blue-900'
+                                            : 'text-slate-500 hover:text-blue-900'
+                                        : isActive
+                                        ? 'text-white'
+                                        : 'text-blue-200/75 hover:text-white'
                                 }`
                             }
                         >
                             {({ isActive }) => (
                                 <>
-                                    {/* Subtle Active Indicator (WhatsApp/Instagram Bar Proportion) */}
-                                    {isActive && (
-                                        <motion.div
-                                            layoutId={shouldReduceMotion ? undefined : 'mobile-active-pill'}
-                                            transition={
-                                                shouldReduceMotion
-                                                    ? { duration: 0 }
-                                                    : { type: 'spring', stiffness: 420, damping: 32 }
-                                            }
-                                            className="absolute inset-x-1.5 inset-y-0.5 rounded-xl bg-blue-900/[0.08] pointer-events-none"
-                                        />
-                                    )}
+                                    {/* Subtle Active Indicator (WhatsApp/Instagram 49-50px Bar Proportion) */}
+                                    {isActive &&
+                                        (isIOS ? (
+                                            <motion.div
+                                                layoutId={shouldReduceMotion ? undefined : 'ios-liquid-pill'}
+                                                transition={
+                                                    shouldReduceMotion
+                                                        ? { duration: 0 }
+                                                        : { type: 'spring', stiffness: 420, damping: 32 }
+                                                }
+                                                className="absolute inset-x-2 inset-y-1 rounded-xl bg-blue-900/10 pointer-events-none"
+                                            />
+                                        ) : (
+                                            <span className="absolute top-0 inset-x-3 mx-auto w-8 h-0.5 rounded-b-full bg-blue-400" />
+                                        ))}
 
                                     {/* Icon Container with Optional Unread/Count Badge */}
                                     <div className="relative z-10 flex items-center justify-center">
                                         <IconComponent
-                                            size={21}
+                                            size={22}
                                             strokeWidth={isActive ? 2.4 : 1.9}
                                             className="shrink-0"
                                         />
                                         {item.badge !== undefined && item.badge > 0 && (
                                             <span
-                                                className={`absolute -top-1.5 -right-2.5 min-w-[16px] h-[16px] px-1 rounded-full text-[9.5px] font-mono font-bold flex items-center justify-center leading-none border-2 border-white shadow-xs ${
+                                                className={`absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono font-bold flex items-center justify-center leading-none border-2 ${
+                                                    isIOS ? 'border-white' : 'border-blue-900'
+                                                } shadow-xs ${
                                                     item.badgeTone === 'amber'
                                                         ? 'bg-amber-400 text-slate-950'
                                                         : item.badgeTone === 'rose'
@@ -270,10 +286,14 @@ export const BottomNav: React.FC = () => {
 
                                     {/* Single-Line Concise Label */}
                                     <span
-                                        className={`relative z-10 text-[10px] leading-tight truncate max-w-full mt-0.5 ${
-                                            isActive
-                                                ? 'font-bold text-blue-900'
-                                                : 'font-medium text-slate-400'
+                                        className={`relative z-10 text-[10.5px] leading-tight truncate max-w-full ${
+                                            isIOS
+                                                ? isActive
+                                                    ? 'font-bold text-blue-900'
+                                                    : 'font-medium text-slate-500'
+                                                : isActive
+                                                ? 'font-bold text-white'
+                                                : 'font-medium text-blue-200/75'
                                         }`}
                                     >
                                         {item.label}

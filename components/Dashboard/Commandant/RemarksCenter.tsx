@@ -749,7 +749,7 @@ export const RemarksCenter: React.FC = () => {
         };
 
         return (
-            <div className="space-y-4 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:pb-8 animate-in fade-in duration-200">
+            <div className="space-y-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] md:pb-8 animate-in fade-in duration-200">
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-4 sm:p-5 flex items-center justify-between gap-3">
                     <div>
                         <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
@@ -846,7 +846,7 @@ export const RemarksCenter: React.FC = () => {
     }
 
     return (
-        <div className="space-y-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:pb-8 animate-in fade-in duration-200">
+        <div className="space-y-3 pb-[calc(7.5rem+env(safe-area-inset-bottom))] md:pb-8 animate-in fade-in duration-200">
             {/* ── 1. Streamlined WhatsApp / Instagram DM Top Toolbar ── */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-3 sm:p-4 space-y-3">
                 {isDFSOfficer && (

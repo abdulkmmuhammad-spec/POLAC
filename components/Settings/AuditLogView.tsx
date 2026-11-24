@@ -253,17 +253,17 @@ export const AuditLogView: React.FC = () => {
                                                                     <Info size={12} className="text-blue-600" /> Meta Intelligence
                                                                 </h4>
                                                                 <div className="space-y-2">
-                                                                    <div className="flex justify-between text-xs border-b border-slate-200 pb-0">
+                                                                    <div className="flex justify-between text-xs border-b border-slate-200 pb-1">
                                                                         <span className="text-slate-400 font-bold">Event ID</span>
                                                                         <span className="font-mono text-slate-600 uppercase">{log.id.split('-')[0]}...</span>
                                                                     </div>
-                                                                    <div className="flex justify-between text-xs border-b border-slate-200 pb-0">
+                                                                    <div className="flex justify-between text-xs border-b border-slate-200 pb-1">
                                                                         <span className="text-slate-400 font-bold">Actor Identity</span>
                                                                         <span className="text-slate-600 uppercase font-black">
                                                                             {log.actorId ? `${log.actorId.split('-')[0]}...` : 'SYSTEM'}
                                                                         </span>
                                                                     </div>
-                                                                    <div className="flex justify-between text-xs border-b border-slate-200 pb-0">
+                                                                    <div className="flex justify-between text-xs border-b border-slate-200 pb-1">
                                                                         <span className="text-slate-400 font-bold">Protocol</span>
                                                                         <span className="text-slate-600 uppercase font-bold">SECURE_DASHBOARD_V2</span>
                                                                     </div>
@@ -333,11 +333,11 @@ export const AuditLogView: React.FC = () => {
                                                 <Info size={12} className="text-blue-500" /> Meta Intelligence
                                             </h4>
                                             <div className="space-y-1.5 text-xs text-slate-400">
-                                                <div className="flex justify-between border-b border-slate-800/50 pb-0">
+                                                <div className="flex justify-between border-b border-slate-800/50 pb-1">
                                                     <span className="font-bold text-slate-500">Event ID</span>
                                                     <span className="font-mono text-slate-300">{log.id.split('-')[0]}...</span>
                                                 </div>
-                                                <div className="flex justify-between border-b border-slate-800/50 pb-0">
+                                                <div className="flex justify-between border-b border-slate-800/50 pb-1">
                                                     <span className="font-bold text-slate-500">Actor Identity</span>
                                                     <span className="font-mono text-slate-300">{log.actorId ? `${log.actorId.split('-')[0]}...` : 'SYSTEM'}</span>
                                                 </div>

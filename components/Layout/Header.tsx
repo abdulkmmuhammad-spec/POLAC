@@ -12,7 +12,6 @@ import { ConfirmationModal } from './ConfirmationModal';
 import { NotificationDrawer } from './NotificationDrawer';
 import { NotificationPreviewModal } from './NotificationPreviewModal';
 import { audioService } from '../../services/audioService';
-import { triggerHaptic } from '../../utils/haptics';
 
 interface HeaderProps {
     title: string;
@@ -116,16 +115,16 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
     };
 
     return (
-        <header className="sticky top-0 z-30 shrink-0 bg-blue-900/95 backdrop-blur-md border-b border-white/10 pt-[env(safe-area-inset-top)] shadow-[0_2px_12px_rgba(0,0,0,0.25)] select-none">
-            <div className="h-[50px] md:h-20 flex items-center justify-between px-3 sm:px-5 md:px-8">
-            <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0">
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                    <div className="flex w-7 h-7 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 items-center justify-center shrink-0 shadow-sm overflow-hidden">
+        <header className="sticky top-0 z-30 shrink-0 bg-blue-900/95 backdrop-blur-md border-b border-white/10 pt-[env(safe-area-inset-top)] shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+            <div className="h-16 md:h-20 flex items-center justify-between px-3.5 sm:px-5 md:px-8">
+            <div className="flex items-center gap-2.5 md:gap-4 min-w-0">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                    <div className="flex w-8 h-8 sm:w-9 sm:h-9 bg-white/10 rounded-lg border border-white/10 items-center justify-center shrink-0 shadow-sm overflow-hidden">
                         <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
                     <div className="flex flex-col min-w-0">
-                        <p className="text-[10px] font-bold text-blue-300 tracking-wide leading-none mb-0.5 hidden sm:block">Command Control</p>
-                        <h2 className="text-sm sm:text-base md:text-xl font-bold md:font-black text-white uppercase tracking-tight leading-tight truncate">{title}</h2>
+                        <p className="text-[11px] font-bold text-blue-300 tracking-wide leading-none mb-0.5 sm:mb-1">Command Control</p>
+                        <h2 className="text-xs sm:text-base md:text-xl font-black text-white uppercase tracking-tight leading-tight truncate">{title}</h2>
                     </div>
                 </div>
             </div>
@@ -231,12 +230,9 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
 
                 {/* Notification Bell */}
                 <button
-                    onClick={() => {
-                        triggerHaptic('light');
-                        handleOpenDrawer();
-                    }}
+                    onClick={handleOpenDrawer}
                     aria-label="Open notifications"
-                    className="w-8 h-8 sm:min-w-[44px] sm:min-h-[44px] flex items-center justify-center rounded-xl transition-all relative text-blue-200 hover:bg-white/10 hover:border-white/20 border border-white/5 bg-white/5 active:scale-[0.96] group"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition-all relative text-blue-200 hover:bg-white/10 hover:border-white/20 border border-white/5 bg-white/5 group"
                 >
                     <motion.div
                         animate={{ 
@@ -249,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                             repeatDelay: 4 
                         }}
                     >
-                        <Bell size={18} className="group-hover:text-white transition-colors" />
+                        <Bell size={20} className="group-hover:text-white transition-colors" />
                     </motion.div>
                     <AnimatePresence>
                         {unreadCount > 0 && (
@@ -257,7 +253,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                                 initial={{ scale: 0 }}
                                 animate={{ scale: 1 }}
                                 exit={{ scale: 0 }}
-                                className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full shadow-[0_0_12px_rgba(244,63,94,0.8)] border border-blue-900"
+                                className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 rounded-full shadow-[0_0_12px_rgba(244,63,94,0.8)] border-2 border-blue-900"
                             />
                         )}
                     </AnimatePresence>
@@ -265,24 +261,18 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
 
                 {showRefresh && (
                     <button
-                        onClick={() => {
-                            triggerHaptic('light');
-                            refreshData(officerNameFilter);
-                        }}
-                        className={`hidden sm:inline-flex p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 active:scale-[0.96] ${isDataLoading ? 'animate-spin' : ''}`}
+                        onClick={() => refreshData(officerNameFilter)}
+                        className={`hidden sm:inline-flex p-2.5 text-blue-200 hover:bg-white/5 rounded-md transition-colors border border-transparent hover:border-white/10 ${isDataLoading ? 'animate-spin' : ''}`}
                     >
                         <RefreshCcw size={18} />
                     </button>
                 )}
 
-                <div className="h-6 md:h-10 w-[1px] bg-white/10 mx-0.5 md:mx-2"></div>
+                <div className="h-8 md:h-10 w-[1px] bg-white/10 mx-0.5 md:mx-2"></div>
 
                 <div
-                    onClick={() => {
-                        triggerHaptic('selection');
-                        if (onProfileClick) onProfileClick();
-                    }}
-                    className={`flex items-center gap-1 md:gap-4 active:scale-[0.97] transition-transform ${onProfileClick ? 'cursor-pointer group hover:bg-white/5 p-1 md:px-3 md:py-2 rounded-md border border-transparent hover:border-white/10' : ''}`}
+                    onClick={onProfileClick}
+                    className={`flex items-center gap-1 md:gap-4 ${onProfileClick ? 'cursor-pointer group hover:bg-white/5 p-1 md:px-3 md:py-2 rounded-md border border-transparent hover:border-white/10 transition-all' : ''}`}
                 >
                     <div className="text-right hidden md:block">
                         <p className="text-[11px] font-bold text-white tracking-wide">{currentUser?.fullName}</p>
@@ -297,20 +287,17 @@ export const Header: React.FC<HeaderProps> = ({ title, showRefresh = true, onPro
                                     : 'Course Officer')}
                         </p>
                     </div>
-                    <div className="w-7 h-7 sm:w-9 sm:h-9 shrink-0 bg-blue-600/20 rounded-xl border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_15px_rgba(59,130,246,0.1)] text-xs sm:text-sm">
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 bg-blue-600/20 rounded-xl border border-blue-400/30 flex items-center justify-center text-blue-400 font-black shadow-[inset_0_0_15px_rgba(59,130,246,0.1)] text-xs sm:text-sm">
                         {(currentUser?.fullName || 'U').charAt(0)}
                     </div>
                 </div>
                 <button
-                    onClick={() => {
-                        triggerHaptic('warning');
-                        logout();
-                    }}
-                    className="w-8 h-8 sm:min-w-[44px] sm:min-h-[44px] flex items-center justify-center rounded-xl text-blue-200/70 hover:text-rose-400 hover:bg-white/5 transition-colors active:scale-[0.96]"
+                    onClick={logout}
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-blue-200/70 hover:text-rose-400 hover:bg-white/5 transition-colors"
                     title="Sign Out"
                     aria-label="Sign Out"
                 >
-                    <LogOut size={16} />
+                    <LogOut size={17} />
                 </button>
             </div>
             </div>
