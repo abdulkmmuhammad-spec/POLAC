@@ -24,10 +24,10 @@ export const LoginScreen: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center p-6 bg-[#050505] overflow-hidden select-none">
-      {/* Background Image with Blur — extended edge-to-edge */}
+    <div className="w-full flex-1 min-h-screen min-h-[100dvh] min-h-[-webkit-fill-available] flex items-center justify-center p-6 bg-[#050505] relative overflow-hidden select-none">
+      {/* Background Image with Blur — extended edge-to-edge past all safe areas */}
       <div
-        className="absolute -inset-8 z-0 bg-cover bg-center bg-no-repeat opacity-60 scale-110 pointer-events-none"
+        className="absolute -inset-12 z-0 bg-cover bg-center bg-no-repeat opacity-60 scale-110 pointer-events-none"
         style={{
           backgroundImage: 'url("/background.jpg")',
           filter: 'blur(8px)'
