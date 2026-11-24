@@ -587,6 +587,11 @@ export const dbService = {
           'Database migration 20261122_01_admin_wipe_application_data is required to execute a full wipe.'
         );
       }
+      if (msg.toLowerCase().includes('delete requires') || msg.toLowerCase().includes('where clause')) {
+        throw new Error(
+          'Safe update restriction triggered. Please re-run migration 20261122_01_admin_wipe_application_data.sql in your Supabase SQL Editor.'
+        );
+      }
       throw new Error(msg.replace(/^[A-Z_]+:\s*/, '') || 'Failed to wipe application data.');
     }
 
