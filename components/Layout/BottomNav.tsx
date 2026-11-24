@@ -18,6 +18,7 @@ import { UserRole } from '../../types';
 import { dbService, supabase } from '../../services/dbService';
 import { isExecutiveCommand, isDeputyCommandant, isDFS } from '../../utils/commandHierarchy';
 import { getUnreadExecutiveCount, getUnreadRemarkCount } from '../../utils/executiveChatState';
+import { triggerHaptic } from '../../utils/haptics';
 
 interface BottomNavItem {
     path: string;
@@ -230,8 +231,9 @@ export const BottomNav: React.FC = () => {
                             key={item.path}
                             to={item.path}
                             end={item.end}
+                            onClick={() => triggerHaptic('selection')}
                             className={({ isActive }) =>
-                                `relative flex-1 min-w-[48px] h-full py-1 px-1 flex flex-col items-center justify-center gap-0.5 select-none active:scale-95 transition-all duration-150 ${
+                                `relative flex-1 min-w-[48px] h-full py-1 px-1 flex flex-col items-center justify-center gap-0.5 select-none active:scale-[0.96] transition-transform duration-100 ${
                                     isIOS
                                         ? isActive
                                             ? 'text-blue-900'
