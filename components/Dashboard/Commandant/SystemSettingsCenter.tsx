@@ -457,7 +457,7 @@ export const SystemSettingsCenter: React.FC = () => {
     : null;
 
   return (
-    <div className="max-w-6xl mx-auto pb-16 md:pb-8 space-y-5">
+    <div className="max-w-6xl mx-auto pb-06 md:pb-8 space-y-5">
       {/* ── Top Instant Settings Search (Google / iOS Settings Style) ── */}
       {!mobileSubpage && (
         <div className="relative">
@@ -606,7 +606,7 @@ export const SystemSettingsCenter: React.FC = () => {
 
       {/* ── TABLET (640px–1023px): Horizontal Pill Tabs ── */}
       <div className="hidden sm:block lg:hidden space-y-5">
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0">
           {CATEGORIES.map(cat => {
             const IconComp = cat.icon;
             const isActive = activeCategory === cat.id;
@@ -663,7 +663,7 @@ export const SystemSettingsCenter: React.FC = () => {
         </aside>
 
         <div className="flex-1 max-w-3xl min-w-0 space-y-4">
-          <div className="pb-1">
+          <div className="pb-0">
             <h2 className="text-lg font-bold text-slate-900">{activeCategoryMeta.title}</h2>
             <p className="text-xs text-slate-500 mt-0.5">{activeCategoryMeta.subtitle}</p>
           </div>
