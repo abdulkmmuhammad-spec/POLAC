@@ -8,9 +8,15 @@ export const LoginScreen: React.FC = () => {
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     document.documentElement.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
     return () => {
       document.body.style.overflow = '';
       document.documentElement.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      document.body.style.height = '';
     };
   }, []);
 
@@ -34,16 +40,25 @@ export const LoginScreen: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-6 bg-[#050505] overflow-hidden">
+    <div
+      className="fixed inset-0 flex items-center justify-center p-6 bg-[#050505] overflow-hidden"
+      style={{
+        minHeight: '-webkit-fill-available',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      }}
+    >
       {/* Background Image with Blur */}
       <div
-        className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        className="absolute z-0 bg-cover bg-center bg-no-repeat opacity-60 scale-105"
         style={{
+          top: '-20px',
+          left: '-20px',
+          right: '-20px',
+          bottom: '-20px',
           backgroundImage: 'url("/background.jpg")',
+          filter: 'blur(8px)',
         }}
       />
-      {/* Dark overlay for contrast */}
-      <div className="absolute inset-0 z-[1] bg-black/50" />
 
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 backdrop-blur-2xl p-8 shadow-2xl relative z-20 text-white">
         <div className="text-center mb-8">
@@ -118,7 +133,10 @@ export const LoginScreen: React.FC = () => {
       </div>
 
       {/* Developer credit */}
-      <p className="absolute bottom-5 left-0 right-0 text-center text-[10px] tracking-wide text-white/25 z-20 select-none pointer-events-none">
+      <p
+        className="absolute left-0 right-0 text-center text-[10px] tracking-wide text-white/25 z-20 select-none pointer-events-none"
+        style={{ bottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}
+      >
         Designed &amp; Developed by Muhammad Abdulkarim Isyaku&ensp;·&ensp;RC10 2026
       </p>
     </div>

@@ -3,9 +3,13 @@
 @tailwind utilities;
 
 /* POLAC Parade Management System - Base Styles */
-body {
+html, body, #root {
     margin: 0;
     padding: 0;
+    height: 100%;
+    height: 100dvh;
+    min-height: -webkit-fill-available;
+    background: #050505;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
