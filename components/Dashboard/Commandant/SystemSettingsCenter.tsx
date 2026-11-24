@@ -457,7 +457,7 @@ export const SystemSettingsCenter: React.FC = () => {
     : null;
 
   return (
-    <div className="max-w-6xl mx-auto pb-28 md:pb-8 space-y-5">
+    <div className="max-w-6xl mx-auto pb-16 md:pb-8 space-y-5">
       {/* ── Top Instant Settings Search (Google / iOS Settings Style) ── */}
       {!mobileSubpage && (
         <div className="relative">

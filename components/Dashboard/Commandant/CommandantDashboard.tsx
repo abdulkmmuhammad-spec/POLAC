@@ -363,7 +363,7 @@ export const AdminDashboard: React.FC = () => {
     };
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden relative">
+        <div className="flex h-full flex-1 bg-slate-50 overflow-hidden relative">
             <Sidebar />
 
             <div className="flex-1 flex flex-col overflow-hidden">
@@ -372,7 +372,7 @@ export const AdminDashboard: React.FC = () => {
                     onProfileClick={() => navigate('/admin/settings')}
                 />
 
-                <main className="flex-1 overflow-y-auto p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:p-8 md:pb-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
                         <PageTransitionWrapper>
                             <Routes location={location}>
@@ -407,13 +407,13 @@ export const CommandantDashboard: React.FC = () => {
     };
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden relative">
+        <div className="flex h-full flex-1 bg-slate-50 overflow-hidden relative">
             <Sidebar />
 
             <div className="flex-1 flex flex-col overflow-hidden">
                 <Header title={getTitle()} />
 
-                <main className="flex-1 overflow-y-auto p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:p-8 md:pb-8">
+                <main className="flex-1 overflow-y-auto p-4 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:p-8 md:pb-8">
                     <div className="max-w-6xl mx-auto">
                         <PageTransitionWrapper>
                             <Routes location={location}>
