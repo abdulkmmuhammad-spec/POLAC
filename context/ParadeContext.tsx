@@ -383,6 +383,11 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     useEffect(() => {
         const handleRemarksSync = (e: Event) => {
             const detail = (e as CustomEvent)?.detail;
+            if (detail?.action === 'wiped') {
+                setRemarks([]);
+                setNotifications([]);
+                return;
+            }
             if (detail && (detail.action === 'resolved' || detail.action === 'followed_up')) {
                 const targetCourse = detail.courseNumber;
                 setNotifications(prev => {

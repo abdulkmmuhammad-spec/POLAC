@@ -600,15 +600,24 @@ export const dbService = {
       throw new Error(msg.replace(/^[A-Z_]+:\s*/, '') || 'Failed to wipe application data.');
     }
 
-    // Flush all cached SWR snapshots immediately so stale counts never linger
+    // Flush all application and SWR caches immediately so stale entities never linger
     if (typeof window !== 'undefined') {
       try {
         Object.keys(localStorage)
-          .filter(key => key.startsWith('polac_swr_'))
+          .filter(key => key.startsWith('polac_') && key !== 'polac_session' && key !== 'polac_theme')
           .forEach(key => localStorage.removeItem(key));
+        localStorage.setItem('polac_commandant_remarks', '[]');
       } catch {
         // ignore storage errors
       }
+
+      // Dispatch real-time refresh signals across all UI centers
+      try {
+        window.dispatchEvent(new CustomEvent('commandant-remarks-updated', { detail: { action: 'wiped' } }));
+        window.dispatchEvent(new Event('sickbay-verifications-updated'));
+        window.dispatchEvent(new Event('cadet-registry-updated'));
+        window.dispatchEvent(new Event('command-reports-updated'));
+      } catch { }
     }
 
     return {
@@ -2264,6 +2273,7 @@ export const dbService = {
 
     const localItems = readLocalCache();
     let dbRemarks: CommandantRemark[] = [];
+    let dbQuerySucceeded = false;
 
     // 1. Primary Authoritative Query: public.commandant_remarks
     try {
@@ -2278,8 +2288,10 @@ export const dbService = {
       }
 
       const { data: rmRows, error: rmErr } = await rmQuery;
-      if (!rmErr && rmRows && rmRows.length > 0) {
-        dbRemarks = rmRows.map((data: any) => {
+      if (!rmErr) {
+        dbQuerySucceeded = true;
+        if (rmRows && rmRows.length > 0) {
+          dbRemarks = rmRows.map((data: any) => {
           const rawThread = Array.isArray(data.thread) ? data.thread : [];
           const cleanThread = sanitizeRemarkThread(rawThread, data.remark_text, data.officer_response);
 
@@ -2314,7 +2326,8 @@ export const dbService = {
           };
         });
       }
-    } catch { }
+    }
+  } catch { }
 
     // 2. Cross-Device Notification Synchronization (Partitioned by Course + Senior Officer Authority so threads never overlap)
     try {
@@ -2510,13 +2523,31 @@ export const dbService = {
         }
 
         const mergedList = Array.from(mergedById.values());
-        writeLocalCache(mergedList);
+        if (!filters?.courseNumber && !filters?.submissionId) {
+          writeLocalCache(mergedList);
+        }
         return applyFilters(mergedList);
       }
     } catch (err) {
       console.warn('[dbService] getCommandantRemarks notification sync fallback:', err);
     }
 
+    // 3. Authoritative Online Reconciliation (DB is strictly authoritative when online)
+    if (dbQuerySucceeded) {
+      if (dbRemarks.length === 0) {
+        if (!filters?.courseNumber && !filters?.submissionId) {
+          writeLocalCache([]);
+        }
+        return [];
+      }
+
+      if (!filters?.courseNumber && !filters?.submissionId) {
+        writeLocalCache(dbRemarks);
+      }
+      return applyFilters(dbRemarks);
+    }
+
+    // 4. Offline Fallback: Serve cached items only when database query fails
     const fallbackMerged = new Map<string, CommandantRemark>();
     for (const item of localItems) {
       const normalizedTitle =
@@ -2534,12 +2565,7 @@ export const dbService = {
         thread: sanitizeRemarkThread(item.thread, item.remarkText, item.officerResponse)
       });
     }
-    for (const dbItem of dbRemarks) {
-      fallbackMerged.set(dbItem.id, dbItem);
-    }
-    const finalItems = Array.from(fallbackMerged.values());
-    if (finalItems.length > 0) writeLocalCache(finalItems);
-    return applyFilters(finalItems);
+    return applyFilters(Array.from(fallbackMerged.values()));
   },
 
   createCommandantRemark: async (payload: {

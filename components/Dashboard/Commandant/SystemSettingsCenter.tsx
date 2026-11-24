@@ -88,7 +88,7 @@ const formatHour24 = (hour: number): string => `${String(hour).padStart(2, '0')}
 
 export const SystemSettingsCenter: React.FC = () => {
   const { currentUser } = useAuth();
-  const { activeRC, submissionSettings, updateSubmissionSetting, refreshActiveRC, refreshData } = useParade();
+  const { activeRC, submissionSettings, updateSubmissionSetting, refreshActiveRC, refreshData, refreshRemarks } = useParade();
   const shouldReduceMotion = useReducedMotion();
 
   // Strict Admin Access Guard
@@ -425,15 +425,20 @@ export const SystemSettingsCenter: React.FC = () => {
             if (typeof window !== 'undefined') {
               try {
                 Object.keys(localStorage)
-                  .filter(key => key.startsWith('polac_swr_'))
+                  .filter(key => key.startsWith('polac_') && key !== 'polac_session' && key !== 'polac_theme')
                   .forEach(key => localStorage.removeItem(key));
+                localStorage.setItem('polac_commandant_remarks', '[]');
               } catch {
                 // ignore storage errors
               }
             }
             setActiveUsersCount(1);
             refreshData();
+            refreshRemarks();
+            window.dispatchEvent(new CustomEvent('commandant-remarks-updated', { detail: { action: 'wiped' } }));
             window.dispatchEvent(new Event('cadet-registry-updated'));
+            window.dispatchEvent(new Event('sickbay-verifications-updated'));
+            window.dispatchEvent(new Event('command-reports-updated'));
           }}
         />
       );
