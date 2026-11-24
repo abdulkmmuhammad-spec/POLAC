@@ -1,8 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 export const LoginScreen: React.FC = () => {
   const { login } = useAuth();
+
+  // Lock scroll while login screen is mounted
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, []);
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -24,7 +34,7 @@ export const LoginScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-[#050505] relative overflow-hidden">
+    <div className="fixed inset-0 flex items-center justify-center p-6 bg-[#050505] overflow-hidden">
       {/* Background Image with Blur */}
       <div
         className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-60 scale-105"
@@ -105,6 +115,11 @@ export const LoginScreen: React.FC = () => {
           </button>
         </form>
       </div>
+
+      {/* Developer credit */}
+      <p className="absolute bottom-5 left-0 right-0 text-center text-[10px] tracking-wide text-white/25 z-20 select-none pointer-events-none">
+        Designed &amp; Developed by Muhammad Abdulkarim Isyaku&ensp;·&ensp;RC10 2026
+      </p>
     </div>
   );
 };
