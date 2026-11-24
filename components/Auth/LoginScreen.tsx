@@ -37,12 +37,13 @@ export const LoginScreen: React.FC = () => {
     <div className="fixed inset-0 flex items-center justify-center p-6 bg-[#050505] overflow-hidden">
       {/* Background Image with Blur */}
       <div
-        className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-60 scale-105"
+        className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: 'url("/background.jpg")',
-          filter: 'blur(8px)'
         }}
       />
+      {/* Dark overlay for contrast */}
+      <div className="absolute inset-0 z-[1] bg-black/50" />
 
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 backdrop-blur-2xl p-8 shadow-2xl relative z-20 text-white">
         <div className="text-center mb-8">
