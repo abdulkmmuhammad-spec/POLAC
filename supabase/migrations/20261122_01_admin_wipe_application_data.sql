@@ -4,13 +4,46 @@
 -- and core app_settings.
 --
 -- Security & Robustness:
--- 1. Explicitly sets WHERE clauses (WHERE id IS NOT NULL) on all DELETE statements to satisfy
+-- 1. Updates audit_immutability_enforcement() and notification_immutability_guard() to support
+--    app.suppress_audit = 'true' during authorized administrative factory wipes.
+-- 2. Explicitly sets WHERE clauses (WHERE id IS NOT NULL) on all DELETE statements to satisfy
 --    PostgreSQL safeupdate extensions and prevent "delete requires where clause" runtime rejections.
--- 2. Sets safeupdate.enabled = off locally for the wipe transaction where supported.
--- 3. Sets app.suppress_audit = true to avoid unnecessary per-row trigger overhead during mass wipe.
--- 4. Safely drops any legacy trg_notification_immutability triggers on notifications.
--- 5. Removes dependent child records (sickbay_verifications, cadet_details, commandant_remarks)
---    prior to deleting parent records (parade_records, cadet_registry, users).
+-- 3. Sets safeupdate.enabled = off locally for the wipe transaction where supported.
+-- 4. Reorders deletions child-first (sickbay_verifications, cadet_details, commandant_remarks)
+--    before parent entities (parade_records, cadet_registry, non-admin users).
+-- 5. Defensively drops and reinstates trg_audit_immutability and trg_notification_immutability.
+
+-- ─── 1. Support Suppressed Audit on Immutability Triggers ───────────────────
+
+CREATE OR REPLACE FUNCTION public.audit_immutability_enforcement()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF current_setting('app.suppress_audit', true) = 'true' THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        ELSE
+            RETURN NEW;
+        END IF;
+    END IF;
+    RAISE EXCEPTION 'INSTITUTIONAL ERROR: Audit logs are immutable and cannot be modified or deleted.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION public.notification_immutability_guard()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF current_setting('app.suppress_audit', true) = 'true' THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        ELSE
+            RETURN NEW;
+        END IF;
+    END IF;
+    RAISE EXCEPTION 'FORENSIC ALERT: Notifications are immutable. Use soft-delete (archived_at) instead of hard deletion.';
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─── 2. Full Application Data Wipe RPC ───────────────────────────────────────
 
 DROP FUNCTION IF EXISTS public.admin_wipe_application_data(UUID, TEXT, TEXT);
 
@@ -80,9 +113,14 @@ BEGIN
     RAISE EXCEPTION 'INVALID_CONFIRMATION_PHRASE: Confirmation phrase must match WIPE ALL DATA.';
   END IF;
 
-  -- Safely drop legacy notification immutability trigger if active so hard deletion succeeds during factory reset
+  -- Safely drop immutability triggers for the duration of the wipe
   BEGIN
     DROP TRIGGER IF EXISTS trg_notification_immutability ON public.notifications;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+
+  BEGIN
+    DROP TRIGGER IF EXISTS trg_audit_immutability ON public.audit_events;
   EXCEPTION WHEN OTHERS THEN NULL;
   END;
 
@@ -147,6 +185,21 @@ BEGIN
 
   -- Clear prior audit events
   DELETE FROM public.audit_events WHERE id IS NOT NULL;
+
+  -- Re-attach immutability triggers so audit and notification trails remain protected going forward
+  BEGIN
+    CREATE TRIGGER trg_audit_immutability
+    BEFORE UPDATE OR DELETE ON public.audit_events
+    FOR EACH ROW EXECUTE FUNCTION public.audit_immutability_enforcement();
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+
+  BEGIN
+    CREATE TRIGGER trg_notification_immutability
+    BEFORE DELETE ON public.notifications
+    FOR EACH ROW EXECUTE FUNCTION public.notification_immutability_guard();
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
 
   -- Remove all non-admin officer accounts (preserve active System Administrator)
   DELETE FROM public.users

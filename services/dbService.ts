@@ -592,6 +592,11 @@ export const dbService = {
           'Safe update restriction triggered. Please re-run migration 20261122_01_admin_wipe_application_data.sql in your Supabase SQL Editor.'
         );
       }
+      if (msg.toLowerCase().includes('audit logs are immutable') || msg.toLowerCase().includes('institutional error')) {
+        throw new Error(
+          'Audit immutability lock encountered. Please execute updated migration 20261122_01_admin_wipe_application_data.sql in Supabase SQL Editor.'
+        );
+      }
       throw new Error(msg.replace(/^[A-Z_]+:\s*/, '') || 'Failed to wipe application data.');
     }
 
