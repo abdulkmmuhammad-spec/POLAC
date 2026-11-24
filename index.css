@@ -7,28 +7,31 @@
 /* 1. App Root Viewport Lock (Eradicates elastic overscroll void without breaking portals) */
 html,
 body {
+    width: 100%;
     height: 100%;
-    height: 100dvh;
+    min-height: 100%;
     margin: 0;
     padding: 0;
     overflow: hidden;
     overscroll-behavior-y: none;
     -webkit-overflow-scrolling: touch;
-    background-color: #0f172a; /* Blends with header & iOS status bar */
+    background-color: #050505; /* Pure dark so safe area & overscroll never show white */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
     height: 100%;
-    height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background-color: #f8fafc;
+    background-color: #050505;
 }
 
 /* 2. Disarm iOS Safari 16px Focus Auto-Zoom while keeping WCAG pinch-zoom intact */

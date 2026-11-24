@@ -24,7 +24,7 @@ export const LoginScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-[#050505] relative overflow-hidden">
+    <div className="fixed inset-0 w-full h-full min-h-screen flex items-center justify-center p-6 bg-[#050505] relative overflow-hidden select-none">
       {/* Background Image with Blur */}
       <div
         className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-60 scale-105"

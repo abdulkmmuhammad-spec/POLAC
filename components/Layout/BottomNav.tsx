@@ -212,7 +212,7 @@ export const BottomNav: React.FC = () => {
     return (
         <nav
             aria-label="Mobile Primary Navigation"
-            className="fixed bottom-0 inset-x-0 z-50 md:hidden bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] pt-1 pb-[max(0.25rem,calc(env(safe-area-inset-bottom)-14px))]"
+            className="fixed bottom-0 inset-x-0 z-50 md:hidden bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] pt-1 pb-[env(safe-area-inset-bottom)]"
         >
             <div className="flex items-center justify-around w-full max-w-lg mx-auto h-[48px] px-1.5">
                 {navItems.map(item => {
