@@ -7,9 +7,17 @@ interface CadetSelectorProps {
     courseNumber: number;
     onSelect: (cadet: { name: string, squad: string }) => void;
     onInputChange?: (name: string) => void;
+    disabledCadets?: Array<{ name: string; squad: string }>;
+    disabledBadgeLabel?: string;
 }
 
-export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSelect, onInputChange }) => {
+export const CadetSelector: React.FC<CadetSelectorProps> = ({
+    courseNumber,
+    onSelect,
+    onInputChange,
+    disabledCadets = [],
+    disabledBadgeLabel = 'Already Logged'
+}) => {
     const [registry, setRegistry] = useState<any[]>([]);
     const [allCadets, setAllCadets] = useState<any[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -65,6 +73,14 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
 
     const hasRegistryData = registry.length > 0 || allCadets.length > 0;
 
+    const disabledKeySet = React.useMemo(() => {
+        const s = new Set<string>();
+        disabledCadets.forEach(c => {
+            s.add(`${String(c.name || '').trim().toLowerCase()}::${String(c.squad || '').trim().toLowerCase()}`);
+        });
+        return s;
+    }, [disabledCadets]);
+
     return (
         <div className="relative">
             <div className="relative">
@@ -85,23 +101,40 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({ courseNumber, onSe
             {isOpen && (searchTerm.length > 0 || hasRegistryData) && (
                 <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-64 overflow-y-auto">
                     {displayCadets.length > 0 ? (
-                        displayCadets.map((cadet) => (
-                            <button
-                                key={cadet.id}
-                                className="w-full text-left px-6 py-3 hover:bg-blue-50 transition-colors border-b last:border-0 border-slate-100 flex items-center justify-between"
-                                onClick={() => {
-                                    onSelect({ name: cadet.name, squad: cadet.squad });
-                                    setSearchTerm('');
-                                    setIsOpen(false);
-                                }}
-                            >
-                                <div>
-                                    <p className="font-bold text-slate-800">{cadet.name}</p>
-                                    <p className="text-xs text-slate-500">{cadet.squad} {cadet.course_number && <span className="text-blue-400">• RC {cadet.course_number}</span>}</p>
-                                </div>
-                                <UserPlus size={16} className="text-blue-500" />
-                            </button>
-                        ))
+                        displayCadets.map((cadet) => {
+                            const key = `${String(cadet.name || '').trim().toLowerCase()}::${String(cadet.squad || '').trim().toLowerCase()}`;
+                            const isDisabled = disabledKeySet.has(key);
+                            return (
+                                <button
+                                    key={cadet.id}
+                                    type="button"
+                                    disabled={isDisabled}
+                                    className={`w-full text-left px-6 py-3 transition-colors border-b last:border-0 border-slate-100 flex items-center justify-between ${
+                                        isDisabled
+                                            ? 'bg-slate-50/80 opacity-60 cursor-not-allowed'
+                                            : 'hover:bg-blue-50'
+                                    }`}
+                                    onClick={() => {
+                                        if (isDisabled) return;
+                                        onSelect({ name: cadet.name, squad: cadet.squad });
+                                        setSearchTerm('');
+                                        setIsOpen(false);
+                                    }}
+                                >
+                                    <div>
+                                        <p className="font-bold text-slate-800">{cadet.name}</p>
+                                        <p className="text-xs text-slate-500">{cadet.squad} {cadet.course_number && <span className="text-blue-400">• RC {cadet.course_number}</span>}</p>
+                                    </div>
+                                    {isDisabled ? (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700 border border-violet-200 shrink-0">
+                                            {disabledBadgeLabel}
+                                        </span>
+                                    ) : (
+                                        <UserPlus size={16} className="text-blue-500" />
+                                    )}
+                                </button>
+                            );
+                        })
                     ) : (
                         <div className="px-6 py-8 text-center">
                             {loadError ? (

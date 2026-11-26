@@ -139,6 +139,12 @@ export const BottomNav: React.FC = () => {
     const navItems: BottomNavItem[] = useMemo(() => {
         if (!currentUser) return [];
 
+        if (currentUser.role === UserRole.MATRON) {
+            return [
+                { path: '/matron', label: 'Parade', icon: LayoutDashboard, end: true }
+            ];
+        }
+
         if (currentUser.role === UserRole.MEDICAL_OFFICER) {
             return [
                 {

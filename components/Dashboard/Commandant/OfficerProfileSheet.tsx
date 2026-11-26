@@ -34,6 +34,12 @@ const MEDICAL_OFFICER_PRESETS = [
   'Sickbay Nursing Officer'
 ];
 
+const MATRON_PRESETS = [
+  'Academy Matron',
+  'Chief Matron (Female Wing)',
+  'Duty Matron'
+];
+
 const RC_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15];
 
 type SheetView = 'overview' | 'edit' | 'delete' | 'success';
@@ -70,6 +76,7 @@ const getRoleLabel = (role: UserRole): string => {
   if (role === UserRole.ADMIN) return 'System Administrator';
   if (role === UserRole.COMMANDANT) return 'Senior Officer';
   if (role === UserRole.MEDICAL_OFFICER) return 'Medical Officer';
+  if (role === UserRole.MATRON) return 'Academy Matron';
   return 'Course Officer';
 };
 
@@ -163,6 +170,8 @@ export const OfficerProfileSheet: React.FC<OfficerProfileSheetProps> = ({
     ? 'bg-slate-900 text-white border-slate-900'
     : user.role === UserRole.MEDICAL_OFFICER
     ? 'bg-rose-50 text-rose-700 border-rose-200'
+    : user.role === UserRole.MATRON
+    ? 'bg-violet-50 text-violet-700 border-violet-200'
     : user.role === UserRole.COURSE_OFFICER
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
     : 'bg-blue-50 text-blue-800 border-blue-200';
@@ -615,10 +624,12 @@ export const OfficerProfileSheet: React.FC<OfficerProfileSheetProps> = ({
                       <label className="block text-xs font-semibold text-slate-700">
                         Official Title / Designation
                       </label>
-                      {(user.role === UserRole.COMMANDANT || user.role === UserRole.MEDICAL_OFFICER) && (
+                      {(user.role === UserRole.COMMANDANT || user.role === UserRole.MEDICAL_OFFICER || user.role === UserRole.MATRON) && (
                         <div className="flex flex-wrap gap-1.5">
                           {(user.role === UserRole.MEDICAL_OFFICER
                             ? MEDICAL_OFFICER_PRESETS
+                            : user.role === UserRole.MATRON
+                            ? MATRON_PRESETS
                             : SENIOR_OFFICER_PRESETS
                           ).map(preset => (
                             <button

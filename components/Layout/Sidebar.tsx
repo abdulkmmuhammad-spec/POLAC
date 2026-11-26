@@ -29,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     const { remarks } = useParade();
     const isAdmin = currentUser?.role === UserRole.ADMIN;
     const isMedical = currentUser?.role === UserRole.MEDICAL_OFFICER;
+    const isMatron = currentUser?.role === UserRole.MATRON;
     const isExecutiveCmd = isExecutiveCommand(currentUser);
     const userIsDfs = isDFS(currentUser);
 
@@ -122,6 +123,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               { path: '/admin/analytics', icon: Activity, label: 'Command Analytics' },
               { path: '/admin/settings', icon: Settings, label: 'System Settings' }
           ]
+        : isMatron
+        ? [
+              { path: '/matron', icon: LayoutDashboard, label: 'Parade', end: true }
+          ]
         : isMedical
         ? [
               { path: '/medical', icon: Stethoscope, label: 'Sickbay Triage', end: true },
@@ -154,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                         <img src="/logo.png" alt="POLAC Logo" className="w-[82%] h-[82%] object-contain block" />
                     </div>
                     <h2 className="font-black text-white tracking-tighter text-lg uppercase">
-                        POLAC <span className={isMedical ? 'text-rose-400' : isAdmin ? 'text-blue-400' : 'text-blue-400'}>{isMedical ? 'MED' : isAdmin ? 'ADMIN' : 'CMD'}</span>
+                        POLAC <span className={isMatron ? 'text-violet-300' : isMedical ? 'text-rose-400' : 'text-blue-400'}>{isMatron ? 'MATRON' : isMedical ? 'MED' : isAdmin ? 'ADMIN' : 'CMD'}</span>
                     </h2>
                 </div>
             </div>

@@ -31,9 +31,15 @@ const MEDICAL_OFFICER_PRESETS = [
   'Sickbay Nursing Officer'
 ];
 
+const MATRON_PRESETS = [
+  'Academy Matron',
+  'Chief Matron (Female Wing)',
+  'Duty Matron'
+];
+
 const RC_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15];
 
-type RoleFilter = 'all' | 'course_officer' | 'commandant' | 'medical_officer';
+type RoleFilter = 'all' | 'course_officer' | 'commandant' | 'medical_officer' | 'matron';
 
 const sanitizeUsername = (val: string): string =>
   val.toLowerCase().replace(/[^a-z0-9._]/g, '');
@@ -55,6 +61,8 @@ const getRoleSummary = (u: User): string => {
     roleLabel = u.designation || 'System Administrator';
   } else if (u.role === UserRole.MEDICAL_OFFICER) {
     roleLabel = u.designation || 'Medical Officer';
+  } else if (u.role === UserRole.MATRON) {
+    roleLabel = u.designation || 'Academy Matron';
   } else if (u.role === UserRole.COMMANDANT) {
     roleLabel = u.designation || 'Commandant';
   }
@@ -145,6 +153,7 @@ export const CredentialSettings: React.FC = () => {
       if (roleFilter === 'course_officer' && u.role !== UserRole.COURSE_OFFICER) return false;
       if (roleFilter === 'commandant' && u.role !== UserRole.COMMANDANT) return false;
       if (roleFilter === 'medical_officer' && u.role !== UserRole.MEDICAL_OFFICER) return false;
+      if (roleFilter === 'matron' && u.role !== UserRole.MATRON) return false;
 
       if (!q) return true;
       return (
@@ -203,6 +212,8 @@ export const CredentialSettings: React.FC = () => {
               ? addPayload.designation.trim() || 'Director Field Studies'
               : addPayload.role === UserRole.MEDICAL_OFFICER
               ? addPayload.designation.trim() || 'Regimental Medical Officer'
+              : addPayload.role === UserRole.MATRON
+              ? addPayload.designation.trim() || 'Academy Matron'
               : 'Course Officer',
           courseNumber:
             addPayload.role === UserRole.COURSE_OFFICER && addPayload.courseNumber
@@ -226,6 +237,7 @@ export const CredentialSettings: React.FC = () => {
 
   const roleAvatarColor = (role: UserRole) => {
     if (role === UserRole.MEDICAL_OFFICER) return 'bg-rose-50 text-rose-700 border-rose-200';
+    if (role === UserRole.MATRON) return 'bg-violet-50 text-violet-700 border-violet-200';
     if (role === UserRole.COURSE_OFFICER) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     return 'bg-blue-50 text-blue-800 border-blue-200';
   };
@@ -356,7 +368,8 @@ export const CredentialSettings: React.FC = () => {
                 { key: 'all', label: 'All' },
                 { key: 'course_officer', label: `Course Officers (${activeCourseOfficersCount}/5)` },
                 { key: 'commandant', label: 'Senior Officers' },
-                { key: 'medical_officer', label: 'Medical' }
+                { key: 'medical_officer', label: 'Medical' },
+                { key: 'matron', label: 'Matron' }
               ] as const
             ).map(pill => {
               const isActive = roleFilter === pill.key;
@@ -508,12 +521,13 @@ export const CredentialSettings: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* 3-Way Segmented Role Control */}
-                  <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
+                  {/* 4-Way Segmented Role Control */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-slate-100 p-1 rounded-xl">
                     {[
                       { role: UserRole.COURSE_OFFICER, label: 'Course Officer' },
                       { role: UserRole.COMMANDANT, label: 'Senior Officer' },
-                      { role: UserRole.MEDICAL_OFFICER, label: 'Medical Officer' }
+                      { role: UserRole.MEDICAL_OFFICER, label: 'Medical Officer' },
+                      { role: UserRole.MATRON, label: 'Matron' }
                     ].map(opt => {
                       const active = addPayload.role === opt.role;
                       return (
@@ -529,6 +543,8 @@ export const CredentialSettings: React.FC = () => {
                                   ? 'Director Field Studies'
                                   : opt.role === UserRole.MEDICAL_OFFICER
                                   ? 'Regimental Medical Officer'
+                                  : opt.role === UserRole.MATRON
+                                  ? 'Academy Matron'
                                   : 'Course Officer'
                             }))
                           }
@@ -579,6 +595,8 @@ export const CredentialSettings: React.FC = () => {
                       <div className="flex flex-wrap gap-1.5">
                         {(addPayload.role === UserRole.MEDICAL_OFFICER
                           ? MEDICAL_OFFICER_PRESETS
+                          : addPayload.role === UserRole.MATRON
+                          ? MATRON_PRESETS
                           : SENIOR_OFFICER_PRESETS
                         ).map(preset => (
                           <button

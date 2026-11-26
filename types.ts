@@ -3,7 +3,8 @@ export enum UserRole {
   ADMIN = 'admin',
   COMMANDANT = 'commandant',
   COURSE_OFFICER = 'course_officer',
-  MEDICAL_OFFICER = 'medical_officer'
+  MEDICAL_OFFICER = 'medical_officer',
+  MATRON = 'matron'
 }
 
 export enum ParadeType {
@@ -383,6 +384,39 @@ export interface CommandReport {
   status: 'sent' | 'acknowledged';
   acknowledgedBy?: string;
   acknowledgedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MatronCourseStrength {
+  courseNumber: number;
+  femaleStrength: number;
+  updatedBy?: string | null;
+  updatedAt?: string;
+}
+
+export interface ParadeGenderSubmission {
+  id: string;
+  paradeDate: string;
+  paradeType: ParadeType;
+  courseNumber: number;
+  courseName: string;
+  yearGroup: number;
+  genderSegment: 'female' | 'male';
+  submittedBy?: string | null;
+  submittedByName: string;
+  declaredStrength: number;
+  presentCount: number;
+  absentCount: number;
+  sickCount: number;
+  detentionCount: number;
+  passCount: number;
+  suspensionCount: number;
+  yetToReportCount: number;
+  grandTotal: number;
+  cadetDetails: CadetDetail[];
+  reconciledRecordId?: string | null;
+  status: 'pending_counterpart' | 'reconciled';
   createdAt: string;
   updatedAt: string;
 }

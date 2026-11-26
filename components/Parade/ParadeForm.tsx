@@ -1,17 +1,42 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, RefreshCcw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Plus, Trash2, RefreshCcw, Search, ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Clock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
-import { ParadeType, CadetStatus, CadetDetail } from '../../types';
+import { ParadeType, CadetStatus, CadetDetail, ParadeGenderSubmission, UserRole } from '../../types';
 import { dbService } from '../../services/dbService';
 import { CadetSelector } from '../CadetRegistry/CadetSelector';
 import { formatRC } from '../../utils/rcHelpers';
 import { toast } from 'react-hot-toast';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
 
-export const ParadeForm: React.FC = () => {
-const { currentUser } = useAuth();
+export interface ParadeFormProps {
+    overrideCourseNumber?: number;
+    overrideTotalCadets?: number;
+    submissionSegment?: 'female' | 'male';
+    counterpartDetails?: CadetDetail[];
+    onSubmittedSuccess?: (result?: { state: 'reconciled' | 'awaiting_counterpart' }) => void;
+    externalDate?: string;
+    externalParadeType?: ParadeType;
+    onDateChange?: (date: string) => void;
+    onParadeTypeChange?: (paradeType: ParadeType) => void;
+}
+
+export const ParadeForm: React.FC<ParadeFormProps> = ({
+    overrideCourseNumber,
+    overrideTotalCadets,
+    submissionSegment,
+    counterpartDetails,
+    onSubmittedSuccess,
+    externalDate,
+    externalParadeType,
+    onDateChange,
+    onParadeTypeChange
+}) => {
+    const { currentUser } = useAuth();
     const { isDataLoading, refreshData, getLevelForCourse, activeRC, submissionSettings } = useParade();
+
+    const isMatronMode = submissionSegment === 'female' || currentUser?.role === UserRole.MATRON;
+    const effectiveSegment: 'female' | 'male' = submissionSegment || (isMatronMode ? 'female' : 'male');
 
     const getWATDateStr = () => {
         const now = new Date();
@@ -19,10 +44,76 @@ const { currentUser } = useAuth();
         return new Date(now.getTime() + watOffsetMs).toISOString().split('T')[0];
     };
 
-    const [formDate, setFormDate] = useState(getWATDateStr());
-    const [formParadeType, setFormParadeType] = useState<ParadeType>(ParadeType.MUSTER);
+    const [internalDate, setInternalDate] = useState(getWATDateStr());
+    const [internalParadeType, setInternalParadeType] = useState<ParadeType>(
+        isMatronMode ? ParadeType.TATTOO : ParadeType.MUSTER
+    );
+
+    const formDate = externalDate ?? internalDate;
+    const formParadeType = isMatronMode ? ParadeType.TATTOO : (externalParadeType ?? internalParadeType);
+
+    const setFormDate = (d: string) => {
+        if (onDateChange) onDateChange(d);
+        else setInternalDate(d);
+    };
+    const setFormParadeType = (t: ParadeType) => {
+        if (onParadeTypeChange) onParadeTypeChange(t);
+        else setInternalParadeType(t);
+    };
+
+    // Determine the course number — override takes precedence (Matron), else officer's course
+    const officerCourseNumber =
+        overrideCourseNumber ??
+        currentUser?.courseNumber ??
+        (currentUser?.yearGroup ? activeRC - currentUser.yearGroup + 1 : activeRC);
+
+    // Matron status & strength state (for Course Officer live banner & expected male strength)
+    const [matronStrength, setMatronStrength] = useState<number | undefined>(undefined);
+    const [matronSubmission, setMatronSubmission] = useState<ParadeGenderSubmission | null>(null);
+    const [showFemaleBreakdown, setShowFemaleBreakdown] = useState(false);
+
+    const isTattooSplitActive = formParadeType === ParadeType.TATTOO;
+
+    const loadCounterpartState = useCallback(async () => {
+        if (isMatronMode || !officerCourseNumber || !isTattooSplitActive) {
+            setMatronSubmission(null);
+            return;
+        }
+        try {
+            const [strengths, subs] = await Promise.all([
+                dbService.getMatronCourseStrengths(),
+                dbService.getParadeGenderSubmissions({
+                    date: formDate,
+                    paradeType: formParadeType,
+                    courseNumber: officerCourseNumber
+                })
+            ]);
+            const s = strengths[officerCourseNumber];
+            setMatronStrength(s ? s.femaleStrength : undefined);
+            const femSub = subs.find(item => item.genderSegment === 'female') || null;
+            setMatronSubmission(femSub);
+        } catch {
+            // non-fatal
+        }
+    }, [isMatronMode, officerCourseNumber, formDate, formParadeType, isTattooSplitActive]);
+
+    useEffect(() => {
+        loadCounterpartState();
+        const onUpdated = () => loadCounterpartState();
+        window.addEventListener('parade-gender-submissions-updated', onUpdated);
+        return () => window.removeEventListener('parade-gender-submissions-updated', onUpdated);
+    }, [loadCounterpartState]);
+
+    const registryTotal = currentUser?.totalCadets || 0;
+    const effectiveTotalCadets =
+        overrideTotalCadets !== undefined
+            ? overrideTotalCadets
+            : !isMatronMode && isTattooSplitActive && matronStrength !== undefined
+            ? Math.max(0, registryTotal - matronStrength)
+            : registryTotal;
+
     const [counts, setCounts] = useState({
-        present: currentUser?.totalCadets || 0,
+        present: effectiveTotalCadets,
         absent: 0,
         sick: 0,
         detention: 0,
@@ -30,6 +121,32 @@ const { currentUser } = useAuth();
         suspension: 0,
         yetToReport: 0
     });
+
+    // Keep Present synchronized when course or strength changes
+    useEffect(() => {
+        setCounts(prev => {
+            const nonPresentSum =
+                prev.absent +
+                prev.sick +
+                prev.detention +
+                prev.pass +
+                prev.suspension +
+                prev.yetToReport;
+            return {
+                ...prev,
+                present: Math.max(0, effectiveTotalCadets) - nonPresentSum
+            };
+        });
+    }, [effectiveTotalCadets]);
+
+    // Reset exception list when Matron switches course
+    useEffect(() => {
+        if (overrideCourseNumber !== undefined) {
+            setCadetDetailsList([]);
+            setTempCadet({ name: '', squad: '', status: CadetStatus.ABSENT });
+            setCurrentPage(1);
+        }
+    }, [overrideCourseNumber]);
     const [tempCadet, setTempCadet] = useState<CadetDetail>({ name: '', squad: '', status: CadetStatus.ABSENT });
     const [cadetDetailsList, setCadetDetailsList] = useState<CadetDetail[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,9 +159,8 @@ const { currentUser } = useAuth();
     const [currentPage, setCurrentPage] = useState<number>(1);
     const ITEMS_PER_PAGE = 10;
 
-    // Determine the officer's course number — fall back to activeRC if needed
-    const officerCourseNumber = currentUser?.courseNumber
-        ?? (currentUser?.yearGroup ? (activeRC - currentUser.yearGroup + 1) : activeRC);
+    // Determine the officer's course number — handled above via officerCourseNumber
+    const _unused = officerCourseNumber;
 
     const handleQuickAdd = (status: CadetStatus) => {
         if (!tempCadet.name || !tempCadet.squad) {
@@ -73,8 +189,8 @@ const { currentUser } = useAuth();
         const total = counts.present + counts.absent + counts.sick + counts.detention +
             counts.pass + counts.suspension + counts.yetToReport;
 
-        if (total !== currentUser.totalCadets) {
-            toast.error(`Error: Total count (${total}) must match your total cadets (${currentUser.totalCadets})`);
+        if (total !== effectiveTotalCadets) {
+            toast.error(`Error: Total count (${total}) must match your ${isMatronMode ? 'female strength' : 'declared strength'} (${effectiveTotalCadets})`);
             return;
         }
 
@@ -89,8 +205,8 @@ const { currentUser } = useAuth();
         const data = {
             officerId: currentUser.id,
             officerName: currentUser.fullName,
-            courseName: currentUser.courseName || '',
-            yearGroup: currentUser.yearGroup || 1,
+            courseName: `REGULAR COURSE ${officerCourseNumber}`,
+            yearGroup: getLevelForCourse(officerCourseNumber) || currentUser.yearGroup || 1,
             courseNumber: officerCourseNumber,
             date: formDate,
             paradeType: formParadeType,
@@ -133,31 +249,31 @@ const { currentUser } = useAuth();
             }
         }
 
-        // 2. Duplicate Detection
         setIsSubmitting(true);
         try {
-            const alreadySubmitted = await dbService.checkDuplicateParade(
-                currentUser.id,
-                formDate,
-                formParadeType
-            );
-
-            if (alreadySubmitted) {
-                const label = formParadeType === ParadeType.MUSTER
-                    ? 'Morning Muster'
-                    : formParadeType === ParadeType.TATTOO
-                        ? 'Night Tattoo'
-                        : 'Special Parade';
-                toast.error(`A ${label} state has already been submitted for ${formDate}.`);
-                setIsSubmitting(false);
-                setShowPreview(false);
-                return;
-            }
-
-            await dbService.saveRecord(previewData);
+            const res = await dbService.submitGenderParadeSegment({
+                submitterId: currentUser.id,
+                submitterName: currentUser.fullName,
+                courseName: previewData.courseName || `REGULAR COURSE ${officerCourseNumber}`,
+                yearGroup: previewData.yearGroup || 1,
+                courseNumber: officerCourseNumber,
+                date: formDate,
+                paradeType: formParadeType,
+                genderSegment: effectiveSegment,
+                declaredStrength: effectiveTotalCadets,
+                presentCount: previewData.presentCount,
+                absentCount: previewData.absentCount,
+                sickCount: previewData.sickCount,
+                detentionCount: previewData.detentionCount,
+                passCount: previewData.passCount || 0,
+                suspensionCount: previewData.suspensionCount || 0,
+                yetToReportCount: previewData.yetToReportCount || 0,
+                grandTotal: previewData.grandTotal,
+                cadets: previewData.cadets || []
+            });
 
             setCounts({
-                present: currentUser.totalCadets || 0,
+                present: effectiveTotalCadets,
                 absent: 0,
                 sick: 0,
                 detention: 0,
@@ -169,9 +285,27 @@ const { currentUser } = useAuth();
             setShowPreview(false);
             setPreviewData(null);
             await refreshData();
-            toast.success('Parade State submitted successfully!');
-        } catch (error) {
-            toast.error('Submission failed. Try again.');
+            await loadCounterpartState();
+
+            if (res.state === 'reconciled') {
+                toast.success(
+                    isMatronMode
+                        ? `${formatRC(officerCourseNumber)} combined with Course Officer & filed!`
+                        : `${formatRC(officerCourseNumber)} combined & official parade state submitted!`
+                );
+            } else {
+                toast.success(
+                    isMatronMode
+                        ? `Female state sent to ${formatRC(officerCourseNumber)} Officer.`
+                        : `Male state staged — will auto-combine once Matron submits.`
+                );
+            }
+
+            if (onSubmittedSuccess) {
+                onSubmittedSuccess({ state: res.state });
+            }
+        } catch (error: any) {
+            toast.error(error?.message || 'Submission failed. Try again.');
         } finally {
             setIsSubmitting(false);
         }
@@ -216,6 +350,89 @@ const { currentUser } = useAuth();
             </div>
 
             <div className="p-4 md:p-8 space-y-6 md:space-y-8">
+                {/* Course Officer Live Matron Status Banner (Night Tattoo only) */}
+                {!isMatronMode && isTattooSplitActive && (
+                    <div
+                        className={`rounded-2xl border px-4 py-3.5 transition-colors ${
+                            matronSubmission
+                                ? 'bg-emerald-50/70 border-emerald-200/80 text-emerald-950'
+                                : matronStrength === 0
+                                ? 'bg-slate-50 border-slate-200 text-slate-700'
+                                : 'bg-amber-50/70 border-amber-200/80 text-amber-950'
+                        }`}
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-2.5 min-w-0">
+                                {matronSubmission ? (
+                                    <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+                                ) : (
+                                    <Clock size={18} className={matronStrength === 0 ? 'text-slate-400 shrink-0 mt-0.5' : 'text-amber-600 shrink-0 mt-0.5'} />
+                                )}
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold tracking-tight">
+                                        {matronSubmission
+                                            ? `Female Parade Received from Matron (${matronSubmission.presentCount} Present · ${matronSubmission.grandTotal} Total)`
+                                            : matronStrength === 0
+                                            ? `No Female Cadets Declared for ${formatRC(officerCourseNumber)}`
+                                            : `Female Parade Pending Matron`}
+                                    </p>
+                                    <p className="text-[11px] opacity-80 mt-0.5 leading-relaxed">
+                                        {matronSubmission
+                                            ? `Expected Male Strength: ${effectiveTotalCadets} (${registryTotal} Total − ${matronSubmission.grandTotal} Female). Submitting will auto-combine both.`
+                                            : matronStrength === 0
+                                            ? `Submitting your parade state will file ${formatRC(officerCourseNumber)} directly.`
+                                            : matronStrength !== undefined
+                                            ? `Expected Male Strength: ${effectiveTotalCadets} (${registryTotal} Total − ${matronStrength} Female). Submitting stages your Male state for auto-merge.`
+                                            : `Submit your Male parade state below. Once the Matron submits ${formatRC(officerCourseNumber)}, both will auto-combine.`}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {matronSubmission && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowFemaleBreakdown(v => !v)}
+                                    className="min-h-[36px] px-2.5 py-1 rounded-lg bg-white/80 hover:bg-white border border-emerald-200 text-[11px] font-semibold text-emerald-800 flex items-center gap-1 shrink-0 transition-colors"
+                                >
+                                    <span>Breakdown</span>
+                                    <ChevronDown
+                                        size={14}
+                                        className={`transition-transform duration-150 ${showFemaleBreakdown ? 'rotate-180' : ''}`}
+                                    />
+                                </button>
+                            )}
+                        </div>
+
+                        {matronSubmission && showFemaleBreakdown && (
+                            <div className="mt-3 pt-3 border-t border-emerald-200/70 space-y-2">
+                                <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold tabular-nums">
+                                    <span className="px-2 py-0.5 rounded-md bg-white border border-emerald-200/70">Present: {matronSubmission.presentCount}</span>
+                                    {matronSubmission.absentCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-rose-200 text-rose-700">Absent: {matronSubmission.absentCount}</span>}
+                                    {matronSubmission.sickCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-700">Sick: {matronSubmission.sickCount}</span>}
+                                    {matronSubmission.detentionCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-indigo-700">Detention: {matronSubmission.detentionCount}</span>}
+                                    {matronSubmission.passCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-purple-200 text-purple-700">Pass: {matronSubmission.passCount}</span>}
+                                    {matronSubmission.suspensionCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">Suspension: {matronSubmission.suspensionCount}</span>}
+                                    {matronSubmission.yetToReportCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-cyan-200 text-cyan-700">YTR: {matronSubmission.yetToReportCount}</span>}
+                                </div>
+                                {matronSubmission.cadetDetails.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {matronSubmission.cadetDetails.map((c, idx) => (
+                                            <span
+                                                key={`${c.name}-${idx}`}
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-white border border-slate-200 text-slate-700"
+                                            >
+                                                <span className="font-semibold">{c.name}</span>
+                                                <span className="text-slate-400">({c.squad})</span>
+                                                <span className="uppercase text-[9px] font-bold text-rose-600">{c.status}</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Parade Date</label>
@@ -228,15 +445,25 @@ const { currentUser } = useAuth();
                     </div>
                     <div className="space-y-2">
                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Parade Type</label>
-                        <select
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={formParadeType}
-                            onChange={(e) => setFormParadeType(e.target.value as ParadeType)}
-                        >
-                            <option value={ParadeType.MUSTER}>Morning Muster</option>
-                            <option value={ParadeType.TATTOO}>Night Tattoo</option>
-                            <option value={ParadeType.SPECIAL}>Special Parade</option>
-                        </select>
+                        {isMatronMode ? (
+                            <select
+                                disabled
+                                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-100 text-slate-700 font-semibold outline-none cursor-not-allowed"
+                                value={ParadeType.TATTOO}
+                            >
+                                <option value={ParadeType.TATTOO}>Night Tattoo</option>
+                            </select>
+                        ) : (
+                            <select
+                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                                value={formParadeType}
+                                onChange={(e) => setFormParadeType(e.target.value as ParadeType)}
+                            >
+                                <option value={ParadeType.MUSTER}>Morning Muster</option>
+                                <option value={ParadeType.TATTOO}>Night Tattoo</option>
+                                <option value={ParadeType.SPECIAL}>Special Parade</option>
+                            </select>
+                        )}
                     </div>
                 </div>
 
@@ -247,10 +474,10 @@ const { currentUser } = useAuth();
                             Cadet Present (Calculated)
                         </label>
                         <div className="flex items-baseline gap-2">
-                            <span className={`text-4xl font-black ${counts.present < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                            <span className={`text-4xl font-black tabular-nums ${counts.present < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
                                 {counts.present}
                             </span>
-                            <span className="text-slate-400 font-bold text-sm">/ {currentUser?.totalCadets || 0}</span>
+                            <span className="text-slate-400 font-bold text-sm tabular-nums">/ {effectiveTotalCadets}</span>
                         </div>
                         {counts.present < 0 && (
                             <p className="text-[10px] font-bold text-rose-500 mt-2 italic">Error: Total exceeds assigned cadets!</p>
@@ -276,7 +503,7 @@ const { currentUser } = useAuth();
                                                     newCounts.pass + newCounts.suspension + newCounts.yetToReport;
                                                 setCounts({
                                                     ...newCounts,
-                                                    present: (currentUser?.totalCadets || 0) - nonPresentSum
+                                                    present: effectiveTotalCadets - nonPresentSum
                                                 });
                                             }}
                                         />
@@ -303,7 +530,7 @@ const { currentUser } = useAuth();
                                                     newCounts.pass + newCounts.suspension + newCounts.yetToReport;
                                                 setCounts({
                                                     ...newCounts,
-                                                    present: (currentUser?.totalCadets || 0) - nonPresentSum
+                                                    present: effectiveTotalCadets - nonPresentSum
                                                 });
                                             }}
                                         />
@@ -354,6 +581,8 @@ const { currentUser } = useAuth();
                             courseNumber={officerCourseNumber}
                             onSelect={(cadet) => setTempCadet({ ...tempCadet, name: cadet.name, squad: cadet.squad })}
                             onInputChange={(name) => setTempCadet(prev => ({ ...prev, name, squad: '' }))}
+                            disabledCadets={counterpartDetails || (!isMatronMode ? matronSubmission?.cadetDetails : undefined)}
+                            disabledBadgeLabel="Logged by Matron"
                         />
 
                         {/* COMPACT CONFIRMATION PREVIEW */}
@@ -520,10 +749,18 @@ const { currentUser } = useAuth();
 
                 <button
                     onClick={handleSubmission}
-                    disabled={isSubmitting}
-                    className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center space-x-2"
+                    disabled={isSubmitting || (isMatronMode && (overrideTotalCadets === undefined || overrideTotalCadets < 0))}
+                    className="w-full min-h-[48px] bg-blue-700 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center space-x-2"
                 >
-                    {isSubmitting ? <RefreshCcw className="animate-spin" /> : <span>Submit Official Parade State</span>}
+                    {isSubmitting ? (
+                        <RefreshCcw className="animate-spin" />
+                    ) : (
+                        <span>
+                            {isMatronMode
+                                ? `Send Female State (${formatRC(officerCourseNumber)})`
+                                : 'Submit Official Parade State'}
+                        </span>
+                    )}
                 </button>
             </div>
 

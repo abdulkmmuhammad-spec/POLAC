@@ -7,6 +7,7 @@ import { LoginScreen } from './components/Auth/LoginScreen';
 import { AdminDashboard, CommandantDashboard } from './components/Dashboard/Commandant/CommandantDashboard';
 import { OfficerDashboard } from './components/Dashboard/Officer/OfficerDashboard';
 import { MedicalDashboard } from './components/Dashboard/Medical/MedicalDashboard';
+import { MatronDashboard } from './components/Dashboard/Matron/MatronDashboard';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/Layout/ErrorBoundary';
 import { SwipePageNavigator } from './components/Layout/SwipePageNavigator';
@@ -57,6 +58,7 @@ const getRoleHomeRoute = (role: UserRole): string => {
   if (role === UserRole.ADMIN) return '/admin';
   if (role === UserRole.COMMANDANT) return '/commandant';
   if (role === UserRole.MEDICAL_OFFICER) return '/medical';
+  if (role === UserRole.MATRON) return '/matron';
   return '/officer';
 };
 
@@ -133,6 +135,11 @@ const AppContent: React.FC = () => {
         {/* Protected medical officer routes */}
         <Route element={<ProtectedRoute allowedRoles={[UserRole.MEDICAL_OFFICER]} />}>
           <Route path="/medical/*" element={<MedicalDashboard />} />
+        </Route>
+
+        {/* Protected matron routes */}
+        <Route element={<ProtectedRoute allowedRoles={[UserRole.MATRON, UserRole.ADMIN]} />}>
+          <Route path="/matron/*" element={<MatronDashboard />} />
         </Route>
 
         {/* Root — smart redirect */}

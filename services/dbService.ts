@@ -8,6 +8,9 @@ import {
   Notification,
   CadetStatus,
   AuditEvent,
+  MatronCourseStrength,
+  ParadeGenderSubmission,
+  ParadeType,
   CourseImpactSummary,
   CourseImpactBreakdownItem,
   CoursePurgeMode,
@@ -444,7 +447,11 @@ export const dbService = {
             ? 'System Administrator'
             : d.role === 'commandant'
               ? 'Commandant'
-              : 'Course Officer'),
+              : d.role === 'medical_officer'
+                ? 'Medical Officer'
+                : d.role === 'matron'
+                  ? 'Academy Matron'
+                  : 'Course Officer'),
         courseName: d.role === 'course_officer' ? d.course_name : 'Academy HQ',
         yearGroup: d.year_group,
         courseNumber: d.course_number ? parseInt(d.course_number) : undefined,
@@ -521,17 +528,19 @@ export const dbService = {
 
     if (!rpcError) return;
 
-    // If RPC failed due to business/security validation, surface immediately
+    // Surface all business/security/database validation errors unless the RPC itself is missing
     const msg = rpcError.message || '';
-    if (
-      msg.includes('INVALID_CURRENT_PASSWORD') ||
-      msg.includes('CANNOT_DELETE_SELF') ||
-      msg.includes('CANNOT_DELETE_LAST_ADMIN')
-    ) {
-      throw new Error(msg.replace(/^[A-Z_]+:\s*/, ''));
+    const code = (rpcError as any).code || '';
+    const isRpcMissing =
+      code === 'PGRST202' ||
+      code === '42883' ||
+      msg.toLowerCase().includes('could not find the function');
+
+    if (!isRpcMissing) {
+      throw new Error(msg.replace(/^[A-Z_]+:\s*/, '') || 'Failed to delete user account.');
     }
 
-    // Fallback if migration 20261119_01 is not yet applied or role check differs
+    // Fallback ONLY if migration 20261119_01 / 20261126_01 is not yet applied
     const isVerified = await dbService.verifyCommandantAccess(resolvedAdminId, currentPassword);
     if (!isVerified) {
       throw new Error('Administrator password verification failed.');
@@ -543,13 +552,17 @@ export const dbService = {
     await supabase.from('sickbay_verifications').update({ medical_officer_id: null }).eq('medical_officer_id', targetUserId);
     await supabase.from('sickbay_verifications').update({ targeted_recipient_id: null }).eq('targeted_recipient_id', targetUserId);
 
-    const { error: deleteErr } = await supabase
+    const { data: deletedRows, error: deleteErr } = await supabase
       .from('users')
       .delete()
-      .eq('id', targetUserId);
+      .eq('id', targetUserId)
+      .select('id');
 
     if (deleteErr) {
       throw new Error(deleteErr.message || 'Failed to delete user.');
+    }
+    if (!deletedRows || deletedRows.length === 0) {
+      throw new Error('Account could not be deleted (blocked by database policy or migration 20261126_01 not applied).');
     }
   },
 
@@ -607,6 +620,7 @@ export const dbService = {
           .filter(key => key.startsWith('polac_') && key !== 'polac_session' && key !== 'polac_theme')
           .forEach(key => localStorage.removeItem(key));
         localStorage.setItem('polac_commandant_remarks', '[]');
+        sessionStorage.removeItem('polac_autopopped_misconduct_alerts');
       } catch {
         // ignore storage errors
       }
@@ -617,6 +631,7 @@ export const dbService = {
         window.dispatchEvent(new Event('sickbay-verifications-updated'));
         window.dispatchEvent(new Event('cadet-registry-updated'));
         window.dispatchEvent(new Event('command-reports-updated'));
+        window.dispatchEvent(new Event('cadet-alerts-updated'));
       } catch { }
     }
 
@@ -2003,7 +2018,14 @@ export const dbService = {
         await supabase.from('parade_records').delete().in('course_number', courseNumbers);
         purgedParadesCount = prs.length;
       }
+      try {
+        await supabase.from('parade_gender_submissions').delete().in('course_number', courseNumbers);
+      } catch { }
     }
+
+    try {
+      await supabase.from('matron_course_strengths').delete().in('course_number', courseNumbers);
+    } catch { }
 
     // Execute delete on cadet_registry for targeted courses
     const { error: deleteErr } = await supabase
@@ -3207,6 +3229,7 @@ export const dbService = {
     const localAlerts = readLocalAlerts();
     const resolvedMap = readResolvedMap();
     let dbAlerts: any[] = [];
+    let dbQuerySucceeded = false;
 
     // 1. Query public.cadet_alerts if accessible
     try {
@@ -3216,6 +3239,7 @@ export const dbService = {
         .order('created_at', { ascending: false })
         .limit(200);
       if (!error && data) {
+        dbQuerySucceeded = true;
         dbAlerts = data;
       }
     } catch { }
@@ -3289,21 +3313,24 @@ export const dbService = {
 
     const mergedByKey = new Map<string, any>();
 
-    // Seed with existing active local alerts (excluding any that already received a Senior Officer directive)
-    for (const loc of localAlerts) {
-      const k = makeCadetKey(loc.cadet_name, loc.squad);
-      if (loc.commandant_directive && String(loc.commandant_directive).trim() !== '') {
-        const prevRes = resolvedMap[k];
-        if (!prevRes || Number(loc.trigger_count || 3) >= prevRes.resolvedCount) {
-          resolvedMap[k] = {
-            resolvedCount: Number(loc.trigger_count || 3),
-            resolvedAt: loc.updated_at || loc.created_at || new Date().toISOString()
-          };
+    // Offline fallback ONLY: seed with local alerts when DB is unreachable.
+    // When DB query succeeds, DB + live parade scan are authoritative (prevents ghost alerts after wipe).
+    if (!dbQuerySucceeded) {
+      for (const loc of localAlerts) {
+        const k = makeCadetKey(loc.cadet_name, loc.squad);
+        if (loc.commandant_directive && String(loc.commandant_directive).trim() !== '') {
+          const prevRes = resolvedMap[k];
+          if (!prevRes || Number(loc.trigger_count || 3) >= prevRes.resolvedCount) {
+            resolvedMap[k] = {
+              resolvedCount: Number(loc.trigger_count || 3),
+              resolvedAt: loc.updated_at || loc.created_at || new Date().toISOString()
+            };
+          }
+          continue;
         }
-        continue;
-      }
-      if (loc.status === 'ACTIVE') {
-        mergedByKey.set(k, loc);
+        if (loc.status === 'ACTIVE') {
+          mergedByKey.set(k, loc);
+        }
       }
     }
 
@@ -3891,6 +3918,208 @@ export const dbService = {
       console.error('Supabase Error (replyCommandReport):', err);
       throw err;
     }
+  },
+
+  // ─── Matron & Split-Gender Parade Reconciliation ─────────────────────────────
+
+  getMatronCourseStrengths: async (): Promise<Record<number, MatronCourseStrength>> => {
+    try {
+      const { data, error } = await supabase
+        .from('matron_course_strengths')
+        .select('*');
+      if (error) {
+        console.warn('getMatronCourseStrengths warning:', error.message);
+        return {};
+      }
+      const map: Record<number, MatronCourseStrength> = {};
+      (data || []).forEach((row: any) => {
+        const cNum = Number(row.course_number);
+        if (!Number.isNaN(cNum)) {
+          map[cNum] = {
+            courseNumber: cNum,
+            femaleStrength: Number(row.female_strength || 0),
+            updatedBy: row.updated_by,
+            updatedAt: row.updated_at
+          };
+        }
+      });
+      return map;
+    } catch (err) {
+      console.warn('getMatronCourseStrengths fallback:', err);
+      return {};
+    }
+  },
+
+  upsertMatronCourseStrength: async (
+    courseNumber: number,
+    femaleStrength: number,
+    updatedBy: string | number
+  ): Promise<{ success: boolean; autoReconciledCount: number }> => {
+    const cleanStrength = Math.max(0, Math.floor(Number(femaleStrength) || 0));
+    const { data, error } = await supabase.rpc('upsert_matron_course_strength', {
+      p_course_number: courseNumber,
+      p_female_strength: cleanStrength,
+      p_updated_by: String(updatedBy)
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Failed to save female course strength.');
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('parade-gender-submissions-updated'));
+    }
+
+    return {
+      success: true,
+      autoReconciledCount: Number(data?.auto_reconciled_count || 0)
+    };
+  },
+
+  getParadeGenderSubmissions: async (params: {
+    date: string;
+    paradeType?: ParadeType | string;
+    courseNumber?: number;
+  }): Promise<ParadeGenderSubmission[]> => {
+    try {
+      let query = supabase
+        .from('parade_gender_submissions')
+        .select('*')
+        .eq('parade_date', params.date);
+
+      if (params.paradeType) {
+        query = query.eq('parade_type', params.paradeType);
+      }
+      if (params.courseNumber !== undefined) {
+        query = query.eq('course_number', params.courseNumber);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('getParadeGenderSubmissions warning:', error.message);
+        return [];
+      }
+
+      return (data || []).map((row: any) => ({
+        id: String(row.id),
+        paradeDate: String(row.parade_date),
+        paradeType: row.parade_type as ParadeType,
+        courseNumber: Number(row.course_number),
+        courseName: String(row.course_name || ''),
+        yearGroup: Number(row.year_group || 1),
+        genderSegment: row.gender_segment as 'female' | 'male',
+        submittedBy: row.submitted_by,
+        submittedByName: String(row.submitted_by_name || ''),
+        declaredStrength: Number(row.declared_strength || 0),
+        presentCount: Number(row.present_count || 0),
+        absentCount: Number(row.absent_count || 0),
+        sickCount: Number(row.sick_count || 0),
+        detentionCount: Number(row.detention_count || 0),
+        passCount: Number(row.pass_count || 0),
+        suspensionCount: Number(row.suspension_count || 0),
+        yetToReportCount: Number(row.yet_to_report_count || 0),
+        grandTotal: Number(row.grand_total || 0),
+        cadetDetails: Array.isArray(row.cadet_details) ? row.cadet_details : [],
+        reconciledRecordId: row.reconciled_record_id,
+        status: row.status as 'pending_counterpart' | 'reconciled',
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at)
+      }));
+    } catch (err) {
+      console.warn('getParadeGenderSubmissions fallback:', err);
+      return [];
+    }
+  },
+
+  submitGenderParadeSegment: async (payload: {
+    submitterId: string | number;
+    submitterName: string;
+    courseName: string;
+    yearGroup: number;
+    courseNumber: number;
+    date: string;
+    paradeType: ParadeType;
+    genderSegment: 'female' | 'male';
+    declaredStrength: number;
+    presentCount: number;
+    absentCount: number;
+    sickCount: number;
+    detentionCount: number;
+    passCount: number;
+    suspensionCount: number;
+    yetToReportCount: number;
+    grandTotal: number;
+    cadets: CadetDetail[];
+  }): Promise<{ success: boolean; state: 'reconciled' | 'awaiting_counterpart'; waitingFor?: string; paradeId?: string }> => {
+    const calculatedTotal =
+      (payload.presentCount || 0) +
+      (payload.absentCount || 0) +
+      (payload.sickCount || 0) +
+      (payload.detentionCount || 0) +
+      (payload.passCount || 0) +
+      (payload.suspensionCount || 0) +
+      (payload.yetToReportCount || 0);
+
+    if (calculatedTotal !== payload.grandTotal) {
+      throw new Error(`Math Mismatch: Calculated Sum (${calculatedTotal}) does not equal Declared Strength (${payload.grandTotal})`);
+    }
+
+    const { data, error } = await supabase.rpc('submit_gender_parade_segment', {
+      p_submitter_id: String(payload.submitterId),
+      p_submitter_name: payload.submitterName,
+      p_course_name: payload.courseName,
+      p_year_group: payload.yearGroup,
+      p_course_number: payload.courseNumber,
+      p_date: payload.date,
+      p_parade_type: payload.paradeType,
+      p_gender_segment: payload.genderSegment,
+      p_declared_strength: payload.declaredStrength,
+      p_present_count: payload.presentCount,
+      p_absent_count: payload.absentCount,
+      p_sick_count: payload.sickCount,
+      p_detention_count: payload.detentionCount,
+      p_pass_count: payload.passCount || 0,
+      p_suspension_count: payload.suspensionCount || 0,
+      p_yet_to_report_count: payload.yetToReportCount || 0,
+      p_grand_total: payload.grandTotal,
+      p_cadet_records: payload.cadets.map(c => ({
+        name: c.name,
+        squad: c.squad,
+        status: c.status
+      }))
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Failed to submit parade segment.');
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('parade-gender-submissions-updated'));
+    }
+
+    if (data?.state === 'reconciled') {
+      try {
+        const evaluatedAlerts = await dbService.syncAndGetCadetAlerts(payload.courseNumber);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('cadet-alerts-updated', {
+              detail: {
+                fromSubmission: true,
+                courseNumber: payload.courseNumber,
+                alerts: evaluatedAlerts
+              }
+            })
+          );
+        }
+      } catch { }
+    }
+
+    return {
+      success: true,
+      state: data?.state === 'reconciled' ? 'reconciled' : 'awaiting_counterpart',
+      waitingFor: data?.waitingFor,
+      paradeId: data?.parade_id
+    };
   }
 };
 
