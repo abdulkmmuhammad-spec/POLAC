@@ -1,777 +1,1021 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, RefreshCcw, Search, ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Clock } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import {
+  Plus,
+  Minus,
+  ChevronDown,
+  CheckCircle2,
+  Clock,
+  UserPlus,
+  X,
+  Calendar,
+  AlertTriangle,
+  Lock
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useParade } from '../../context/ParadeContext';
-import { ParadeType, CadetStatus, CadetDetail, ParadeGenderSubmission, UserRole } from '../../types';
+import {
+  ParadeType,
+  CadetStatus,
+  CadetDetail,
+  ParadeGenderSubmission,
+  UserRole
+} from '../../types';
 import { dbService } from '../../services/dbService';
 import { CadetSelector } from '../CadetRegistry/CadetSelector';
 import { formatRC } from '../../utils/rcHelpers';
+import { useWATDateRollover, getWATDateStr } from '../../hooks/useWATDateRollover';
+import { createStaleFetchGuard } from '../../utils/dateRollover';
 import { toast } from 'react-hot-toast';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
 
 export interface ParadeFormProps {
-    overrideCourseNumber?: number;
-    overrideTotalCadets?: number;
-    submissionSegment?: 'female' | 'male';
-    counterpartDetails?: CadetDetail[];
-    onSubmittedSuccess?: (result?: { state: 'reconciled' | 'awaiting_counterpart' }) => void;
-    externalDate?: string;
-    externalParadeType?: ParadeType;
-    onDateChange?: (date: string) => void;
-    onParadeTypeChange?: (paradeType: ParadeType) => void;
+  overrideCourseNumber?: number;
+  overrideTotalCadets?: number;
+  submissionSegment?: 'female' | 'male';
+  counterpartDetails?: CadetDetail[];
+  onSubmittedSuccess?: (result?: { state: 'reconciled' | 'awaiting_counterpart' }) => void;
+  externalDate?: string;
+  externalParadeType?: ParadeType;
+  onDateChange?: (date: string) => void;
+  onParadeTypeChange?: (paradeType: ParadeType) => void;
 }
 
+type ExceptionKey =
+  | 'absent'
+  | 'sick'
+  | 'pass'
+  | 'detention'
+  | 'suspension'
+  | 'yetToReport';
+
+interface ExceptionCategory {
+  key: ExceptionKey;
+  label: string;
+  cadetStatus: CadetStatus;
+}
+
+const EXCEPTION_CATEGORIES: ExceptionCategory[] = [
+  { key: 'absent', label: 'Absent', cadetStatus: CadetStatus.ABSENT },
+  { key: 'sick', label: 'Sick', cadetStatus: CadetStatus.SICK },
+  { key: 'pass', label: 'Pass', cadetStatus: CadetStatus.PASS },
+  { key: 'detention', label: 'Detention', cadetStatus: CadetStatus.DETENTION },
+  { key: 'suspension', label: 'Suspension', cadetStatus: CadetStatus.SUSPENSION },
+  { key: 'yetToReport', label: 'Yet to Report', cadetStatus: CadetStatus.YET_TO_REPORT }
+];
+
+const PARADE_OPTIONS: Array<{ value: ParadeType; shortLabel: string }> = [
+  { value: ParadeType.MUSTER, shortLabel: 'Muster' },
+  { value: ParadeType.TATTOO, shortLabel: 'Tattoo' },
+  { value: ParadeType.SPECIAL, shortLabel: 'Special' }
+];
+
+const EMPTY_EXCEPTION_COUNTS: Record<ExceptionKey, number> = {
+  absent: 0,
+  sick: 0,
+  pass: 0,
+  detention: 0,
+  suspension: 0,
+  yetToReport: 0
+};
+
 export const ParadeForm: React.FC<ParadeFormProps> = ({
-    overrideCourseNumber,
-    overrideTotalCadets,
-    submissionSegment,
-    counterpartDetails,
-    onSubmittedSuccess,
-    externalDate,
-    externalParadeType,
-    onDateChange,
-    onParadeTypeChange
+  overrideCourseNumber,
+  overrideTotalCadets,
+  submissionSegment,
+  onSubmittedSuccess,
+  externalDate,
+  externalParadeType,
+  onDateChange,
+  onParadeTypeChange
 }) => {
-    const { currentUser } = useAuth();
-    const { isDataLoading, refreshData, getLevelForCourse, activeRC, submissionSettings } = useParade();
+  const { currentUser } = useAuth();
+  const {
+    refreshData,
+    getLevelForCourse,
+    activeRC,
+    submissionSettings,
+    records
+  } = useParade();
 
-    const isMatronMode = submissionSegment === 'female' || currentUser?.role === UserRole.MATRON;
-    const effectiveSegment: 'female' | 'male' = submissionSegment || (isMatronMode ? 'female' : 'male');
+  const isMatronMode =
+    submissionSegment === 'female' || currentUser?.role === UserRole.MATRON;
+  const effectiveSegment: 'female' | 'male' =
+    submissionSegment || (isMatronMode ? 'female' : 'male');
 
-    const getWATDateStr = () => {
-        const now = new Date();
-        const watOffsetMs = 60 * 60 * 1000;
-        return new Date(now.getTime() + watOffsetMs).toISOString().split('T')[0];
-    };
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [tagSheetCategory, setTagSheetCategory] = useState<ExceptionCategory | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const [internalDate, setInternalDate] = useState(getWATDateStr());
-    const [internalParadeType, setInternalParadeType] = useState<ParadeType>(
-        isMatronMode ? ParadeType.TATTOO : ParadeType.MUSTER
-    );
+  const {
+    selectedDate: internalDate,
+    setSelectedDate: setInternalDate,
+    todayWAT,
+    isViewingPastDate,
+    jumpToToday,
+    didRollover
+  } = useWATDateRollover({
+    onRollover: () => {
+      if (!externalDate) {
+        setShowPreview(false);
+        setPreviewData(null);
+        setTagSheetCategory(null);
+        setExceptionCounts(EMPTY_EXCEPTION_COUNTS);
+        setCadetDetailsList([]);
+        toast('New day — Parade Date updated to Today');
+      }
+    }
+  });
 
-    const formDate = externalDate ?? internalDate;
-    const formParadeType = isMatronMode ? ParadeType.TATTOO : (externalParadeType ?? internalParadeType);
+  const [internalParadeType, setInternalParadeType] = useState<ParadeType>(
+    isMatronMode ? ParadeType.TATTOO : ParadeType.MUSTER
+  );
 
-    const setFormDate = (d: string) => {
-        if (onDateChange) onDateChange(d);
-        else setInternalDate(d);
-    };
-    const setFormParadeType = (t: ParadeType) => {
-        if (onParadeTypeChange) onParadeTypeChange(t);
-        else setInternalParadeType(t);
-    };
+  const formDate = externalDate ?? internalDate;
+  const formParadeType = isMatronMode
+    ? ParadeType.TATTOO
+    : externalParadeType ?? internalParadeType;
 
-    // Determine the course number — override takes precedence (Matron), else officer's course
-    const officerCourseNumber =
-        overrideCourseNumber ??
-        currentUser?.courseNumber ??
-        (currentUser?.yearGroup ? activeRC - currentUser.yearGroup + 1 : activeRC);
+  const setFormDate = (d: string) => {
+    if (onDateChange) onDateChange(d);
+    else setInternalDate(d);
+  };
 
-    // Matron status & strength state (for Course Officer live banner & expected male strength)
-    const [matronStrength, setMatronStrength] = useState<number | undefined>(undefined);
-    const [matronSubmission, setMatronSubmission] = useState<ParadeGenderSubmission | null>(null);
-    const [showFemaleBreakdown, setShowFemaleBreakdown] = useState(false);
+  const setFormParadeType = (t: ParadeType) => {
+    if (onParadeTypeChange) onParadeTypeChange(t);
+    else setInternalParadeType(t);
+  };
 
-    const isTattooSplitActive = formParadeType === ParadeType.TATTOO;
+  const officerCourseNumber =
+    overrideCourseNumber ??
+    currentUser?.courseNumber ??
+    (currentUser?.yearGroup ? activeRC - currentUser.yearGroup + 1 : activeRC);
 
-    const loadCounterpartState = useCallback(async () => {
-        if (isMatronMode || !officerCourseNumber || !isTattooSplitActive) {
-            setMatronSubmission(null);
-            return;
-        }
-        try {
-            const [strengths, subs] = await Promise.all([
-                dbService.getMatronCourseStrengths(),
-                dbService.getParadeGenderSubmissions({
-                    date: formDate,
-                    paradeType: formParadeType,
-                    courseNumber: officerCourseNumber
-                })
-            ]);
-            const s = strengths[officerCourseNumber];
-            setMatronStrength(s ? s.femaleStrength : undefined);
-            const femSub = subs.find(item => item.genderSegment === 'female') || null;
-            setMatronSubmission(femSub);
-        } catch {
-            // non-fatal
-        }
-    }, [isMatronMode, officerCourseNumber, formDate, formParadeType, isTattooSplitActive]);
+  const yearGroup = officerCourseNumber ? getLevelForCourse(officerCourseNumber) : 1;
 
-    useEffect(() => {
-        loadCounterpartState();
-        const onUpdated = () => loadCounterpartState();
-        window.addEventListener('parade-gender-submissions-updated', onUpdated);
-        return () => window.removeEventListener('parade-gender-submissions-updated', onUpdated);
-    }, [loadCounterpartState]);
+  // Matron status & strength state (for Course Officer Night Tattoo)
+  const [matronStrength, setMatronStrength] = useState<number | undefined>(undefined);
+  const [matronSubmission, setMatronSubmission] = useState<ParadeGenderSubmission | null>(null);
+  const [ownGenderSubmission, setOwnGenderSubmission] = useState<ParadeGenderSubmission | null>(null);
+  const [showFemaleBreakdown, setShowFemaleBreakdown] = useState(false);
 
-    const registryTotal = currentUser?.totalCadets || 0;
-    const effectiveTotalCadets =
-        overrideTotalCadets !== undefined
-            ? overrideTotalCadets
-            : !isMatronMode && isTattooSplitActive && matronStrength !== undefined
-            ? Math.max(0, registryTotal - matronStrength)
-            : registryTotal;
+  const isTattooSplitActive = formParadeType === ParadeType.TATTOO;
+  const counterpartGuardRef = useRef(createStaleFetchGuard());
 
-    const [counts, setCounts] = useState({
-        present: effectiveTotalCadets,
-        absent: 0,
-        sick: 0,
-        detention: 0,
-        pass: 0,
-        suspension: 0,
-        yetToReport: 0
-    });
+  const loadCounterpartState = useCallback(async () => {
+    if (!officerCourseNumber || !isTattooSplitActive) {
+      setMatronSubmission(null);
+      setOwnGenderSubmission(null);
+      return;
+    }
+    const requestId = counterpartGuardRef.current.nextRequestId();
+    try {
+      const [strengths, subs] = await Promise.all([
+        dbService.getMatronCourseStrengths(),
+        dbService.getParadeGenderSubmissions({
+          date: formDate,
+          paradeType: formParadeType,
+          courseNumber: officerCourseNumber
+        })
+      ]);
+      if (!counterpartGuardRef.current.isLatest(requestId)) return;
 
-    // Keep Present synchronized when course or strength changes
-    useEffect(() => {
-        setCounts(prev => {
-            const nonPresentSum =
-                prev.absent +
-                prev.sick +
-                prev.detention +
-                prev.pass +
-                prev.suspension +
-                prev.yetToReport;
-            return {
-                ...prev,
-                present: Math.max(0, effectiveTotalCadets) - nonPresentSum
-            };
-        });
-    }, [effectiveTotalCadets]);
+      const s = strengths[officerCourseNumber];
+      setMatronStrength(s ? s.femaleStrength : undefined);
 
-    // Reset exception list when Matron switches course
-    useEffect(() => {
-        if (overrideCourseNumber !== undefined) {
-            setCadetDetailsList([]);
-            setTempCadet({ name: '', squad: '', status: CadetStatus.ABSENT });
-            setCurrentPage(1);
-        }
-    }, [overrideCourseNumber]);
-    const [tempCadet, setTempCadet] = useState<CadetDetail>({ name: '', squad: '', status: CadetStatus.ABSENT });
-    const [cadetDetailsList, setCadetDetailsList] = useState<CadetDetail[]>([]);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [showPreview, setShowPreview] = useState(false);
-    const [previewData, setPreviewData] = useState<any>(null);
+      const femSub =
+        subs.find(item => item.genderSegment === 'female' && item.paradeDate === formDate) ||
+        null;
+      const ownSub =
+        subs.find(
+          item => item.genderSegment === effectiveSegment && item.paradeDate === formDate
+        ) || null;
 
-    // Ledger Local State
-    const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'ABSENT' | 'SICK' | string>('ALL');
-    const [ledgerSearch, setLedgerSearch] = useState<string>('');
-    const [currentPage, setCurrentPage] = useState<number>(1);
-    const ITEMS_PER_PAGE = 10;
+      setMatronSubmission(isMatronMode ? null : femSub);
+      setOwnGenderSubmission(ownSub);
+    } catch {
+      // non-fatal
+    }
+  }, [
+    isMatronMode,
+    effectiveSegment,
+    officerCourseNumber,
+    formDate,
+    formParadeType,
+    isTattooSplitActive
+  ]);
 
-    // Determine the officer's course number — handled above via officerCourseNumber
-    const _unused = officerCourseNumber;
+  useEffect(() => {
+    loadCounterpartState();
+    const onUpdated = () => loadCounterpartState();
+    window.addEventListener('parade-gender-submissions-updated', onUpdated);
+    return () => window.removeEventListener('parade-gender-submissions-updated', onUpdated);
+  }, [loadCounterpartState]);
 
-    const handleQuickAdd = (status: CadetStatus) => {
-        if (!tempCadet.name || !tempCadet.squad) {
-            toast.error("Please select or enter a cadet first.");
-            return;
-        }
+  const registryTotal = currentUser?.totalCadets || 0;
+  const effectiveTotalCadets =
+    overrideTotalCadets !== undefined
+      ? overrideTotalCadets
+      : !isMatronMode && isTattooSplitActive && matronStrength !== undefined
+        ? Math.max(0, registryTotal - matronStrength)
+        : registryTotal;
 
-        // Prevent duplicate names in the non-present list
-        const isDuplicate = cadetDetailsList.some(
-            c => c.name.toLowerCase() === tempCadet.name.toLowerCase()
-        );
+  const [exceptionCounts, setExceptionCounts] = useState<Record<ExceptionKey, number>>(
+    EMPTY_EXCEPTION_COUNTS
+  );
+  const [cadetDetailsList, setCadetDetailsList] = useState<CadetDetail[]>([]);
 
-        if (isDuplicate) {
-            toast.error(`${tempCadet.name} is already in the list.`);
-            return;
-        }
+  // Check if this parade is already submitted & locked
+  const matchingOfficialRecord = useMemo(
+    () =>
+      records.find(
+        r =>
+          r.date === formDate &&
+          r.paradeType === formParadeType &&
+          Number(r.courseNumber) === Number(officerCourseNumber)
+      ) || null,
+    [records, formDate, formParadeType, officerCourseNumber]
+  );
 
-        // LIFO Insertion: Prepend new cadet so it appears at top of Page 1
-        setCadetDetailsList([{ ...tempCadet, status }, ...cadetDetailsList]);
-        setTempCadet({ name: '', squad: '', status: CadetStatus.ABSENT });
-        setCurrentPage(1);
-    };
+  const isLocked = Boolean(ownGenderSubmission || matchingOfficialRecord);
 
-    const handleSubmission = () => {
-        if (!currentUser) return;
-        const total = counts.present + counts.absent + counts.sick + counts.detention +
-            counts.pass + counts.suspension + counts.yetToReport;
+  // Hydrate locked state counts if already submitted, else reset cleanly when date/type changes
+  useEffect(() => {
+    if (ownGenderSubmission) {
+      setExceptionCounts({
+        absent: ownGenderSubmission.absentCount,
+        sick: ownGenderSubmission.sickCount,
+        pass: ownGenderSubmission.passCount,
+        detention: ownGenderSubmission.detentionCount,
+        suspension: ownGenderSubmission.suspensionCount,
+        yetToReport: ownGenderSubmission.yetToReportCount
+      });
+      setCadetDetailsList(ownGenderSubmission.cadetDetails || []);
+    } else if (matchingOfficialRecord) {
+      setExceptionCounts({
+        absent: matchingOfficialRecord.absentCount,
+        sick: matchingOfficialRecord.sickCount,
+        pass: matchingOfficialRecord.passCount,
+        detention: matchingOfficialRecord.detentionCount,
+        suspension: matchingOfficialRecord.suspensionCount,
+        yetToReport: matchingOfficialRecord.yetToReportCount
+      });
+      setCadetDetailsList([]);
+    } else {
+      setExceptionCounts(EMPTY_EXCEPTION_COUNTS);
+      setCadetDetailsList([]);
+    }
+  }, [ownGenderSubmission, matchingOfficialRecord, formDate, formParadeType, officerCourseNumber]);
 
-        if (total !== effectiveTotalCadets) {
-            toast.error(`Error: Total count (${total}) must match your ${isMatronMode ? 'female strength' : 'declared strength'} (${effectiveTotalCadets})`);
-            return;
-        }
+  const exceptionsTotal =
+    exceptionCounts.absent +
+    exceptionCounts.sick +
+    exceptionCounts.pass +
+    exceptionCounts.detention +
+    exceptionCounts.suspension +
+    exceptionCounts.yetToReport;
 
-        const neededDetails = counts.absent + counts.sick + counts.detention +
-            counts.pass + counts.suspension + counts.yetToReport;
-        if (cadetDetailsList.length !== neededDetails) {
-            toast.error(`Please provide details for all ${neededDetails} cadets with non-present status.`);
-            return;
-        }
+  const presentCount = Math.max(0, effectiveTotalCadets) - exceptionsTotal;
+  const isOverStrength = exceptionsTotal > effectiveTotalCadets;
 
-        // Prepare data for preview
-        const data = {
-            officerId: currentUser.id,
-            officerName: currentUser.fullName,
-            courseName: `REGULAR COURSE ${officerCourseNumber}`,
-            yearGroup: getLevelForCourse(officerCourseNumber) || currentUser.yearGroup || 1,
-            courseNumber: officerCourseNumber,
-            date: formDate,
-            paradeType: formParadeType,
-            presentCount: counts.present,
-            absentCount: counts.absent,
-            sickCount: counts.sick,
-            detentionCount: counts.detention,
-            passCount: counts.pass,
-            suspensionCount: counts.suspension,
-            yetToReportCount: counts.yetToReport,
-            grandTotal: total,
-            cadets: cadetDetailsList
-        };
+  // Time window check for Today
+  const timeWindowMessage = useMemo(() => {
+    if (formDate !== todayWAT) return null;
+    const currentHour = new Date().getHours();
+    const { musterStartHour, musterEndHour, tattooStartHour } = submissionSettings;
 
-        setPreviewData(data);
-        setShowPreview(true);
-    };
+    if (
+      formParadeType === ParadeType.MUSTER &&
+      (currentHour < musterStartHour || currentHour >= musterEndHour)
+    ) {
+      return `Morning Muster opens ${String(musterStartHour).padStart(2, '0')}:00 – ${String(musterEndHour - 1).padStart(2, '0')}:59.`;
+    }
+    if (formParadeType === ParadeType.TATTOO && currentHour < tattooStartHour) {
+      return `Night Tattoo opens from ${String(tattooStartHour).padStart(2, '0')}:00 onwards.`;
+    }
+    return null;
+  }, [formDate, todayWAT, formParadeType, submissionSettings]);
 
-    const commitSubmission = async () => {
-        if (!previewData || !currentUser) return;
+  const incompleteCategories = useMemo(
+    () =>
+      EXCEPTION_CATEGORIES.map(cat => {
+        const expected = exceptionCounts[cat.key];
+        const tagged = cadetDetailsList.filter(c => c.status === cat.cadetStatus).length;
+        return { cat, expected, tagged, remaining: expected - tagged };
+      }).filter(item => item.expected > 0 && item.tagged !== item.expected),
+    [exceptionCounts, cadetDetailsList]
+  );
 
-        // ──── Submission Guards ───────────────────────────────────────────────
+  const missingTagTotal = incompleteCategories.reduce(
+    (sum, item) => sum + Math.max(0, item.remaining),
+    0
+  );
 
-        // 1. Time Window Enforcement (only for "today")
-        const today = getWATDateStr();
-        if (formDate === today) {
-            const currentHour = new Date().getHours();
-            const { musterStartHour, musterEndHour, tattooStartHour } = submissionSettings;
+  const canSubmit =
+    !isLocked &&
+    !isOverStrength &&
+    incompleteCategories.length === 0 &&
+    !isSubmitting &&
+    effectiveTotalCadets >= 0;
 
-            if (formParadeType === ParadeType.MUSTER && (currentHour < musterStartHour || currentHour >= musterEndHour)) {
-                toast.error(`Morning Muster can only be submitted between ${String(musterStartHour).padStart(2, '0')}:00 and ${String(musterEndHour - 1).padStart(2, '0')}:59.`);
-                setShowPreview(false);
-                return;
-            }
+  const syncTaggedToCount = (key: ExceptionKey, nextVal: number) => {
+    const cat = EXCEPTION_CATEGORIES.find(c => c.key === key);
+    if (!cat) return;
+    if (nextVal <= 0) {
+      setCadetDetailsList(prev => prev.filter(c => c.status !== cat.cadetStatus));
+    } else {
+      setCadetDetailsList(prev => {
+        const others = prev.filter(c => c.status !== cat.cadetStatus);
+        const matching = prev.filter(c => c.status === cat.cadetStatus).slice(0, nextVal);
+        return [...others, ...matching];
+      });
+    }
+  };
 
-            if (formParadeType === ParadeType.TATTOO && (currentHour < tattooStartHour)) {
-                toast.error(`Night Tattoo can only be submitted from ${String(tattooStartHour).padStart(2, '0')}:00 onwards.`);
-                setShowPreview(false);
-                return;
-            }
-        }
+  const adjustCount = (key: ExceptionKey, delta: number) => {
+    if (isLocked) return;
+    const nextVal = Math.max(0, exceptionCounts[key] + delta);
+    setExceptionCounts(prev => ({ ...prev, [key]: nextVal }));
+    syncTaggedToCount(key, nextVal);
+  };
 
-        setIsSubmitting(true);
-        try {
-            const res = await dbService.submitGenderParadeSegment({
-                submitterId: currentUser.id,
-                submitterName: currentUser.fullName,
-                courseName: previewData.courseName || `REGULAR COURSE ${officerCourseNumber}`,
-                yearGroup: previewData.yearGroup || 1,
-                courseNumber: officerCourseNumber,
-                date: formDate,
-                paradeType: formParadeType,
-                genderSegment: effectiveSegment,
-                declaredStrength: effectiveTotalCadets,
-                presentCount: previewData.presentCount,
-                absentCount: previewData.absentCount,
-                sickCount: previewData.sickCount,
-                detentionCount: previewData.detentionCount,
-                passCount: previewData.passCount || 0,
-                suspensionCount: previewData.suspensionCount || 0,
-                yetToReportCount: previewData.yetToReportCount || 0,
-                grandTotal: previewData.grandTotal,
-                cadets: previewData.cadets || []
-            });
+  const setDirectCount = (key: ExceptionKey, raw: string) => {
+    if (isLocked) return;
+    const num = raw.trim() === '' ? 0 : Math.max(0, Math.floor(Number(raw)));
+    if (Number.isNaN(num)) return;
+    setExceptionCounts(prev => ({ ...prev, [key]: num }));
+    syncTaggedToCount(key, num);
+  };
 
-            setCounts({
-                present: effectiveTotalCadets,
-                absent: 0,
-                sick: 0,
-                detention: 0,
-                pass: 0,
-                suspension: 0,
-                yetToReport: 0
-            });
-            setCadetDetailsList([]);
-            setShowPreview(false);
-            setPreviewData(null);
-            await refreshData();
-            await loadCounterpartState();
+  // Cadets already logged by Matron during Night Tattoo (prevent duplicate tagging)
+  const matronTaggedCadets = useMemo(
+    () =>
+      !isMatronMode && isTattooSplitActive && matronSubmission?.cadetDetails
+        ? matronSubmission.cadetDetails
+        : [],
+    [isMatronMode, isTattooSplitActive, matronSubmission]
+  );
 
-            if (res.state === 'reconciled') {
-                toast.success(
-                    isMatronMode
-                        ? `${formatRC(officerCourseNumber)} combined with Course Officer & filed!`
-                        : `${formatRC(officerCourseNumber)} combined & official parade state submitted!`
-                );
-            } else {
-                toast.success(
-                    isMatronMode
-                        ? `Female state sent to ${formatRC(officerCourseNumber)} Officer.`
-                        : `Male state staged — will auto-combine once Matron submits.`
-                );
-            }
-
-            if (onSubmittedSuccess) {
-                onSubmittedSuccess({ state: res.state });
-            }
-        } catch (error: any) {
-            toast.error(error?.message || 'Submission failed. Try again.');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    const levelLabel = officerCourseNumber
-        ? `${formatRC(officerCourseNumber)} — YEAR ${getLevelForCourse(officerCourseNumber)}`
-        : '';
-
-    // Filtered & Paginated Ledger list
-    const filteredCadets = cadetDetailsList.filter(cadet => {
-        const matchesFilter = ledgerFilter === 'ALL' || cadet.status === ledgerFilter;
-        const matchesSearch = !ledgerSearch.trim() ||
-            cadet.name.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
-            cadet.squad.toLowerCase().includes(ledgerSearch.toLowerCase());
-        return matchesFilter && matchesSearch;
-    });
-
-    const totalPages = Math.ceil(filteredCadets.length / ITEMS_PER_PAGE) || 1;
-    const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-    const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
-    const paginatedCadets = filteredCadets.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-
-    const filterTabs = [
-        { id: 'ALL', label: 'All', count: cadetDetailsList.length },
-        { id: CadetStatus.ABSENT, label: 'Absent', count: cadetDetailsList.filter(c => c.status === CadetStatus.ABSENT).length },
-        { id: CadetStatus.SICK, label: 'Sick', count: cadetDetailsList.filter(c => c.status === CadetStatus.SICK).length },
-        { id: CadetStatus.DETENTION, label: 'Detent', count: cadetDetailsList.filter(c => c.status === CadetStatus.DETENTION).length },
-        { id: CadetStatus.PASS, label: 'Pass', count: cadetDetailsList.filter(c => c.status === CadetStatus.PASS).length },
-        { id: CadetStatus.SUSPENSION, label: 'Susp', count: cadetDetailsList.filter(c => c.status === CadetStatus.SUSPENSION).length },
-        { id: CadetStatus.YET_TO_REPORT, label: 'YTR', count: cadetDetailsList.filter(c => c.status === CadetStatus.YET_TO_REPORT).length },
+  const disabledForTagging = useMemo(() => {
+    const combined = [
+      ...cadetDetailsList.map(c => ({ name: c.name, squad: c.squad })),
+      ...matronTaggedCadets.map(c => ({ name: c.name, squad: c.squad }))
     ];
+    return combined;
+  }, [cadetDetailsList, matronTaggedCadets]);
 
-    return (
-        <div className="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
-            <div className="p-6 md:p-8 bg-blue-900 text-white">
-                <h3 className="text-xl font-bold">New Parade Submission</h3>
-                <p className="text-blue-200 text-sm">
-                    Cadet Accountability Form
-                    {levelLabel && <span className="ml-2 bg-blue-700 px-3 py-0.5 rounded-full text-xs font-bold">{levelLabel}</span>}
-                </p>
-            </div>
+  const handleTagCadet = (cadet: { name: string; squad: string }) => {
+    if (!tagSheetCategory || isLocked) return;
+    const categoryCount = exceptionCounts[tagSheetCategory.key];
+    if (categoryCount <= 0) {
+      toast.error(`Set ${tagSheetCategory.label} count above 0 first.`);
+      return;
+    }
 
-            <div className="p-4 md:p-8 space-y-6 md:space-y-8">
-                {/* Course Officer Live Matron Status Banner (Night Tattoo only) */}
-                {!isMatronMode && isTattooSplitActive && (
-                    <div
-                        className={`rounded-2xl border px-4 py-3.5 transition-colors ${
-                            matronSubmission
-                                ? 'bg-emerald-50/70 border-emerald-200/80 text-emerald-950'
-                                : matronStrength === 0
-                                ? 'bg-slate-50 border-slate-200 text-slate-700'
-                                : 'bg-amber-50/70 border-amber-200/80 text-amber-950'
-                        }`}
-                    >
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-2.5 min-w-0">
-                                {matronSubmission ? (
-                                    <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-                                ) : (
-                                    <Clock size={18} className={matronStrength === 0 ? 'text-slate-400 shrink-0 mt-0.5' : 'text-amber-600 shrink-0 mt-0.5'} />
-                                )}
-                                <div className="min-w-0">
-                                    <p className="text-xs font-bold tracking-tight">
-                                        {matronSubmission
-                                            ? `Female Parade Received from Matron (${matronSubmission.presentCount} Present · ${matronSubmission.grandTotal} Total)`
-                                            : matronStrength === 0
-                                            ? `No Female Cadets Declared for ${formatRC(officerCourseNumber)}`
-                                            : `Female Parade Pending Matron`}
-                                    </p>
-                                    <p className="text-[11px] opacity-80 mt-0.5 leading-relaxed">
-                                        {matronSubmission
-                                            ? `Expected Male Strength: ${effectiveTotalCadets} (${registryTotal} Total − ${matronSubmission.grandTotal} Female). Submitting will auto-combine both.`
-                                            : matronStrength === 0
-                                            ? `Submitting your parade state will file ${formatRC(officerCourseNumber)} directly.`
-                                            : matronStrength !== undefined
-                                            ? `Expected Male Strength: ${effectiveTotalCadets} (${registryTotal} Total − ${matronStrength} Female). Submitting stages your Male state for auto-merge.`
-                                            : `Submit your Male parade state below. Once the Matron submits ${formatRC(officerCourseNumber)}, both will auto-combine.`}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {matronSubmission && (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowFemaleBreakdown(v => !v)}
-                                    className="min-h-[36px] px-2.5 py-1 rounded-lg bg-white/80 hover:bg-white border border-emerald-200 text-[11px] font-semibold text-emerald-800 flex items-center gap-1 shrink-0 transition-colors"
-                                >
-                                    <span>Breakdown</span>
-                                    <ChevronDown
-                                        size={14}
-                                        className={`transition-transform duration-150 ${showFemaleBreakdown ? 'rotate-180' : ''}`}
-                                    />
-                                </button>
-                            )}
-                        </div>
-
-                        {matronSubmission && showFemaleBreakdown && (
-                            <div className="mt-3 pt-3 border-t border-emerald-200/70 space-y-2">
-                                <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold tabular-nums">
-                                    <span className="px-2 py-0.5 rounded-md bg-white border border-emerald-200/70">Present: {matronSubmission.presentCount}</span>
-                                    {matronSubmission.absentCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-rose-200 text-rose-700">Absent: {matronSubmission.absentCount}</span>}
-                                    {matronSubmission.sickCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-700">Sick: {matronSubmission.sickCount}</span>}
-                                    {matronSubmission.detentionCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-indigo-700">Detention: {matronSubmission.detentionCount}</span>}
-                                    {matronSubmission.passCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-purple-200 text-purple-700">Pass: {matronSubmission.passCount}</span>}
-                                    {matronSubmission.suspensionCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">Suspension: {matronSubmission.suspensionCount}</span>}
-                                    {matronSubmission.yetToReportCount > 0 && <span className="px-2 py-0.5 rounded-md bg-white border border-cyan-200 text-cyan-700">YTR: {matronSubmission.yetToReportCount}</span>}
-                                </div>
-                                {matronSubmission.cadetDetails.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {matronSubmission.cadetDetails.map((c, idx) => (
-                                            <span
-                                                key={`${c.name}-${idx}`}
-                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-white border border-slate-200 text-slate-700"
-                                            >
-                                                <span className="font-semibold">{c.name}</span>
-                                                <span className="text-slate-400">({c.squad})</span>
-                                                <span className="uppercase text-[9px] font-bold text-rose-600">{c.status}</span>
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Parade Date</label>
-                        <input
-                            type="date"
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={formDate}
-                            onChange={(e) => setFormDate(e.target.value)}
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Parade Type</label>
-                        {isMatronMode ? (
-                            <select
-                                disabled
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-100 text-slate-700 font-semibold outline-none cursor-not-allowed"
-                                value={ParadeType.TATTOO}
-                            >
-                                <option value={ParadeType.TATTOO}>Night Tattoo</option>
-                            </select>
-                        ) : (
-                            <select
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                                value={formParadeType}
-                                onChange={(e) => setFormParadeType(e.target.value as ParadeType)}
-                            >
-                                <option value={ParadeType.MUSTER}>Morning Muster</option>
-                                <option value={ParadeType.TATTOO}>Night Tattoo</option>
-                                <option value={ParadeType.SPECIAL}>Special Parade</option>
-                            </select>
-                        )}
-                    </div>
-                </div>
-
-                <div className="space-y-4">
-                    {/* Primary Status: Present (Auto-calculated) */}
-                    <div className={`p-6 rounded-3xl border-2 transition-all shadow-sm ${counts.present < 0 ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'}`}>
-                        <label className={`text-xs font-black uppercase tracking-widest mb-2 block ${counts.present < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            Cadet Present (Calculated)
-                        </label>
-                        <div className="flex items-baseline gap-2">
-                            <span className={`text-4xl font-black tabular-nums ${counts.present < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                                {counts.present}
-                            </span>
-                            <span className="text-slate-400 font-bold text-sm tabular-nums">/ {effectiveTotalCadets}</span>
-                        </div>
-                        {counts.present < 0 && (
-                            <p className="text-[10px] font-bold text-rose-500 mt-2 italic">Error: Total exceeds assigned cadets!</p>
-                        )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Standard Absence Column */}
-                        <div className="space-y-3">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Excused / Unexcused</p>
-                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                                {(['absent', 'sick', 'detention'] as const).map(key => (
-                                    <div key={key} className="p-3 bg-slate-50 rounded-2xl border border-slate-100 focus-within:border-blue-200 transition-colors">
-                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-1 block truncate">{key === 'detention' ? 'Detent.' : key}</label>
-                                        <input
-                                            type="number"
-                                            className="w-full bg-transparent text-lg font-bold text-slate-800 outline-none"
-                                            value={counts[key]}
-                                            onChange={(e) => {
-                                                const val = Math.max(0, parseInt(e.target.value) || 0);
-                                                const newCounts = { ...counts, [key]: val };
-                                                const nonPresentSum = newCounts.absent + newCounts.sick + newCounts.detention +
-                                                    newCounts.pass + newCounts.suspension + newCounts.yetToReport;
-                                                setCounts({
-                                                    ...newCounts,
-                                                    present: effectiveTotalCadets - nonPresentSum
-                                                });
-                                            }}
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Secondary Status Column */}
-                        <div className="space-y-3">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Secondary States</p>
-                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                                {([{ key: 'pass', label: 'Pass' }, { key: 'suspension', label: 'Susp.' }, { key: 'yetToReport', label: 'YTR' }] as const).map(item => (
-                                    <div key={item.key} className="p-3 bg-slate-50 rounded-2xl border border-slate-100 focus-within:border-blue-200 transition-colors">
-                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-1 block truncate">{item.label}</label>
-                                        <input
-                                            type="number"
-                                            className="w-full bg-transparent text-lg font-bold text-slate-800 outline-none"
-                                            value={counts[item.key as keyof typeof counts]}
-                                            onChange={(e) => {
-                                                const val = Math.max(0, parseInt(e.target.value) || 0);
-                                                const newCounts = { ...counts, [item.key]: val };
-                                                const nonPresentSum = newCounts.absent + newCounts.sick + newCounts.detention +
-                                                    newCounts.pass + newCounts.suspension + newCounts.yetToReport;
-                                                setCounts({
-                                                    ...newCounts,
-                                                    present: effectiveTotalCadets - nonPresentSum
-                                                });
-                                            }}
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="pt-6 border-t border-slate-100">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
-                        <h4 className="font-bold text-slate-800">Nominal Roll (Non-Present Cadets)</h4>
-                        
-                        {/* COMPACT INLINE TRACKER */}
-                        <div className="flex flex-wrap items-center gap-2">
-                            {([
-                                { key: 'absent', status: CadetStatus.ABSENT, label: 'Abs', color: 'rose' },
-                                { key: 'sick', status: CadetStatus.SICK, label: 'Sick', color: 'amber' },
-                                { key: 'detention', status: CadetStatus.DETENTION, label: 'Det', color: 'indigo' },
-                                { key: 'pass', status: CadetStatus.PASS, label: 'Pass', color: 'purple' },
-                                { key: 'suspension', status: CadetStatus.SUSPENSION, label: 'Susp', color: 'slate' },
-                                { key: 'yetToReport', status: CadetStatus.YET_TO_REPORT, label: 'YTR', color: 'cyan' },
-                            ] as const).map(item => {
-                                const required = counts[item.key as keyof typeof counts] as number;
-                                if (required === 0) return null;
-                                const added = cadetDetailsList.filter(c => c.status === item.status).length;
-                                const isComplete = added === required;
-                                const isOver = added > required;
-                                
-                                return (
-                                    <div key={item.key} className={`px-2 py-1 rounded flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider border transition-all ${isOver ? 'border-rose-400 bg-rose-50 text-rose-600' : isComplete ? 'border-emerald-400 bg-emerald-50 text-emerald-600' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                        <span>{item.label}</span>
-                                        <span className={`px-1.5 py-0.5 rounded ${isOver ? 'bg-rose-200 text-rose-800' : isComplete ? 'bg-emerald-200 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>{added}/{required}</span>
-                                    </div>
-                                );
-                            })}
-                            <div className="px-2 py-1 rounded flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider border border-blue-200 bg-blue-50 text-blue-700 ml-1">
-                                <span>TOTAL</span>
-                                <span className="bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded">{cadetDetailsList.length}/{counts.absent + counts.sick + counts.detention + counts.pass + counts.suspension + counts.yetToReport}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* COMPACT SEARCH & QUICK-ADD ACTION BAR */}
-                    <div className="mb-6 bg-slate-50/50 p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
-                        <CadetSelector
-                            courseNumber={officerCourseNumber}
-                            onSelect={(cadet) => setTempCadet({ ...tempCadet, name: cadet.name, squad: cadet.squad })}
-                            onInputChange={(name) => setTempCadet(prev => ({ ...prev, name, squad: '' }))}
-                            disabledCadets={counterpartDetails || (!isMatronMode ? matronSubmission?.cadetDetails : undefined)}
-                            disabledBadgeLabel="Logged by Matron"
-                        />
-
-                        {/* COMPACT CONFIRMATION PREVIEW */}
-                        <div className={`overflow-hidden transition-all duration-300 ${tempCadet.name ? 'max-h-20 opacity-100 mt-3' : 'max-h-0 opacity-0 mt-0'}`}>
-                            <div className="flex items-center gap-3 bg-blue-50/80 p-2.5 rounded-xl border border-blue-100 shadow-[inset_0_1px_3px_rgba(0,0,0,0.02)]">
-                                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-inner shrink-0">
-                                    {tempCadet.name.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="flex-1 truncate">
-                                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest leading-none mb-0.5">Target Cadet</p>
-                                    <p className="text-sm font-bold text-slate-800 truncate">
-                                        {tempCadet.name} <span className="text-slate-500 font-medium text-xs ml-1">• {tempCadet.squad || 'Squad Unknown'}</span>
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div className={`mt-3 flex flex-wrap gap-2 transition-all duration-300 ${tempCadet.name ? 'opacity-100' : 'opacity-40 grayscale pointer-events-none'}`}>
-                            <button onClick={() => handleQuickAdd(CadetStatus.ABSENT)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-rose-600 hover:bg-rose-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-rose-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
-                                <Plus size={14} /> Absent
-                            </button>
-                            <button onClick={() => handleQuickAdd(CadetStatus.SICK)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-amber-600 hover:bg-amber-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-amber-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
-                                <Plus size={14} /> Sick
-                            </button>
-                            <button onClick={() => handleQuickAdd(CadetStatus.DETENTION)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-indigo-600 hover:bg-indigo-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-indigo-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
-                                <Plus size={14} /> Detent
-                            </button>
-                            <button onClick={() => handleQuickAdd(CadetStatus.PASS)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-purple-600 hover:bg-purple-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-purple-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
-                                <Plus size={14} /> Pass
-                            </button>
-                            <button onClick={() => handleQuickAdd(CadetStatus.SUSPENSION)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-slate-600 hover:bg-slate-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-slate-300 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
-                                <Plus size={14} /> Susp
-                            </button>
-                            <button onClick={() => handleQuickAdd(CadetStatus.YET_TO_REPORT)} className="flex-1 min-w-[70px] py-2 rounded-xl bg-white text-cyan-600 hover:bg-cyan-50 font-black text-[9px] sm:text-[10px] uppercase tracking-wider border border-cyan-200 shadow-sm transition-all active:scale-95 flex justify-center items-center gap-1">
-                                <Plus size={14} /> YTR
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* LEDGER FILTER TABS & AUDIT QUICK SEARCH */}
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4">
-                        {/* Contextual Filter Tabs */}
-                        <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 custom-scrollbar">
-                            {filterTabs.map(tab => (
-                                <button
-                                    key={tab.id}
-                                    type="button"
-                                    onClick={() => {
-                                        setLedgerFilter(tab.id);
-                                        setCurrentPage(1);
-                                    }}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                                        ledgerFilter === tab.id
-                                            ? 'bg-blue-600 text-white shadow-sm'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    }`}
-                                >
-                                    <span>{tab.label}</span>
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
-                                        ledgerFilter === tab.id ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-700'
-                                    }`}>
-                                        {tab.count}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Local Audit Quick Search */}
-                        <div className="relative shrink-0 sm:w-56">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                            <input
-                                type="text"
-                                placeholder="Search ledger..."
-                                value={ledgerSearch}
-                                onChange={(e) => {
-                                    setLedgerSearch(e.target.value);
-                                    setCurrentPage(1);
-                                }}
-                                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                        </div>
-                    </div>
-
-                    {/* SMART LEDGER LIST VIEW */}
-                    <div className="space-y-2 min-h-[220px]">
-                        {paginatedCadets.length > 0 ? (
-                            paginatedCadets.map((c, i) => (
-                                <div key={`${c.name}-${startIndex + i}`} className="group flex items-center justify-between p-3 bg-slate-50 hover:bg-white rounded-xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-                                            {c.name.charAt(0).toUpperCase()}
-                                        </div>
-                                        <span className="text-sm font-semibold text-slate-700">
-                                            {c.name} <span className="text-slate-400 mx-1">•</span> {c.squad}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${
-                                            c.status === CadetStatus.ABSENT ? 'text-rose-500 bg-rose-50' :
-                                            c.status === CadetStatus.SICK ? 'text-amber-500 bg-amber-50' :
-                                            c.status === CadetStatus.DETENTION ? 'text-indigo-500 bg-indigo-50' :
-                                            c.status === CadetStatus.PASS ? 'text-purple-500 bg-purple-50' :
-                                            c.status === CadetStatus.SUSPENSION ? 'text-slate-500 bg-slate-100' :
-                                            'text-cyan-500 bg-cyan-50'
-                                        }`}>
-                                            {c.status === CadetStatus.YET_TO_REPORT ? 'YTR' : c.status}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setCadetDetailsList(cadetDetailsList.filter(item => item !== c))}
-                                            className="text-slate-300 hover:text-rose-600 transition-colors"
-                                            title="Remove cadet"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center">
-                                <p className="text-slate-400 text-sm italic">
-                                    {cadetDetailsList.length === 0
-                                        ? "No non-present cadets added yet."
-                                        : "No cadets match your filter or search criteria."}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* SMART PAGINATION FOOTER */}
-                    {filteredCadets.length > 0 && (
-                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                            <div>
-                                Showing <span className="font-bold text-slate-700">{startIndex + 1}</span> to{' '}
-                                <span className="font-bold text-slate-700">
-                                    {Math.min(startIndex + ITEMS_PER_PAGE, filteredCadets.length)}
-                                </span>{' '}
-                                of <span className="font-bold text-slate-700">{filteredCadets.length}</span> cadets
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                    disabled={safeCurrentPage === 1}
-                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 font-semibold text-slate-700 transition-all"
-                                >
-                                    <ChevronLeft size={14} /> Previous
-                                </button>
-                                <span className="px-2 py-1 font-bold text-slate-600">
-                                    Page {safeCurrentPage} of {totalPages}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                    disabled={safeCurrentPage >= totalPages}
-                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 font-semibold text-slate-700 transition-all"
-                                >
-                                    Next <ChevronRight size={14} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <button
-                    onClick={handleSubmission}
-                    disabled={isSubmitting || (isMatronMode && (overrideTotalCadets === undefined || overrideTotalCadets < 0))}
-                    className="w-full min-h-[48px] bg-blue-700 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center space-x-2"
-                >
-                    {isSubmitting ? (
-                        <RefreshCcw className="animate-spin" />
-                    ) : (
-                        <span>
-                            {isMatronMode
-                                ? `Send Female State (${formatRC(officerCourseNumber)})`
-                                : 'Submit Official Parade State'}
-                        </span>
-                    )}
-                </button>
-            </div>
-
-            <SubmissionPreview
-                isOpen={showPreview}
-                onClose={() => setShowPreview(false)}
-                onConfirm={commitSubmission}
-                title={`Review ${formParadeType} State`}
-                type="parade"
-                data={previewData}
-            />
-        </div>
+    const exists = cadetDetailsList.some(
+      c =>
+        c.name.trim().toLowerCase() === cadet.name.trim().toLowerCase() &&
+        c.squad.trim().toLowerCase() === cadet.squad.trim().toLowerCase()
     );
+    if (exists) {
+      toast.error(`${cadet.name} is already tagged.`);
+      return;
+    }
+
+    const currentForCategory = cadetDetailsList.filter(
+      c => c.status === tagSheetCategory.cadetStatus
+    ).length;
+
+    if (currentForCategory >= categoryCount) {
+      toast.error(
+        `Already tagged ${categoryCount} of ${categoryCount} for ${tagSheetCategory.label}.`
+      );
+      return;
+    }
+
+    const newCadet: CadetDetail = {
+      name: cadet.name,
+      squad: cadet.squad,
+      status: tagSheetCategory.cadetStatus
+    };
+
+    const nextTaggedCount = currentForCategory + 1;
+    setCadetDetailsList(prev => [...prev, newCadet]);
+
+    if (nextTaggedCount >= categoryCount) {
+      setTagSheetCategory(null);
+    }
+  };
+
+  const handleRemoveTaggedCadet = (cadet: CadetDetail) => {
+    if (isLocked) return;
+    setCadetDetailsList(prev =>
+      prev.filter(
+        c =>
+          !(
+            c.name === cadet.name &&
+            c.squad === cadet.squad &&
+            c.status === cadet.status
+          )
+      )
+    );
+  };
+
+  const handleOpenReview = () => {
+    if (!currentUser) return;
+    if (isLocked) {
+      toast.error(`${formParadeType} has already been submitted for ${formDate}.`);
+      return;
+    }
+    if (isOverStrength) {
+      toast.error(`Not-present count cannot exceed ${effectiveTotalCadets} cadets.`);
+      return;
+    }
+    if (incompleteCategories.length > 0) {
+      const first = incompleteCategories[0];
+      toast.error(
+        `Tag all ${first.expected} cadet${first.expected === 1 ? '' : 's'} for ${first.cat.label} (${first.tagged}/${first.expected}).`
+      );
+      setTagSheetCategory(first.cat);
+      return;
+    }
+
+    const data = {
+      officerId: currentUser.id,
+      officerName: currentUser.fullName,
+      courseName: `REGULAR COURSE ${officerCourseNumber}`,
+      yearGroup: yearGroup || currentUser.yearGroup || 1,
+      courseNumber: officerCourseNumber,
+      date: formDate,
+      paradeType: formParadeType,
+      presentCount: Math.max(0, presentCount),
+      absentCount: exceptionCounts.absent,
+      sickCount: exceptionCounts.sick,
+      detentionCount: exceptionCounts.detention,
+      passCount: exceptionCounts.pass,
+      suspensionCount: exceptionCounts.suspension,
+      yetToReportCount: exceptionCounts.yetToReport,
+      grandTotal: effectiveTotalCadets,
+      cadets: cadetDetailsList
+    };
+
+    setPreviewData(data);
+    setShowPreview(true);
+  };
+
+  const commitSubmission = async () => {
+    if (!previewData || !currentUser || isSubmitting || isLocked) return;
+
+    // 1. Time Window Enforcement (only for Today)
+    const today = getWATDateStr();
+    if (formDate === today) {
+      const currentHour = new Date().getHours();
+      const { musterStartHour, musterEndHour, tattooStartHour } = submissionSettings;
+
+      if (
+        formParadeType === ParadeType.MUSTER &&
+        (currentHour < musterStartHour || currentHour >= musterEndHour)
+      ) {
+        toast.error(
+          `Morning Muster can only be submitted between ${String(musterStartHour).padStart(2, '0')}:00 and ${String(musterEndHour - 1).padStart(2, '0')}:59.`
+        );
+        setShowPreview(false);
+        return;
+      }
+
+      if (formParadeType === ParadeType.TATTOO && currentHour < tattooStartHour) {
+        toast.error(
+          `Night Tattoo can only be submitted from ${String(tattooStartHour).padStart(2, '0')}:00 onwards.`
+        );
+        setShowPreview(false);
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await dbService.submitGenderParadeSegment({
+        submitterId: currentUser.id,
+        submitterName: currentUser.fullName,
+        courseName: previewData.courseName || `REGULAR COURSE ${officerCourseNumber}`,
+        yearGroup: previewData.yearGroup || 1,
+        courseNumber: officerCourseNumber,
+        date: formDate,
+        paradeType: formParadeType,
+        genderSegment: effectiveSegment,
+        declaredStrength: effectiveTotalCadets,
+        presentCount: previewData.presentCount,
+        absentCount: previewData.absentCount,
+        sickCount: previewData.sickCount,
+        detentionCount: previewData.detentionCount,
+        passCount: previewData.passCount || 0,
+        suspensionCount: previewData.suspensionCount || 0,
+        yetToReportCount: previewData.yetToReportCount || 0,
+        grandTotal: previewData.grandTotal,
+        cadets: previewData.cadets || []
+      });
+
+      setShowPreview(false);
+      setPreviewData(null);
+      await refreshData();
+      await loadCounterpartState();
+
+      if (res.state === 'reconciled') {
+        toast.success(
+          isMatronMode
+            ? `${formatRC(officerCourseNumber)} combined with Course Officer & filed!`
+            : `${formatRC(officerCourseNumber)} parade submitted!`
+        );
+      } else {
+        toast.success(
+          isMatronMode
+            ? `Female state sent to ${formatRC(officerCourseNumber)} Officer.`
+            : `Male state saved — will combine once Matron submits.`
+        );
+      }
+
+      if (onSubmittedSuccess) {
+        onSubmittedSuccess({ state: res.state });
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Submission failed. Try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-4 pb-28 md:pb-6">
+      {/* Jakob's Law: Clean Header + Date Pill + iOS Segmented Parade Type */}
+      <section className="bg-white rounded-2xl border border-slate-200/80 p-4 space-y-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-slate-950 tracking-tight">
+              Submit Parade
+            </h2>
+            <p className="text-xs text-slate-500 tabular-nums">
+              {formatRC(officerCourseNumber)} · Year {yearGroup}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+            {!externalDate && isViewingPastDate && (
+              <button
+                type="button"
+                onClick={jumpToToday}
+                className="min-h-[36px] px-3 rounded-full bg-blue-50 hover:bg-blue-100 border border-blue-200/80 text-blue-700 text-xs font-bold active:scale-95 transition-all"
+              >
+                Today
+              </button>
+            )}
+            <label className="relative flex items-center gap-1.5 min-h-[36px] px-2.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer">
+              <Calendar size={13} className="text-slate-500" />
+              <input
+                type="date"
+                value={formDate}
+                onChange={e => setFormDate(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 outline-none w-[108px]"
+              />
+            </label>
+          </div>
+        </div>
+
+        {didRollover && !externalDate && !isViewingPastDate && (
+          <div className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-semibold flex items-center justify-between">
+            <span>New day · Switched to Today</span>
+            <span className="text-slate-500 tabular-nums">{formDate}</span>
+          </div>
+        )}
+
+        {/* iOS Segmented Control for Parade Type */}
+        {!isMatronMode && (
+          <div
+            role="tablist"
+            aria-label="Parade Type"
+            className="grid grid-cols-3 bg-slate-100 p-1 rounded-xl border border-slate-200/60"
+          >
+            {PARADE_OPTIONS.map(opt => {
+              const active = formParadeType === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setFormParadeType(opt.value)}
+                  className={`min-h-[40px] rounded-lg text-xs font-bold transition-all active:scale-[0.98] ${
+                    active
+                      ? 'bg-white text-slate-950 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {opt.shortLabel}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Locked State Banner */}
+      {isLocked && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-2.5">
+          <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-emerald-950 flex items-center gap-1.5">
+              <span>{formParadeType} Submitted</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200/70 text-emerald-900">
+                <Lock size={10} />
+                Locked
+              </span>
+            </p>
+            <p className="text-xs text-emerald-800">
+              {ownGenderSubmission?.status === 'pending_counterpart'
+                ? 'Saved — waiting for Matron to submit female count so both combine.'
+                : `Filed for ${formDate}. Switch parade type above if needed.`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Time Window Notice */}
+      {!isLocked && timeWindowMessage && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2.5 text-xs font-semibold text-amber-900">
+          <Clock size={16} className="text-amber-600 shrink-0" />
+          <span>{timeWindowMessage}</span>
+        </div>
+      )}
+
+      {/* Matron Sync Card (Night Tattoo only) */}
+      {!isMatronMode && isTattooSplitActive && (
+        <section
+          className={`rounded-2xl border p-4 transition-colors ${
+            matronSubmission
+              ? 'bg-emerald-50/70 border-emerald-200/80 text-emerald-950'
+              : matronStrength === 0
+                ? 'bg-slate-50 border-slate-200 text-slate-700'
+                : 'bg-amber-50/70 border-amber-200/80 text-amber-950'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              {matronSubmission ? (
+                <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+              ) : (
+                <Clock
+                  size={18}
+                  className={
+                    matronStrength === 0
+                      ? 'text-slate-400 shrink-0 mt-0.5'
+                      : 'text-amber-600 shrink-0 mt-0.5'
+                  }
+                />
+              )}
+              <div className="min-w-0">
+                <p className="text-xs font-bold tracking-tight">
+                  {matronSubmission
+                    ? `Female count received (${matronSubmission.presentCount} of ${matronSubmission.grandTotal} present)`
+                    : matronStrength === 0
+                      ? `No female cadets in ${formatRC(officerCourseNumber)}`
+                      : 'Waiting for Matron female count'}
+                </p>
+                <p className="text-[11px] opacity-85 mt-0.5 leading-relaxed">
+                  {matronSubmission
+                    ? `Your male count is ${effectiveTotalCadets} (${registryTotal} total − ${matronSubmission.grandTotal} female). Submitting will combine both.`
+                    : matronStrength === 0
+                      ? `Your submission will file ${formatRC(officerCourseNumber)} directly.`
+                      : matronStrength !== undefined
+                        ? `Your male count is ${effectiveTotalCadets} (${registryTotal} total − ${matronStrength} female). You can submit anytime.`
+                        : 'You can submit your male count anytime — both will combine automatically.'}
+                </p>
+              </div>
+            </div>
+
+            {matronSubmission && (
+              <button
+                type="button"
+                onClick={() => setShowFemaleBreakdown(v => !v)}
+                className="min-h-[36px] px-2.5 py-1 rounded-lg bg-white/80 hover:bg-white border border-emerald-200 text-[11px] font-semibold text-emerald-800 flex items-center gap-1 shrink-0 transition-colors"
+              >
+                <span>View details</span>
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform duration-150 ${showFemaleBreakdown ? 'rotate-180' : ''}`}
+                />
+              </button>
+            )}
+          </div>
+
+          {matronSubmission && showFemaleBreakdown && (
+            <div className="mt-3 pt-3 border-t border-emerald-200/70 space-y-2">
+              <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold tabular-nums">
+                <span className="px-2 py-0.5 rounded-md bg-white border border-emerald-200/70">
+                  Present: {matronSubmission.presentCount}
+                </span>
+                {matronSubmission.absentCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-rose-200 text-rose-700">
+                    Absent: {matronSubmission.absentCount}
+                  </span>
+                )}
+                {matronSubmission.sickCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-700">
+                    Sick: {matronSubmission.sickCount}
+                  </span>
+                )}
+                {matronSubmission.passCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-purple-200 text-purple-700">
+                    Pass: {matronSubmission.passCount}
+                  </span>
+                )}
+                {matronSubmission.detentionCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-indigo-700">
+                    Detention: {matronSubmission.detentionCount}
+                  </span>
+                )}
+                {matronSubmission.suspensionCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">
+                    Suspension: {matronSubmission.suspensionCount}
+                  </span>
+                )}
+                {matronSubmission.yetToReportCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-cyan-200 text-cyan-700">
+                    Yet to Report: {matronSubmission.yetToReportCount}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Live Present Summary Banner */}
+      <section
+        className={`rounded-2xl border p-4 flex items-center justify-between gap-3 ${
+          isOverStrength ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200/80'
+        }`}
+      >
+        <div>
+          <div className="text-xs font-semibold text-slate-500">Present on Parade</div>
+          <div className="text-xs text-slate-600 mt-0.5 tabular-nums">
+            {isOverStrength
+              ? `Not-present (${exceptionsTotal}) exceeds strength (${effectiveTotalCadets})`
+              : exceptionsTotal === 0
+                ? `All ${effectiveTotalCadets} cadets accounted for`
+                : `${exceptionsTotal} cadet${exceptionsTotal === 1 ? '' : 's'} not on parade (of ${effectiveTotalCadets})`}
+          </div>
+        </div>
+
+        <div
+          className={`text-3xl font-bold tabular-nums tracking-tight ${
+            isOverStrength ? 'text-rose-600' : 'text-slate-950'
+          }`}
+        >
+          {presentCount}
+        </div>
+      </section>
+
+      {/* Apple iOS Grouped List: 6 Not-On-Parade Steppers */}
+      <section className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-200/70 overflow-hidden">
+        {EXCEPTION_CATEGORIES.map(cat => {
+          const val = exceptionCounts[cat.key];
+          const catCadets = cadetDetailsList.filter(c => c.status === cat.cadetStatus);
+
+          return (
+            <div key={cat.key} className="p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-950">{cat.label}</div>
+                  {val > 0 ? (
+                    <button
+                      type="button"
+                      disabled={isLocked}
+                      onClick={() => setTagSheetCategory(cat)}
+                      className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:text-slate-400 disabled:cursor-not-allowed min-h-[28px]"
+                    >
+                      <UserPlus size={12} />
+                      <span>
+                        {catCadets.length > 0
+                          ? `Tagged (${catCadets.length}/${val})`
+                          : `Tag cadet (0/${val})`}
+                      </span>
+                    </button>
+                  ) : (
+                    <span className="mt-1 inline-block text-[11px] text-slate-400">
+                      Increase count to tag a cadet
+                    </span>
+                  )}
+                </div>
+
+                {/* Tactile 44x44px iOS Stepper */}
+                <div
+                  className={`flex items-center bg-slate-100 rounded-xl p-0.5 border border-slate-200/60 shrink-0 ${
+                    isLocked ? 'opacity-60' : ''
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => adjustCount(cat.key, -1)}
+                    disabled={isLocked || val <= 0}
+                    aria-label={`Decrease ${cat.label}`}
+                    className="w-11 h-11 rounded-lg flex items-center justify-center text-slate-700 hover:bg-white disabled:opacity-30 active:scale-95 transition-all"
+                  >
+                    <Minus size={16} />
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    disabled={isLocked}
+                    value={val === 0 ? '' : val}
+                    placeholder="0"
+                    onChange={e => setDirectCount(cat.key, e.target.value)}
+                    aria-label={`${cat.label} count`}
+                    className="w-12 h-11 bg-transparent text-center text-base font-bold text-slate-950 tabular-nums outline-none disabled:cursor-not-allowed"
+                  />
+                  <button
+                    type="button"
+                    disabled={isLocked}
+                    onClick={() => adjustCount(cat.key, 1)}
+                    aria-label={`Increase ${cat.label}`}
+                    className="w-11 h-11 rounded-lg flex items-center justify-center text-slate-700 hover:bg-white disabled:opacity-30 active:scale-95 transition-all"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Tagged Cadet Chips */}
+              {catCadets.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {catCadets.map((c, idx) => (
+                    <span
+                      key={`${c.name}-${idx}`}
+                      className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-slate-100 border border-slate-200/80 text-xs font-medium text-slate-800"
+                    >
+                      <span className="truncate max-w-[160px]">{c.name}</span>
+                      {!isLocked && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTaggedCadet(c)}
+                          aria-label={`Remove ${c.name}`}
+                          className="w-5 h-5 rounded-full hover:bg-slate-200 flex items-center justify-center text-slate-500"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
+
+      {isOverStrength && (
+        <div className="flex items-center gap-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          <AlertTriangle size={15} className="shrink-0" />
+          <span>
+            Reduce not-present counts so they do not exceed {effectiveTotalCadets} cadets.
+          </span>
+        </div>
+      )}
+
+      {!isLocked && !isOverStrength && incompleteCategories.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-amber-950">
+              Tag {missingTagTotal} more cadet{missingTagTotal === 1 ? '' : 's'} to submit
+            </p>
+            <p className="text-[11px] text-amber-800 mt-0.5 tabular-nums">
+              {incompleteCategories
+                .map(i => `${i.cat.label}: ${i.tagged}/${i.expected}`)
+                .join(' · ')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTagSheetCategory(incompleteCategories[0].cat)}
+            className="min-h-[38px] px-3 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold shrink-0 transition-all"
+          >
+            Tag {incompleteCategories[0].cat.label}
+          </button>
+        </div>
+      )}
+
+      {/* Desktop Inline Submit */}
+      <div className="hidden md:block pt-1">
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={handleOpenReview}
+          className="w-full min-h-[48px] rounded-2xl bg-slate-950 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-bold transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+        >
+          {isLocked ? (
+            <>
+              <Lock size={15} />
+              <span>{formParadeType} Submitted &amp; Locked</span>
+            </>
+          ) : isSubmitting ? (
+            'Submitting...'
+          ) : (
+            `Review ${formParadeType} (${Math.max(0, presentCount)} Present)`
+          )}
+        </button>
+      </div>
+
+      {/* Mobile Sticky Action Bar (Apple Pay / WhatsApp pattern) */}
+      <div className="md:hidden fixed inset-x-0 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-4 py-2.5">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-slate-950 tabular-nums truncate">
+              {formatRC(officerCourseNumber)} {formParadeType}
+            </div>
+            <div className="text-[11px] text-slate-500 tabular-nums">
+              {isLocked
+                ? 'Submitted & Locked'
+                : incompleteCategories.length > 0
+                  ? `Tag ${missingTagTotal} more cadet${missingTagTotal === 1 ? '' : 's'} to submit`
+                  : `${Math.max(0, presentCount)} Present · ${exceptionsTotal} Not on parade`}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={handleOpenReview}
+            className="min-h-[44px] px-5 rounded-xl bg-slate-950 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500 text-white text-xs font-bold transition-all active:scale-95 shrink-0 inline-flex items-center gap-1.5"
+          >
+            {isLocked ? (
+              <>
+                <Lock size={13} />
+                <span>Locked</span>
+              </>
+            ) : isSubmitting ? (
+              'Saving...'
+            ) : (
+              'Review & Submit'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Bottom-Sheet Cadet Tagging Modal */}
+      {tagSheetCategory && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-[2px] flex items-end md:items-center justify-center"
+          onClick={() => setTagSheetCategory(null)}
+        >
+          <div
+            className="w-full md:max-w-lg bg-white rounded-t-3xl md:rounded-2xl h-[78dvh] md:h-[600px] flex flex-col overflow-hidden shadow-xl pb-[env(safe-area-inset-bottom)]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-2.5 pb-1 md:hidden shrink-0">
+              <div className="w-10 h-1 rounded-full bg-slate-300" />
+            </div>
+            <div className="px-4 py-3 border-b border-slate-200/80 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-sm font-bold text-slate-950">
+                  Tag Cadet · {tagSheetCategory.label}
+                </h3>
+                <p className="text-xs text-slate-500 tabular-nums">
+                  {formatRC(officerCourseNumber)} Registry · Tagged{' '}
+                  {cadetDetailsList.filter(c => c.status === tagSheetCategory.cadetStatus).length}{' '}
+                  of {exceptionCounts[tagSheetCategory.key]}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTagSheetCategory(null)}
+                className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 min-h-0 flex flex-col">
+              <CadetSelector
+                inlineList
+                courseNumber={officerCourseNumber}
+                disabledCadets={disabledForTagging}
+                disabledBadgeLabel={
+                  matronTaggedCadets.length > 0 ? 'Tagged / Matron' : 'Tagged'
+                }
+                onSelect={handleTagCadet}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <SubmissionPreview
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        onConfirm={commitSubmission}
+        title={`Review ${formParadeType}`}
+        type="parade"
+        data={previewData}
+      />
+    </div>
+  );
 };

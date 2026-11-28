@@ -3,21 +3,15 @@ import { CheckCircle2, Clock, ChevronDown, ChevronUp, RefreshCw, History, Users 
 import { dbService } from '../../../services/dbService';
 import { ParadeGenderSubmission } from '../../../types';
 import { formatRC } from '../../../utils/rcHelpers';
+import { getWATDateStr } from '../../../utils/dateRollover';
 
 interface MatronSubmissionHistoryProps {
   activeCourses: number[];
 }
 
-const getWATDateStr = (offsetDays = 0) => {
-  const now = new Date();
-  const watOffsetMs = 60 * 60 * 1000;
-  const target = new Date(now.getTime() + watOffsetMs + offsetDays * 86400000);
-  return target.toISOString().split('T')[0];
-};
-
 const formatDateGroupLabel = (dateStr: string): string => {
-  const today = getWATDateStr(0);
-  const yesterday = getWATDateStr(-1);
+  const today = getWATDateStr(new Date(), 0);
+  const yesterday = getWATDateStr(new Date(), -1);
   if (dateStr === today) return 'Today';
   if (dateStr === yesterday) return 'Yesterday';
 

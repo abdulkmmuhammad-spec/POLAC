@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -24,6 +24,8 @@ import { useParade } from '../../../context/ParadeContext';
 import { dbService } from '../../../services/dbService';
 import { ParadeType, ParadeGenderSubmission, CadetDetail, CadetStatus } from '../../../types';
 import { formatRC, calculateCurrentLevel } from '../../../utils/rcHelpers';
+import { useWATDateRollover } from '../../../hooks/useWATDateRollover';
+import { createStaleFetchGuard } from '../../../utils/dateRollover';
 import { toast } from 'react-hot-toast';
 
 type ExceptionKey =
@@ -58,12 +60,6 @@ const EMPTY_COUNTS: Record<ExceptionKey, number> = {
   absent: 0
 };
 
-const getWATDateStr = () => {
-  const now = new Date();
-  const watOffsetMs = 60 * 60 * 1000;
-  return new Date(now.getTime() + watOffsetMs).toISOString().split('T')[0];
-};
-
 export const MatronDashboard: React.FC = () => {
   const { currentUser } = useAuth();
   const { activeRC } = useParade();
@@ -80,7 +76,6 @@ export const MatronDashboard: React.FC = () => {
   }, [activeRC]);
 
   const [selectedRC, setSelectedRC] = useState<number>(activeCourses[0] || activeRC);
-  const [selectedDate, setSelectedDate] = useState<string>(getWATDateStr());
   const selectedParadeType = ParadeType.TATTOO;
 
   const [strengthsMap, setStrengthsMap] = useState<Record<number, number>>({});
@@ -98,6 +93,27 @@ export const MatronDashboard: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastCompletedRC, setLastCompletedRC] = useState<number | null>(null);
 
+  const fetchGuardRef = useRef(createStaleFetchGuard());
+
+  const {
+    selectedDate,
+    setSelectedDate,
+    isViewingPastDate,
+    jumpToToday,
+    didRollover
+  } = useWATDateRollover({
+    onRollover: () => {
+      setLastCompletedRC(null);
+      setShowPreview(false);
+      setPreviewData(null);
+      setTagSheetCategory(null);
+      setCounts(EMPTY_COUNTS);
+      setTaggedCadets([]);
+      setSubmissions([]);
+      toast('New day — reset for Today');
+    }
+  });
+
   useEffect(() => {
     if (activeCourses.length > 0 && !activeCourses.includes(selectedRC)) {
       setSelectedRC(activeCourses[0]);
@@ -105,14 +121,19 @@ export const MatronDashboard: React.FC = () => {
   }, [activeCourses, selectedRC]);
 
   const loadMatronData = useCallback(async () => {
+    const requestId = fetchGuardRef.current.nextRequestId();
+    const targetDate = selectedDate;
     try {
       const [strengths, subs] = await Promise.all([
         dbService.getMatronCourseStrengths(),
         dbService.getParadeGenderSubmissions({
-          date: selectedDate,
+          date: targetDate,
           paradeType: selectedParadeType
         })
       ]);
+
+      // Stale-fetch protection: discard late responses from an older date
+      if (!fetchGuardRef.current.isLatest(requestId)) return;
 
       const numericMap: Record<number, number> = {};
       Object.values(strengths).forEach(s => {
@@ -132,13 +153,16 @@ export const MatronDashboard: React.FC = () => {
     return () => window.removeEventListener('parade-gender-submissions-updated', onUpdated);
   }, [loadMatronData]);
 
-  // Hydrate strength + existing female submission whenever course/date changes
+  // Hydrate strength + existing female submission strictly scoped to selectedDate
   const existingFemaleSub = useMemo(
     () =>
       submissions.find(
-        s => s.courseNumber === selectedRC && s.genderSegment === 'female'
+        s =>
+          s.courseNumber === selectedRC &&
+          s.genderSegment === 'female' &&
+          s.paradeDate === selectedDate
       ),
-    [submissions, selectedRC]
+    [submissions, selectedRC, selectedDate]
   );
 
   useEffect(() => {
@@ -234,8 +258,27 @@ export const MatronDashboard: React.FC = () => {
   const isOverStrength =
     parsedStrength !== undefined && exceptionsTotal > parsedStrength;
 
+  const incompleteCategories = useMemo(
+    () =>
+      EXCEPTION_CATEGORIES.map(cat => {
+        const expected = counts[cat.key];
+        const tagged = taggedCadets.filter(c => c.status === cat.cadetStatus).length;
+        return { cat, expected, tagged, remaining: expected - tagged };
+      }).filter(item => item.expected > 0 && item.tagged !== item.expected),
+    [counts, taggedCadets]
+  );
+
+  const missingTagTotal = incompleteCategories.reduce(
+    (sum, item) => sum + Math.max(0, item.remaining),
+    0
+  );
+
   const canSubmit =
-    parsedStrength !== undefined && !isOverStrength && !isSubmitting && !isLocked;
+    parsedStrength !== undefined &&
+    !isOverStrength &&
+    incompleteCategories.length === 0 &&
+    !isSubmitting &&
+    !isLocked;
 
   const nextUnsubmittedRC = useMemo(() => {
     const currentIdx = activeCourses.indexOf(selectedRC);
@@ -313,7 +356,6 @@ export const MatronDashboard: React.FC = () => {
 
     const nextTaggedCount = currentForCategory + 1;
     setTaggedCadets(prev => [...prev, newCadet]);
-    toast.success(`Tagged ${cadet.name} (${tagSheetCategory.label})`);
 
     if (nextTaggedCount >= categoryCount) {
       setTagSheetCategory(null);
@@ -336,6 +378,14 @@ export const MatronDashboard: React.FC = () => {
   const handleOpenReview = () => {
     if (isLocked) {
       toast.error(`${formatRC(selectedRC)} Tattoo has already been submitted for ${selectedDate}.`);
+      return;
+    }
+    if (incompleteCategories.length > 0) {
+      const first = incompleteCategories[0];
+      toast.error(
+        `Tag all ${first.expected} female cadet${first.expected === 1 ? '' : 's'} for ${first.cat.label} (${first.tagged}/${first.expected}).`
+      );
+      setTagSheetCategory(first.cat);
       return;
     }
     if (!currentUser || parsedStrength === undefined || isOverStrength) return;
@@ -436,7 +486,19 @@ export const MatronDashboard: React.FC = () => {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                      {isViewingPastDate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            jumpToToday();
+                            setLastCompletedRC(null);
+                          }}
+                          className="min-h-[36px] px-3 rounded-full bg-blue-50 hover:bg-blue-100 border border-blue-200/80 text-blue-700 text-xs font-bold active:scale-95 transition-all"
+                        >
+                          Today
+                        </button>
+                      )}
                       <label className="relative flex items-center gap-1.5 min-h-[36px] px-2.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer">
                         <Calendar size={13} className="text-slate-500" />
                         <input
@@ -454,6 +516,13 @@ export const MatronDashboard: React.FC = () => {
                       </span>
                     </div>
                   </div>
+
+                  {didRollover && !isViewingPastDate && (
+                    <div className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-semibold flex items-center justify-between">
+                      <span>New day · Switched to Today</span>
+                      <span className="text-slate-500 tabular-nums">{selectedDate}</span>
+                    </div>
+                  )}
 
                   {/* Stories-style horizontal course rings */}
                   <div
@@ -743,31 +812,53 @@ export const MatronDashboard: React.FC = () => {
                   </div>
                 )}
 
-                {/* Desktop inline submit (mobile uses sticky bottom bar below) */}
-                <div className="hidden md:block pt-1">
-                  <button
-                    type="button"
-                    disabled={!canSubmit}
-                    onClick={handleOpenReview}
-                    className="w-full min-h-[48px] rounded-2xl bg-slate-950 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-bold transition-all active:scale-[0.99] flex items-center justify-center gap-2"
-                  >
-                    {isLocked ? (
-                      <>
-                        <Lock size={15} />
-                        <span>{formatRC(selectedRC)} Tattoo Submitted &amp; Locked</span>
-                      </>
-                    ) : isSubmitting ? (
-                      'Submitting...'
-                    ) : parsedStrength === 0 ? (
-                      `Review & Confirm 0 Female Cadets (${formatRC(selectedRC)})`
-                    ) : (
-                      `Review ${formatRC(selectedRC)} Tattoo (${Math.max(0, presentCount)} Present)`
-                    )}
-                  </button>
-                </div>
+                {!isLocked && !isOverStrength && incompleteCategories.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-amber-950">
+                        Tag {missingTagTotal} more female cadet{missingTagTotal === 1 ? '' : 's'} to submit
+                      </p>
+                      <p className="text-[11px] text-amber-800 mt-0.5 tabular-nums">
+                        {incompleteCategories
+                          .map(i => `${i.cat.label}: ${i.tagged}/${i.expected}`)
+                          .join(' · ')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTagSheetCategory(incompleteCategories[0].cat)}
+                      className="min-h-[38px] px-3 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold shrink-0 transition-all"
+                    >
+                      Tag {incompleteCategories[0].cat.label}
+                    </button>
+                  </div>
+                )}
+
+                    {/* Desktop inline submit (mobile uses sticky bottom bar below) */}
+                    <div className="hidden md:block pt-1">
+                      <button
+                        type="button"
+                        disabled={!canSubmit}
+                        onClick={handleOpenReview}
+                        className="w-full min-h-[48px] rounded-2xl bg-slate-950 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-bold transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+                      >
+                        {isLocked ? (
+                          <>
+                            <Lock size={15} />
+                            <span>{formatRC(selectedRC)} Tattoo Submitted &amp; Locked</span>
+                          </>
+                        ) : isSubmitting ? (
+                          'Submitting...'
+                        ) : parsedStrength === 0 ? (
+                          `Review & Confirm 0 Female Cadets (${formatRC(selectedRC)})`
+                        ) : (
+                          `Review ${formatRC(selectedRC)} Tattoo (${Math.max(0, presentCount)} Present)`
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
         </main>
 
         {/* Mobile Sticky Action Bar (Apple Pay / WhatsApp pattern) */}
@@ -782,8 +873,10 @@ export const MatronDashboard: React.FC = () => {
                   {isLocked
                     ? 'Submitted & Locked'
                     : parsedStrength === undefined
-                    ? 'Set female strength'
-                    : `${Math.max(0, presentCount)} Present · ${exceptionsTotal} Exc.`}
+                      ? 'Set female strength'
+                      : incompleteCategories.length > 0
+                        ? `Tag ${missingTagTotal} more cadet${missingTagTotal === 1 ? '' : 's'} to submit`
+                        : `${Math.max(0, presentCount)} Present · ${exceptionsTotal} Exc.`}
                 </div>
               </div>
               <button
