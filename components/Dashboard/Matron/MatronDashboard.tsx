@@ -98,6 +98,7 @@ export const MatronDashboard: React.FC = () => {
   const {
     selectedDate,
     setSelectedDate,
+    watTimeLabel,
     isViewingPastDate,
     jumpToToday,
     didRollover
@@ -481,8 +482,8 @@ export const MatronDashboard: React.FC = () => {
                       <h2 className="text-base font-bold text-slate-950 tracking-tight">
                         Night Tattoo
                       </h2>
-                      <p className="text-xs text-slate-500">
-                        Tap a course ring to log female attendance
+                      <p className="text-xs text-slate-500 tabular-nums">
+                        Tap a course ring · {watTimeLabel} WAT
                       </p>
                     </div>
 

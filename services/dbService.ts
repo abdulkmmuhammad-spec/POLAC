@@ -4166,6 +4166,25 @@ export const dbService = {
       waitingFor: data?.waitingFor,
       paradeId: data?.parade_id
     };
+  },
+
+  getNigeriaServerClock: async (): Promise<{
+    watDate: string;
+    watTime: string;
+    utcNowMs: number;
+  } | null> => {
+    try {
+      const { data, error } = await supabase.rpc('get_nigeria_server_date');
+      if (error || !data?.wat_date) return null;
+      const utcNowMs = data.utc_now ? Date.parse(String(data.utc_now)) : Date.now();
+      return {
+        watDate: String(data.wat_date),
+        watTime: String(data.wat_time || ''),
+        utcNowMs: Number.isFinite(utcNowMs) ? utcNowMs : Date.now()
+      };
+    } catch {
+      return null;
+    }
   }
 };
 

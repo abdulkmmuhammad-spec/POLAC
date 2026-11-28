@@ -13,20 +13,52 @@ const WAT_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   hour12: false
 });
 
+const WAT_TIME_SHORT_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Africa/Lagos',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false
+});
+
+let serverClockOffsetMs = 0;
+
 /**
- * Returns YYYY-MM-DD in West Africa Time (Africa/Lagos) using en-CA formatting.
+ * Stores the offset (serverUtcMs - clientNowMs) so getWATDateStr() and
+ * getWATTimeStr() stay aligned with the Supabase PostgreSQL clock.
  */
-export function getWATDateStr(date: Date = new Date(), offsetDays = 0): string {
+export function setServerClockOffsetMs(offsetMs: number): void {
+  if (Number.isFinite(offsetMs)) {
+    serverClockOffsetMs = offsetMs;
+  }
+}
+
+export function getNigeriaNow(): Date {
+  return new Date(Date.now() + serverClockOffsetMs);
+}
+
+/**
+ * Returns YYYY-MM-DD in West Africa Time (Africa/Lagos) using en-CA formatting,
+ * aligned with the database server clock when synced.
+ */
+export function getWATDateStr(date?: Date, offsetDays = 0): string {
+  const base = date ?? getNigeriaNow();
   const target =
-    offsetDays === 0 ? date : new Date(date.getTime() + offsetDays * 86400000);
+    offsetDays === 0 ? base : new Date(base.getTime() + offsetDays * 86400000);
   return WAT_FORMATTER.format(target);
+}
+
+/**
+ * Returns HH:MM in West Africa Time (Africa/Lagos), aligned with server clock.
+ */
+export function getWATTimeStr(date?: Date): string {
+  return WAT_TIME_SHORT_FORMATTER.format(date ?? getNigeriaNow());
 }
 
 /**
  * Computes milliseconds until 00:00:05 WAT the next calendar day.
  */
-export function getMsUntilNextWATMidnight(now: Date = new Date()): number {
-  const parts = WAT_TIME_FORMATTER.formatToParts(now);
+export function getMsUntilNextWATMidnight(now?: Date): number {
+  const parts = WAT_TIME_FORMATTER.formatToParts(now ?? getNigeriaNow());
   const hour = Number(parts.find(p => p.type === 'hour')?.value ?? '0');
   const minute = Number(parts.find(p => p.type === 'minute')?.value ?? '0');
   const second = Number(parts.find(p => p.type === 'second')?.value ?? '0');

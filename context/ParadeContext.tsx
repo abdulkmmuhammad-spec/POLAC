@@ -747,6 +747,110 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     refreshRemarks();
                 }
             )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'command_reports' },
+                (payload) => {
+                    window.dispatchEvent(new Event('command-reports-updated'));
+                    if (currentUser.role !== UserRole.COMMANDANT) return;
+
+                    const raw = (payload.new || {}) as any;
+                    const msgs = Array.isArray(raw.messages) ? raw.messages : [];
+                    const latestMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+                    const senderId =
+                        payload.eventType === 'INSERT'
+                            ? raw.sender_id
+                            : latestMsg?.senderId ?? raw.sender_id;
+
+                    if (senderId && String(senderId) === String(currentUser.id)) {
+                        return;
+                    }
+
+                    const senderLabel =
+                        latestMsg?.senderName || raw.sender_name || 'Senior Command';
+                    const messageBody =
+                        latestMsg?.text ||
+                        raw.executive_note ||
+                        'New executive brief or message received.';
+
+                    audioService.play('intel');
+
+                    if (
+                        typeof window !== 'undefined' &&
+                        'Notification' in window &&
+                        window.Notification.permission === 'granted' &&
+                        localStorage.getItem('polac_local_push_enabled') !== 'false'
+                    ) {
+                        const title = `Message from ${senderLabel}`;
+                        if ('serviceWorker' in navigator) {
+                            navigator.serviceWorker.ready
+                                .then(reg => {
+                                    reg.showNotification(title, {
+                                        body: messageBody,
+                                        icon: '/logo.png',
+                                        badge: '/logo.png',
+                                        tag: `polac-brief-${raw.id}-${msgs.length}`,
+                                        renotify: true,
+                                        data: { url: '/commandant/remarks' }
+                                    } as any);
+                                })
+                                .catch(() => {
+                                    try {
+                                        new window.Notification(title, {
+                                            body: messageBody,
+                                            icon: '/logo.png'
+                                        });
+                                    } catch {}
+                                });
+                        } else {
+                            try {
+                                new window.Notification(title, {
+                                    body: messageBody,
+                                    icon: '/logo.png'
+                                });
+                            } catch {}
+                        }
+                    }
+
+                    toast.custom(
+                        t => (
+                            <motion.div
+                                initial={{ opacity: 0, y: -16, scale: 0.94 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.94 }}
+                                className="w-[92vw] max-w-md flex items-center gap-3.5 px-4 py-3.5 rounded-2xl border shadow-2xl backdrop-blur-xl cursor-pointer bg-slate-950/95 border-blue-500/50 text-white"
+                                onClick={() => {
+                                    toast.dismiss(t.id);
+                                }}
+                            >
+                                <div className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center bg-blue-500/20 border border-blue-400/30">
+                                    <Bell size={18} className="text-blue-300" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[11px] font-bold text-blue-300 truncate">
+                                        {senderLabel}
+                                    </p>
+                                    <p className="text-xs font-medium text-white/95 line-clamp-2 mt-0.5">
+                                        {messageBody}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={e => {
+                                        e.stopPropagation();
+                                        toast.dismiss(t.id);
+                                    }}
+                                    className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 shrink-0"
+                                    aria-label="Dismiss"
+                                >
+                                    <X size={15} />
+                                </button>
+                            </motion.div>
+                        ),
+                        { duration: 7000, position: 'top-center' }
+                    );
+                }
+            )
             .subscribe();
 
         return () => {

@@ -106,7 +106,9 @@ const AppContent: React.FC = () => {
       <Toaster
         position="top-center"
         containerStyle={{
-          top: 10,
+          top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+          left: 12,
+          right: 12,
           position: 'fixed',
           zIndex: 99999,
         }}

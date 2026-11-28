@@ -23,7 +23,7 @@ import {
 import { dbService } from '../../services/dbService';
 import { CadetSelector } from '../CadetRegistry/CadetSelector';
 import { formatRC } from '../../utils/rcHelpers';
-import { useWATDateRollover, getWATDateStr } from '../../hooks/useWATDateRollover';
+import { useWATDateRollover, getWATDateStr, getWATTimeStr } from '../../hooks/useWATDateRollover';
 import { createStaleFetchGuard } from '../../utils/dateRollover';
 import { toast } from 'react-hot-toast';
 import { SubmissionPreview } from '../Common/SubmissionPreview';
@@ -111,6 +111,7 @@ export const ParadeForm: React.FC<ParadeFormProps> = ({
     selectedDate: internalDate,
     setSelectedDate: setInternalDate,
     todayWAT,
+    watTimeLabel,
     isViewingPastDate,
     jumpToToday,
     didRollover
@@ -278,10 +279,10 @@ export const ParadeForm: React.FC<ParadeFormProps> = ({
   const presentCount = Math.max(0, effectiveTotalCadets) - exceptionsTotal;
   const isOverStrength = exceptionsTotal > effectiveTotalCadets;
 
-  // Time window check for Today
+  // Time window check for Today (aligned with Nigeria Time WAT)
   const timeWindowMessage = useMemo(() => {
     if (formDate !== todayWAT) return null;
-    const currentHour = new Date().getHours();
+    const currentHour = Number((watTimeLabel || getWATTimeStr()).split(':')[0]);
     const { musterStartHour, musterEndHour, tattooStartHour } = submissionSettings;
 
     if (
@@ -466,10 +467,10 @@ export const ParadeForm: React.FC<ParadeFormProps> = ({
   const commitSubmission = async () => {
     if (!previewData || !currentUser || isSubmitting || isLocked) return;
 
-    // 1. Time Window Enforcement (only for Today)
+    // 1. Time Window Enforcement (only for Today, Nigeria Time WAT)
     const today = getWATDateStr();
     if (formDate === today) {
-      const currentHour = new Date().getHours();
+      const currentHour = Number(getWATTimeStr().split(':')[0]);
       const { musterStartHour, musterEndHour, tattooStartHour } = submissionSettings;
 
       if (
@@ -554,7 +555,7 @@ export const ParadeForm: React.FC<ParadeFormProps> = ({
               Submit Parade
             </h2>
             <p className="text-xs text-slate-500 tabular-nums">
-              {formatRC(officerCourseNumber)} · Year {yearGroup}
+              {formatRC(officerCourseNumber)} · Year {yearGroup} · {watTimeLabel} WAT
             </p>
           </div>
 
