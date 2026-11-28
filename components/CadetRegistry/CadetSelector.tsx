@@ -9,6 +9,8 @@ interface CadetSelectorProps {
     onInputChange?: (name: string) => void;
     disabledCadets?: Array<{ name: string; squad: string }>;
     disabledBadgeLabel?: string;
+    /** Renders the cadet list inline instead of an absolute floating dropdown (ideal for mobile bottom sheets). */
+    inlineList?: boolean;
 }
 
 export const CadetSelector: React.FC<CadetSelectorProps> = ({
@@ -16,7 +18,8 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({
     onSelect,
     onInputChange,
     disabledCadets = [],
-    disabledBadgeLabel = 'Already Logged'
+    disabledBadgeLabel = 'Already Logged',
+    inlineList = false
 }) => {
     const [registry, setRegistry] = useState<any[]>([]);
     const [allCadets, setAllCadets] = useState<any[]>([]);
@@ -81,13 +84,15 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({
         return s;
     }, [disabledCadets]);
 
+    const showDropdown = inlineList || (isOpen && (searchTerm.length > 0 || hasRegistryData));
+
     return (
-        <div className="relative">
-            <div className="relative">
+        <div className={inlineList ? 'flex flex-col h-full min-h-0' : 'relative'}>
+            <div className="relative shrink-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                 <input
                     placeholder="Search registry or type new name..."
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 text-base outline-none focus:ring-2 focus:ring-blue-500"
                     value={searchTerm}
                     onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -98,8 +103,14 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({
                 />
             </div>
 
-            {isOpen && (searchTerm.length > 0 || hasRegistryData) && (
-                <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-64 overflow-y-auto">
+            {showDropdown && (
+                <div
+                    className={
+                        inlineList
+                            ? 'mt-3 flex-1 min-h-0 overflow-y-auto bg-white border border-slate-200/80 rounded-2xl divide-y divide-slate-100'
+                            : 'absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-64 overflow-y-auto'
+                    }
+                >
                     {displayCadets.length > 0 ? (
                         displayCadets.map((cadet) => {
                             const key = `${String(cadet.name || '').trim().toLowerCase()}::${String(cadet.squad || '').trim().toLowerCase()}`;
@@ -109,28 +120,28 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({
                                     key={cadet.id}
                                     type="button"
                                     disabled={isDisabled}
-                                    className={`w-full text-left px-6 py-3 transition-colors border-b last:border-0 border-slate-100 flex items-center justify-between ${
+                                    className={`w-full text-left px-4 sm:px-6 py-3 min-h-[48px] transition-colors border-b last:border-0 border-slate-100 flex items-center justify-between gap-2 ${
                                         isDisabled
                                             ? 'bg-slate-50/80 opacity-60 cursor-not-allowed'
-                                            : 'hover:bg-blue-50'
+                                            : 'hover:bg-blue-50 active:bg-blue-100/60'
                                     }`}
                                     onClick={() => {
                                         if (isDisabled) return;
                                         onSelect({ name: cadet.name, squad: cadet.squad });
                                         setSearchTerm('');
-                                        setIsOpen(false);
+                                        if (!inlineList) setIsOpen(false);
                                     }}
                                 >
-                                    <div>
-                                        <p className="font-bold text-slate-800">{cadet.name}</p>
-                                        <p className="text-xs text-slate-500">{cadet.squad} {cadet.course_number && <span className="text-blue-400">• RC {cadet.course_number}</span>}</p>
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-sm text-slate-800 truncate">{cadet.name}</p>
+                                        <p className="text-xs text-slate-500 truncate">{cadet.squad} {cadet.course_number && <span className="text-blue-500">• RC {cadet.course_number}</span>}</p>
                                     </div>
                                     {isDisabled ? (
                                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700 border border-violet-200 shrink-0">
                                             {disabledBadgeLabel}
                                         </span>
                                     ) : (
-                                        <UserPlus size={16} className="text-blue-500" />
+                                        <UserPlus size={16} className="text-blue-500 shrink-0" />
                                     )}
                                 </button>
                             );
@@ -159,7 +170,7 @@ export const CadetSelector: React.FC<CadetSelectorProps> = ({
                 </div>
             )}
 
-            {isOpen && (
+            {!inlineList && isOpen && (
                 <div
                     className="fixed inset-0 z-40"
                     onClick={() => setIsOpen(false)}

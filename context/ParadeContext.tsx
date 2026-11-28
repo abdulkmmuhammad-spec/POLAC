@@ -200,7 +200,10 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                pass_count, suspension_count, yet_to_report_count, grand_total, created_at`;
 
             let queryBuilder;
-            const isGlobalViewer = currentUser.role === UserRole.COMMANDANT || currentUser.role === UserRole.ADMIN;
+            const isGlobalViewer =
+                currentUser.role === UserRole.COMMANDANT ||
+                currentUser.role === UserRole.ADMIN ||
+                currentUser.role === UserRole.MATRON;
 
             if (isGlobalViewer) {
                 queryBuilder = supabase
@@ -210,6 +213,10 @@ export const ParadeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     .order('created_at', { ascending: false })
                     .limit(200);
             } else {
+                if (currentUser.courseNumber == null) {
+                    setTodayRecords([]);
+                    return;
+                }
                 queryBuilder = supabase
                     .from('parade_records')
                     .select(selectFields)

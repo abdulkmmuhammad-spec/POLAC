@@ -4031,6 +4031,52 @@ export const dbService = {
     }
   },
 
+  getMatronSubmissionHistory: async (limit = 200): Promise<ParadeGenderSubmission[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('parade_gender_submissions')
+        .select('*')
+        .eq('gender_segment', 'female')
+        .order('parade_date', { ascending: false })
+        .order('course_number', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.warn('getMatronSubmissionHistory warning:', error.message);
+        return [];
+      }
+
+      return (data || []).map((row: any) => ({
+        id: String(row.id),
+        paradeDate: String(row.parade_date),
+        paradeType: row.parade_type as ParadeType,
+        courseNumber: Number(row.course_number),
+        courseName: String(row.course_name || ''),
+        yearGroup: Number(row.year_group || 1),
+        genderSegment: row.gender_segment as 'female' | 'male',
+        submittedBy: row.submitted_by,
+        submittedByName: String(row.submitted_by_name || ''),
+        declaredStrength: Number(row.declared_strength || 0),
+        presentCount: Number(row.present_count || 0),
+        absentCount: Number(row.absent_count || 0),
+        sickCount: Number(row.sick_count || 0),
+        detentionCount: Number(row.detention_count || 0),
+        passCount: Number(row.pass_count || 0),
+        suspensionCount: Number(row.suspension_count || 0),
+        yetToReportCount: Number(row.yet_to_report_count || 0),
+        grandTotal: Number(row.grand_total || 0),
+        cadetDetails: Array.isArray(row.cadet_details) ? row.cadet_details : [],
+        reconciledRecordId: row.reconciled_record_id,
+        status: row.status as 'pending_counterpart' | 'reconciled',
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at)
+      }));
+    } catch (err) {
+      console.warn('getMatronSubmissionHistory fallback:', err);
+      return [];
+    }
+  },
+
   submitGenderParadeSegment: async (payload: {
     submitterId: string | number;
     submitterName: string;

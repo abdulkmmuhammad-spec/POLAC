@@ -125,7 +125,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           ]
         : isMatron
         ? [
-              { path: '/matron', icon: LayoutDashboard, label: 'Parade', end: true }
+              { path: '/matron', icon: LayoutDashboard, label: 'Night Tattoo', end: true },
+              { path: '/matron/history', icon: FileText, label: 'Submission History' }
           ]
         : isMedical
         ? [

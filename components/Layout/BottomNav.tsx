@@ -141,7 +141,8 @@ export const BottomNav: React.FC = () => {
 
         if (currentUser.role === UserRole.MATRON) {
             return [
-                { path: '/matron', label: 'Parade', icon: LayoutDashboard, end: true }
+                { path: '/matron', label: 'Submit', icon: Plus, end: true },
+                { path: '/matron/history', label: 'History', icon: History }
             ];
         }
 
